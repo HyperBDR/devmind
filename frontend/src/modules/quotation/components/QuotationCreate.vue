@@ -112,6 +112,7 @@ const props = withDefaults(
     historyHasMore?: boolean
     historyLoading?: boolean
     editingQuote?: Quotation | null
+    copyQuote?: Quotation | null
     customerPrefill?: {
       company: string
       contact: string
@@ -132,6 +133,7 @@ const props = withDefaults(
     historyHasMore: false,
     historyLoading: false,
     editingQuote: null,
+    copyQuote: null,
     customerPrefill: null,
   },
 )
@@ -632,6 +634,68 @@ function loadEditingQuoteIntoForm(editingQuote: Quotation) {
   }))
 }
 
+function loadCopiedQuoteIntoForm(sourceQuote: Quotation) {
+  applyingCreateDraft.value = true
+  preferDraftQuoteNo.value = false
+  quoteNoMode.value = 'auto'
+  productLine.value =
+    sourceQuote.productLine ||
+    inferProductLineFromQuoteNumber(sourceQuote.quoteNo, props.productLineOptions)
+  projectName.value = sourceQuote.projectName
+  clientCompany.value = sourceQuote.clientCompany
+  contactPerson.value = sourceQuote.contactPerson
+  email.value = sourceQuote.email
+  billingCompany.value = sourceQuote.billingCompany || sourceQuote.clientCompany
+  billingContact.value = sourceQuote.billingContact || sourceQuote.contactPerson
+  billingEmail.value = sourceQuote.billingEmail || sourceQuote.email
+  region.value = sourceQuote.region || ''
+  industry.value = sourceQuote.industry || ''
+  salesperson.value = sourceQuote.salesperson
+  currency.value = ['CNY', 'USD', 'EUR'].includes(sourceQuote.currency)
+    ? sourceQuote.currency as 'CNY' | 'USD' | 'EUR'
+    : 'USD'
+  const loadedPaymentTermOption =
+    sourceQuote.paymentTermOption || inferPaymentTermOption(sourceQuote.paymentTerms || '')
+  paymentTermOption.value = loadedPaymentTermOption
+  paymentTermsCustom.value =
+    loadedPaymentTermOption === 'Others' ? sourceQuote.paymentTerms || '' : ''
+  vatRateInput.value = formatVatRateForInput(sourceQuote.vatRate)
+  taxLabel.value = resolveTaxLabel(sourceQuote.taxLabel)
+  const todayInput = formatDateInput(new Date())
+  quoteDate.value = todayInput
+  expireDate.value = getDefaultExpireDate(dateFromInput(todayInput))
+  quoteNo.value = getNextAutoQuoteNumber(
+    productLine.value,
+    dateFromInput(todayInput),
+    existingQuoteNumbers.value,
+  )
+  remarksDisclaimer.value = sourceQuote.remarksDisclaimer ?? ''
+  issuerCompanyName.value =
+    sourceQuote.issuerCompanyName ?? DEFAULT_ISSUER_COMPANY_NAME
+  issuerContactName.value =
+    sourceQuote.issuerContactName
+    || sourceQuote.salesperson
+    || props.currentUser?.name
+    || ''
+  issuerContactEmail.value =
+    sourceQuote.issuerContactEmail || props.currentUser?.email || ''
+  issuerContactTitle.value =
+    sourceQuote.issuerContactTitle || props.currentUser?.title || ''
+  issuerSignature.value = sourceQuote.issuerSignature ?? ''
+  items.value = JSON.parse(JSON.stringify(sourceQuote.items)).map(
+    (item: QuotationLineItem) => ({
+      ...item,
+      type: item.type === 'Software' ? 'Software' : 'Other',
+      name: '',
+      description: item.description || item.name || '',
+    }),
+  )
+  window.setTimeout(() => {
+    applyingCreateDraft.value = false
+    if (quoteNoMode.value === 'auto') regenerateQuoteNo()
+  }, 0)
+}
+
 function resetCreateForm() {
   preferDraftQuoteNo.value = false
   quoteNoMode.value = 'auto'
@@ -761,12 +825,12 @@ function applyCreateDraft(draft: CreateQuoteDraft) {
 }
 
 function persistCreateDraftSoon() {
-  if (props.editingQuote || applyingCreateDraft.value) return
+  if (props.editingQuote || props.copyQuote || applyingCreateDraft.value) return
   const emailKey = props.currentUser?.email
   if (!emailKey) return
   window.clearTimeout(createDraftSaveTimer)
   createDraftSaveTimer = window.setTimeout(() => {
-    if (props.editingQuote || applyingCreateDraft.value) return
+    if (props.editingQuote || props.copyQuote || applyingCreateDraft.value) return
     saveCreateQuoteDraft(emailKey, buildCreateDraftPayload())
   }, 300)
 }
@@ -793,13 +857,21 @@ onBeforeUnmount(() => {
 })
 
 watch(
-  () => [props.editingQuote?.id ?? null, props.currentUser?.email ?? null] as const,
-  ([editingQuoteId]) => {
+  () => [
+    props.editingQuote?.id ?? null,
+    props.copyQuote?.id ?? null,
+    props.currentUser?.email ?? null,
+  ] as const,
+  ([editingQuoteId, copyQuoteId]) => {
     if (editingQuoteId && props.editingQuote) {
       loadEditingQuoteIntoForm(props.editingQuote)
       return
     }
-    if (!editingQuoteId) {
+    if (copyQuoteId && props.copyQuote) {
+      loadCopiedQuoteIntoForm(props.copyQuote)
+      return
+    }
+    if (!editingQuoteId && !copyQuoteId) {
       initCreateForm()
     }
   },
