@@ -9,8 +9,10 @@ import type {
 import { useQuotationI18n } from '../composables/useQuotationI18n'
 import { formatCatalogPrice } from '../utils/templateCatalogs'
 import FormSelect from './FormSelect.vue'
+import PublicAttachmentManager from './PublicAttachmentManager.vue'
 import {
   ChevronDown,
+  FileText,
   FolderOpen,
   Percent,
   Plus,
@@ -31,6 +33,7 @@ const props = withDefaults(
     services: Service[]
     discounts: DiscountOption[]
     productLineOptions?: ProductLineOption[]
+    currentUser?: { role?: string } | null
   }>(),
   {
     productLineOptions: () => [],
@@ -48,13 +51,13 @@ const emit = defineEmits<{
 
 const { t } = useQuotationI18n()
 
-const subTab = ref<'products' | 'services' | 'discounts'>('products')
+const subTab = ref<'products' | 'services' | 'discounts' | 'attachments'>('products')
 const searchQuery = ref('')
 const isFormOpen = ref(false)
 const quoteDescriptionsExpanded = ref(true)
 const discountSettingsExpanded = ref(true)
 
-function setSubTab(next: 'products' | 'services' | 'discounts') {
+function setSubTab(next: 'products' | 'services' | 'discounts' | 'attachments') {
   subTab.value = next
   pendingDelete.value = null
   searchQuery.value = ''
@@ -62,6 +65,7 @@ function setSubTab(next: 'products' | 'services' | 'discounts') {
 }
 
 const normalizedSearch = computed(() => searchQuery.value.trim().toLowerCase())
+const isAdmin = computed(() => String(props.currentUser?.role || '').toLowerCase().includes('admin'))
 const filteredProducts = computed(() => props.products.filter((item) =>
   !normalizedSearch.value || [item.name, item.description, item.category]
     .some((value) => String(value || '').toLowerCase().includes(normalizedSearch.value)),
@@ -289,10 +293,21 @@ watch(
           </div>
         </div>
 
+        <div v-if="isAdmin" data-catalog-parent="attachment-library" class="mt-2 space-y-1">
+          <button type="button" class="flex h-8 w-full items-center gap-2 rounded-md px-1 text-left text-sm font-semibold text-dm-text hover:bg-slate-50" @click="setSubTab('attachments')">
+            <FileText class="h-4 w-4 text-dm-text-tertiary" />
+            <span class="min-w-0 flex-1 truncate">{{ t('quotation.pages.catalog.attachmentLibrary') }}</span>
+          </button>
+          <button type="button" class="catalog-tree-item" :class="subTab === 'attachments' ? 'catalog-tree-item-active' : ''" @click="setSubTab('attachments')">
+            <span class="min-w-0 flex-1 truncate">{{ t('quotation.pages.catalog.publicAttachments') }}</span>
+          </button>
+        </div>
+
       </aside>
 
       <section data-catalog-content class="min-w-0">
-        <div class="flex flex-col gap-3 border-b border-dm-border-light px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <PublicAttachmentManager v-if="subTab === 'attachments'" :is-admin="isAdmin" />
+        <div v-if="subTab !== 'attachments'" class="flex flex-col gap-3 border-b border-dm-border-light px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div class="min-w-0">
             <h3 class="text-base font-bold text-dm-text">{{ t(`quotation.pages.catalog.${subTab}Title`) }}</h3>
             <p class="mt-0.5 text-sm text-dm-text-tertiary">{{ t(`quotation.pages.catalog.${subTab}Subtitle`) }}</p>
@@ -352,7 +367,7 @@ watch(
             </button>
           </div>
         </div>
-        <div class="overflow-x-auto text-sm">
+        <div v-if="subTab !== 'attachments'" class="overflow-x-auto text-sm">
           <table v-if="subTab === 'products'" class="w-full text-left">
             <thead>
               <tr class="border-b border-dm-border-light bg-[#fafafa] text-xs font-bold uppercase text-dm-text-tertiary">

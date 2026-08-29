@@ -3,23 +3,28 @@ from __future__ import annotations
 import logging
 from hashlib import sha256
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from quotation.audit import AUDIT_CONTEXT
 from quotation.models import (
     ExportJob,
     ExportJobStatus,
+    PublicAttachment,
     Quotation,
     QuotationTemplate,
     QuotationTemplateStatus,
     QuotationVersion,
+    QuoteStatus,
 )
 from quotation.permissions import user_display_email
 from quotation.services.export_renderer import (
     CURRENT_RENDERER_VERSION,
     ensure_default_template,
 )
-from quotation.services.quotation_service import create_version_snapshot
+from quotation.services.quotation_service import (
+    create_version_snapshot,
+    formalize_quotation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +43,22 @@ def _resolve_version(
     version_no: int | None,
     actor,
 ) -> QuotationVersion:
+    if quotation.status == QuoteStatus.DRAFT:
+        for attempt in range(5):
+            try:
+                formalize_quotation(
+                    quotation,
+                    operator_email=user_display_email(actor),
+                    notes="Generated quotation for document export",
+                )
+                break
+            except IntegrityError:
+                if attempt == 4:
+                    raise ExportRequestError(
+                        "quote_no already exists"
+                    ) from None
+            except ValueError as exc:
+                raise ExportRequestError(str(exc)) from exc
     if version_no is not None:
         version = QuotationVersion.objects.filter(
             quotation=quotation,
@@ -75,6 +96,7 @@ def _idempotency_key(
     template: QuotationTemplate,
     formats: list[str],
     archive_folder_token: str = "",
+    attachment_selection: list[str] | None = None,
 ) -> str:
     material = "|".join(
         [
@@ -85,6 +107,7 @@ def _idempotency_key(
             renderer_version(),
             ",".join(formats),
             archive_folder_token,
+            ",".join(attachment_selection or []),
         ]
     )
     return sha256(material.encode("utf-8")).hexdigest()
@@ -122,6 +145,7 @@ def create_export_job(
     template_id: str | None = None,
     archive_to_feishu: bool = False,
     archive_folder_token: str = "",
+    attachment_selection: list[str] | None = None,
     request=None,
 ) -> tuple[ExportJob, bool]:
     normalized_formats = sorted(set(formats))
@@ -138,6 +162,18 @@ def create_export_job(
             template_id=template_id,
             actor=actor,
         )
+        selected_attachments = list(dict.fromkeys(attachment_selection or []))
+        if selected_attachments:
+            available = set(
+                PublicAttachment.objects.filter(
+                    id__in=selected_attachments,
+                    status="active",
+                ).values_list("id", flat=True)
+            )
+            if len(available) != len(selected_attachments):
+                raise ExportRequestError(
+                    "one or more selected attachments are unavailable"
+                )
         context = AUDIT_CONTEXT.get()
         request_id = getattr(request, "audit_request_id", "") or context.get(
             "request_id", ""
@@ -148,6 +184,7 @@ def create_export_job(
             template=template,
             formats=normalized_formats,
             archive_folder_token=archive_folder_token,
+            attachment_selection=selected_attachments,
         )
         job, created = ExportJob.objects.get_or_create(
             idempotency_key=key,
@@ -159,6 +196,7 @@ def create_export_job(
                 "template_version": template.version,
                 "renderer_version": renderer_version(),
                 "formats": normalized_formats,
+                "attachment_selection": selected_attachments,
                 "archive_to_feishu": archive_to_feishu,
                 "archive_folder_token": archive_folder_token,
                 "requested_by": actor,

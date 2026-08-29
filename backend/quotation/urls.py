@@ -8,6 +8,8 @@ from quotation.views.audit import AuditEventExportView, AuditEventListView
 from quotation.views.catalog import (
     CatalogBootstrapView,
     LegacyCatalogImportView,
+    PublicAttachmentListCreateView,
+    PublicAttachmentStatusView,
     UserQuotationCatalogView,
 )
 from quotation.views.dashboard import (
@@ -105,6 +107,14 @@ urlpatterns = [
     path("catalog", UserQuotationCatalogView.as_view()),
     path("catalog/import-legacy", LegacyCatalogImportView.as_view()),
     path("catalog/bootstrap", CatalogBootstrapView.as_view()),
+    path(
+        "public-attachments",
+        PublicAttachmentListCreateView.as_view(),
+    ),
+    path(
+        "public-attachments/<str:attachment_id>/status",
+        PublicAttachmentStatusView.as_view(),
+    ),
     path("quotations", QuotationListCreateView.as_view()),
     path("quotations/form-context", QuotationFormContextView.as_view()),
     path(

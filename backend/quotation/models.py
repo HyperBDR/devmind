@@ -39,10 +39,19 @@ class ItemType(models.TextChoices):
 class DocumentType(models.TextChoices):
     EXCEL = "excel", "excel"
     PDF = "pdf", "pdf"
+    MERGED_PDF = "merged_pdf", "merged_pdf"
     SIGNATURE = "signature", "signature"
+    ATTACHMENT = "attachment", "attachment"
 
 
 class DocumentLifecycleState(models.TextChoices):
+    ACTIVE = "active", "Active"
+    ARCHIVED = "archived", "Archived"
+
+
+class PublicAttachmentStatus(models.TextChoices):
+    """Availability state for administrator-managed shared files."""
+
     ACTIVE = "active", "Active"
     ARCHIVED = "archived", "Archived"
 
@@ -729,6 +738,7 @@ class ExportJob(TimeStampedModel):
     template_version = models.PositiveIntegerField()
     renderer_version = models.CharField(max_length=80)
     formats = models.JSONField(default=list)
+    attachment_selection = models.JSONField(default=list, blank=True)
     archive_to_feishu = models.BooleanField(default=False)
     archive_folder_token = models.CharField(
         max_length=255,
@@ -868,6 +878,45 @@ class DocumentAsset(models.Model):
                 fields=["export_job", "doc_type"],
                 condition=models.Q(export_job__isnull=False),
                 name="quotation_export_asset_format_unique",
+            ),
+        ]
+
+
+class PublicAttachment(TimeStampedModel):
+    """Administrator-managed attachment available to quotation users."""
+
+    id = models.CharField(
+        primary_key=True, max_length=36, default=_uuid, editable=False
+    )
+    asset = models.OneToOneField(
+        DocumentAsset,
+        on_delete=models.PROTECT,
+        related_name="public_attachment",
+    )
+    scope = models.CharField(max_length=255)
+    product_line = models.CharField(max_length=120, blank=True, default="")
+    service_name = models.CharField(max_length=255, blank=True, default="")
+    status = models.CharField(
+        max_length=20,
+        choices=PublicAttachmentStatus.choices,
+        default=PublicAttachmentStatus.ACTIVE,
+        db_index=True,
+    )
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="uploaded_public_attachments",
+    )
+
+    class Meta:
+        db_table = "quotation_public_attachments"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["status", "product_line", "-created_at"],
+                name="public_attach_status_line",
             ),
         ]
 

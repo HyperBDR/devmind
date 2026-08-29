@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from quotation.models import (
     DocumentAsset,
     DocumentLifecycleState,
+    PublicAttachmentStatus,
     Quotation,
     QuotationSourceType,
     QuotationUploadPermission,
@@ -304,7 +305,8 @@ def filter_accessible_documents(
     ).values("id")
     granted_document_ids = _granted_document_ids(user)
     return qs.filter(
-        Q(id__in=granted_document_ids)
+        Q(public_attachment__status=PublicAttachmentStatus.ACTIVE)
+        | Q(id__in=granted_document_ids)
         | Q(quotation_id__in=quotation_ids)
         | Q(created_by_email__iexact=email)
     )
@@ -344,6 +346,15 @@ def get_accessible_document(
     ):
         return None, Response(
             {"detail": "document is archived"},
+            status=status.HTTP_409_CONFLICT,
+        )
+    if (
+        hasattr(asset, "public_attachment")
+        and asset.public_attachment.status != PublicAttachmentStatus.ACTIVE
+        and action not in {DocumentAction.VIEW, DocumentAction.DELETE}
+    ):
+        return None, Response(
+            {"detail": "attachment is archived"},
             status=status.HTTP_409_CONFLICT,
         )
     return asset, None

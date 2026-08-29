@@ -4,7 +4,10 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import SimpleTestCase, override_settings
 
-from quotation.services.upload_validation import validate_quotation_upload
+from quotation.services.upload_validation import (
+    validate_public_attachment_upload,
+    validate_quotation_upload,
+)
 
 
 def xlsx_upload(
@@ -26,6 +29,22 @@ def xlsx_upload(
         content_type=(
             "application/vnd.openxmlformats-officedocument."
             "spreadsheetml.sheet"
+        ),
+    )
+
+
+def docx_upload() -> SimpleUploadedFile:
+    """Build a minimal DOCX-shaped upload for attachment validation."""
+    content = BytesIO()
+    with ZipFile(content, "w", compression=ZIP_DEFLATED) as archive:
+        archive.writestr("[Content_Types].xml", b"<Types />")
+        archive.writestr("word/document.xml", b"<document />")
+    return SimpleUploadedFile(
+        "scope.docx",
+        content.getvalue(),
+        content_type=(
+            "application/vnd.openxmlformats-officedocument."
+            "wordprocessingml.document"
         ),
     )
 
@@ -226,3 +245,51 @@ class QuotationUploadValidationTests(SimpleTestCase):
             "XLSX shared strings exceed the 2 item limit",
         ):
             validate_quotation_upload(upload)
+
+
+class PublicAttachmentUploadValidationTests(SimpleTestCase):
+    def test_accepts_pdf_word_and_excel_content(self):
+        uploads = [
+            SimpleUploadedFile("scope.pdf", b"%PDF-1.7 attachment"),
+            SimpleUploadedFile("scope.doc", b"\xd0\xcf\x11\xe0document"),
+            docx_upload(),
+            SimpleUploadedFile("scope.xls", b"\xd0\xcf\x11\xe0workbook"),
+            xlsx_upload(),
+        ]
+
+        for upload in uploads:
+            with self.subTest(file_name=upload.name):
+                validate_public_attachment_upload(upload)
+
+    def test_rejects_image_attachments(self):
+        upload = SimpleUploadedFile(
+            "screenshot.png",
+            b"\x89PNG\r\n\x1a\ncontent",
+            content_type="image/png",
+        )
+
+        with self.assertRaisesMessage(
+            ValueError,
+            "Only PDF, Word, and Excel public attachments are supported",
+        ):
+            validate_public_attachment_upload(upload)
+
+    def test_rejects_openxml_content_that_does_not_match_extension(self):
+        workbook = xlsx_upload()
+        upload = SimpleUploadedFile("renamed.docx", workbook.read())
+
+        with self.assertRaisesMessage(
+            ValueError,
+            "File content does not match DOCX",
+        ):
+            validate_public_attachment_upload(upload)
+
+    @override_settings(QUOTATION_XLSX_MAX_ENTRIES=1)
+    def test_rejects_docx_archive_with_too_many_entries(self):
+        upload = docx_upload()
+
+        with self.assertRaisesMessage(
+            ValueError,
+            "DOCX archive has more than 1 entries",
+        ):
+            validate_public_attachment_upload(upload)

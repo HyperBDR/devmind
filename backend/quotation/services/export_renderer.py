@@ -1302,6 +1302,93 @@ def convert_xlsx_to_pdf(excel_bytes: bytes, *, job_id: str) -> bytes:
         return _convert_xlsx_to_pdf_unlocked(excel_bytes, job_id=job_id)
 
 
+def convert_attachment_to_pdf(
+    content: bytes,
+    file_name: str,
+    *,
+    job_id: str,
+) -> bytes:
+    """Convert a supported Office attachment to PDF."""
+    with _libreoffice_conversion_slot():
+        return _convert_file_to_pdf_unlocked(
+            content,
+            file_name,
+            job_id=job_id,
+        )
+
+def _convert_file_to_pdf_unlocked(
+    content: bytes,
+    file_name: str,
+    *,
+    job_id: str,
+) -> bytes:
+    """Convert one attachment with an isolated LibreOffice profile."""
+    extension = Path(file_name).suffix.lower() or ".bin"
+    with TemporaryDirectory(prefix=f"quotation-attachment-{job_id}-") as root:
+        root_path = Path(root)
+        profile_path = root_path / "profile"
+        output_path = root_path / "output"
+        profile_path.mkdir()
+        output_path.mkdir()
+        input_path = root_path / f"attachment{extension}"
+        input_path.write_bytes(content)
+        command = [
+            settings.QUOTATION_SOFFICE_BINARY,
+            "--headless",
+            "--nologo",
+            "--nodefault",
+            "--nofirststartwizard",
+            f"-env:UserInstallation={profile_path.as_uri()}",
+            "--convert-to",
+            "pdf",
+            "--outdir",
+            str(output_path),
+            str(input_path),
+        ]
+        try:
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                start_new_session=True,
+            )
+        except FileNotFoundError as exc:
+            raise PdfConversionError(
+                "LibreOffice executable is unavailable",
+                code="libreoffice_unavailable",
+            ) from exc
+        try:
+            _stdout, stderr = process.communicate(
+                timeout=settings.QUOTATION_RENDER_TIMEOUT_SECONDS
+            )
+        except subprocess.TimeoutExpired as exc:
+            _terminate_process_group(process)
+            raise PdfConversionTimeoutError(
+                "LibreOffice conversion timed out",
+                code="libreoffice_timeout",
+            ) from exc
+        if process.returncode != 0:
+            error_type = "conversion_failed" if stderr else "process_failed"
+            raise PdfConversionError(
+                "LibreOffice conversion failed",
+                code=f"libreoffice_{error_type}",
+            )
+        pdf_path = output_path / "attachment.pdf"
+        if not pdf_path.is_file():
+            raise PdfConversionError(
+                "LibreOffice produced no PDF file",
+                code="libreoffice_no_output",
+            )
+        pdf_bytes = pdf_path.read_bytes()
+        if not pdf_bytes.startswith(b"%PDF-"):
+            raise PdfConversionError(
+                "LibreOffice produced an invalid PDF file",
+                code="libreoffice_invalid_pdf",
+                retryable=False,
+            )
+        return pdf_bytes
+
+
 def _convert_xlsx_to_pdf_unlocked(excel_bytes: bytes, *, job_id: str) -> bytes:
     """Convert XLSX bytes with an isolated headless LibreOffice profile."""
     with TemporaryDirectory(prefix=f"quotation-render-{job_id}-") as root:

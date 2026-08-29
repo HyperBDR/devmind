@@ -38,6 +38,7 @@ import {
   type QuotationExportStatus,
 } from '../api/exports'
 import { downloadImportedDocument } from '../api/documents'
+import PublicAttachmentPicker from './PublicAttachmentPicker.vue'
 import type { QuotationListParams } from '../api/quotations'
 import type { Quotation } from '../types'
 import { FORM_SELECT_COMPACT_TRIGGER_CLASS } from '../utils/formFieldClasses'
@@ -280,6 +281,11 @@ const folderPickerOpen = ref(false)
 const pendingFeishuUpload = ref<{
   quote: Quotation
   format: FeishuUploadFormat
+} | null>(null)
+const attachmentPickerOpen = ref(false)
+const pendingAttachmentDownload = ref<{
+  quote: Quotation
+  quotationVersion?: number
 } | null>(null)
 const actionMenu = ref<{
   quoteId: string
@@ -699,6 +705,12 @@ async function handleDownloadLocal(
   quotationVersion?: number,
 ) {
   if (quote.status === 'Cancelled') return
+  if (format === 'pdf') {
+    closeActionMenu()
+    pendingAttachmentDownload.value = { quote, quotationVersion }
+    attachmentPickerOpen.value = true
+    return
+  }
   closeActionMenu()
   try {
     if (
@@ -742,6 +754,29 @@ async function handleDownloadLocal(
         : t('quotation.pages.list.toastExcelDownloadFailed'),
       'error',
     )
+  }
+}
+
+async function handleAttachmentDownload(ids: string[]) {
+  const pending = pendingAttachmentDownload.value
+  attachmentPickerOpen.value = false
+  pendingAttachmentDownload.value = null
+  if (!pending) return
+  try {
+    await exportQuotationFile(pending.quote.id, 'pdf', {
+      onProgress: (job) => updateExportProgress(pending.quote.id, job.status),
+      quotationVersion: pending.quotationVersion,
+      attachmentSelection: ids,
+    })
+    emit(
+      'toast',
+      t('quotation.pages.list.toastPdfDownloadStarted', {
+        quoteNo: pending.quote.quoteNo,
+      }),
+      'success',
+    )
+  } catch (error) {
+    emit('toast', error instanceof Error ? error.message : 'Download failed', 'error')
   }
 }
 
@@ -1802,6 +1837,12 @@ function displayQuoteDate(quote: Quotation): string {
       @update:open="folderPickerOpen = $event"
       @select="handleFeishuFolderSelected"
       @toast="(message, type) => emit('toast', message, type)"
+    />
+
+    <PublicAttachmentPicker
+      :open="attachmentPickerOpen"
+      @close="attachmentPickerOpen = false"
+      @confirm="handleAttachmentDownload"
     />
 
   </div>

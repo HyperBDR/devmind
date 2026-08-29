@@ -132,13 +132,18 @@ class ExportCreateSerializer(serializers.Serializer):
         allow_blank=True,
         default="",
     )
+    attachment_selection = serializers.ListField(
+        child=serializers.CharField(max_length=36),
+        required=False,
+        default=list,
+    )
 
 
 def export_job_data(job: ExportJob) -> dict:
     assets = [
         {
             "id": asset.id,
-            "format": "xlsx" if asset.doc_type == "excel" else "pdf",
+            "format": asset.doc_type,
             "file_name": asset.file_name,
             "mime_type": asset.mime_type,
             "size_bytes": asset.size_bytes,
@@ -233,6 +238,9 @@ class QuotationExportCreateView(APIView):
                     "archive_to_feishu"
                 ],
                 archive_folder_token=archive_folder_token,
+                attachment_selection=serializer.validated_data.get(
+                    "attachment_selection", []
+                ),
                 request=request,
             )
         except ExportRequestError as exc:

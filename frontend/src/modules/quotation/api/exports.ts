@@ -5,7 +5,7 @@ import {
   getApiBaseUrl,
 } from './client'
 
-export type QuotationExportFormat = 'xlsx' | 'pdf'
+export type QuotationExportFormat = 'xlsx' | 'pdf' | 'merged_pdf'
 
 export type QuotationExportStatus =
   | 'queued'
@@ -56,6 +56,7 @@ interface QuotationExportProgressOptions {
   onProgress?: (job: QuotationExportJob) => void
   quotationVersion?: number
   archiveFolderToken?: string
+  attachmentSelection?: string[]
 }
 
 const TERMINAL_STATUSES = new Set<QuotationExportStatus>([
@@ -76,6 +77,7 @@ export function createQuotationExport(
     templateId?: string
     archiveToFeishu?: boolean
     archiveFolderToken?: string
+    attachmentSelection?: string[]
   } = {},
 ): Promise<CreateQuotationExportResponse> {
   return apiRequest<CreateQuotationExportResponse>(
@@ -88,6 +90,7 @@ export function createQuotationExport(
         template_id: options.templateId,
         archive_to_feishu: options.archiveToFeishu ?? false,
         archive_folder_token: options.archiveFolderToken || undefined,
+        attachment_selection: options.attachmentSelection || [],
       }),
     },
   )
@@ -160,12 +163,17 @@ export async function exportQuotationFile(
 ): Promise<QuotationExportJob> {
   const created = await createQuotationExport(quotationId, [format], {
     quotationVersion: options.quotationVersion,
+    attachmentSelection: options.attachmentSelection,
   })
   const job = await waitForQuotationExport(created.job_id, options)
   if (job.status === 'render_failed') {
     throw new ApiError(job.error_message || 'Quotation rendering failed', 422)
   }
-  const asset = job.assets.find((candidate) => candidate.format === format)
+  const targetFormat =
+    format === 'pdf' && options.attachmentSelection?.length
+      ? 'merged_pdf'
+      : format
+  const asset = job.assets.find((candidate) => candidate.format === targetFormat)
   if (!asset) {
     throw new ApiError('Rendered quotation file is unavailable', 502)
   }

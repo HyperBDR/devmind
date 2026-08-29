@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import logging
 import re
+from io import BytesIO
 from hashlib import sha256
+from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5
 
 from django.conf import settings
 from django.db import DatabaseError, transaction
 from django.utils import timezone
+from pypdf import PdfReader, PdfWriter
 from quotation.models import (
     DocumentAsset,
     DocumentParseResult,
@@ -27,6 +30,7 @@ from quotation.services.export_archive import (
 from quotation.services.export_renderer import (
     CURRENT_RENDERER_VERSION,
     TemplateValidationError,
+    convert_attachment_to_pdf,
     convert_xlsx_to_pdf,
     render_quotation_xlsx,
 )
@@ -101,6 +105,7 @@ def _persist_assets(
             "application/vnd.openxmlformats-" "officedocument.spreadsheetml.sheet",
         ),
         DocumentType.PDF: ("pdf", "application/pdf"),
+        DocumentType.MERGED_PDF: ("pdf", "application/pdf"),
     }
     try:
         with transaction.atomic():
@@ -122,9 +127,10 @@ def _persist_assets(
                         "quotation": job.quotation,
                         "quotation_version": job.quotation_version,
                         "template": job.template,
-                        "file_name": (
-                            f"{_safe_file_stem(job)}-v"
-                            f"{job.quotation_version_no}.{extension}"
+                        "file_name": _asset_file_name(
+                            job,
+                            doc_type,
+                            extension,
                         ),
                         "mime_type": mime_type,
                         "storage_key": storage_key,
@@ -144,6 +150,19 @@ def _persist_assets(
         for storage_key in created_keys:
             delete_document(storage_key)
         raise
+
+
+def _asset_file_name(
+    job: ExportJob,
+    doc_type: str,
+    extension: str,
+) -> str:
+    """Build distinct names for original and merged export artifacts."""
+    suffix = "-with-attachments" if doc_type == DocumentType.MERGED_PDF else ""
+    return (
+        f"{_safe_file_stem(job)}-v{job.quotation_version_no}"
+        f"{suffix}.{extension}"
+    )
 
 
 def queue_replica_uploads(
@@ -270,6 +289,11 @@ def render_export_job(job_id: str) -> dict:
             excel_bytes,
             job_id=job.id,
         )
+        if job.attachment_selection:
+            outputs[DocumentType.MERGED_PDF] = _merge_public_attachments(
+                job,
+                outputs[DocumentType.PDF],
+            )
 
     assets = _persist_assets(job, outputs)
     now = timezone.now()
@@ -307,6 +331,49 @@ def render_export_job(job_id: str) -> dict:
         .get()
     )
     return {"job_id": job.id, "status": current_status}
+
+
+def _merge_public_attachments(job: ExportJob, quotation_pdf: bytes) -> bytes:
+    """Append selected active public files to the quotation PDF."""
+    from quotation.models import PublicAttachment, PublicAttachmentStatus
+
+    attachments = list(
+        PublicAttachment.objects.select_related("asset").filter(
+            id__in=job.attachment_selection,
+            status=PublicAttachmentStatus.ACTIVE,
+        )
+    )
+    by_id = {item.id: item for item in attachments}
+    writer = PdfWriter()
+    for asset in [quotation_pdf] + [
+        _attachment_pdf_bytes(by_id[item_id].asset, job.id)
+        for item_id in job.attachment_selection
+        if item_id in by_id
+    ]:
+        reader = PdfReader(BytesIO(asset))
+        for page in reader.pages:
+            writer.add_page(page)
+    output = BytesIO()
+    writer.write(output)
+    return output.getvalue()
+
+
+def _attachment_pdf_bytes(asset: DocumentAsset, job_id: str) -> bytes:
+    """Read a public PDF or convert a supported Office attachment."""
+    content = resolve_document_path(asset.storage_key).read_bytes()
+    extension = Path(asset.file_name).suffix.lower()
+    if extension == ".pdf" and content.startswith(b"%PDF-"):
+        return content
+    if extension in {".doc", ".docx", ".xls", ".xlsx"}:
+        return convert_attachment_to_pdf(
+            content,
+            asset.file_name,
+            job_id=job_id,
+        )
+    raise TemplateValidationError(
+        "Public attachment format is not supported",
+        code="invalid_public_attachment",
+    )
 
 
 def mark_render_failed(job_id: str, exc: Exception) -> None:
