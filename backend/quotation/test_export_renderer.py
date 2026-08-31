@@ -4,12 +4,14 @@ import subprocess
 from datetime import datetime
 from tempfile import TemporaryDirectory
 from threading import Event, Thread
+from types import SimpleNamespace
 from unittest.mock import patch
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from django.test import SimpleTestCase, TestCase, override_settings
 from openpyxl import load_workbook
 from quotation.models import QuotationTemplate
+from quotation.services.export_pipeline import _attachment_pdf_bytes
 from quotation.services.export_renderer import (
     DEFAULT_TEMPLATE_NAME,
     LEGACY_DEFAULT_TEMPLATE_NAME,
@@ -19,6 +21,7 @@ from quotation.services.export_renderer import (
     _signature_image,
     build_default_template_bytes,
     convert_xlsx_to_pdf,
+    convert_attachment_to_pdf,
     ensure_default_template,
     estimate_wrapped_lines,
     register_template_version,
@@ -455,6 +458,50 @@ class LibreOfficeConversionTests(SimpleTestCase):
     def tearDown(self):
         self.settings_override.disable()
         self.lock_dir.cleanup()
+
+    @patch("quotation.services.export_pipeline.convert_attachment_to_pdf")
+    @patch("quotation.services.export_pipeline.resolve_document_path")
+    def test_public_office_attachment_is_converted_before_merge(
+        self,
+        resolve_document_path,
+        convert_attachment_to_pdf,
+    ):
+        resolve_document_path.return_value.read_bytes.return_value = (
+            b"PK\x03\x04document"
+        )
+        convert_attachment_to_pdf.return_value = b"%PDF-converted"
+        asset = SimpleNamespace(
+            storage_key="documents/test",
+            file_name="scope.docx",
+        )
+
+        result = _attachment_pdf_bytes(asset, "job-id")
+
+        self.assertEqual(result, b"%PDF-converted")
+        convert_attachment_to_pdf.assert_called_once_with(
+            b"PK\x03\x04document",
+            "scope.docx",
+            job_id="job-id",
+        )
+
+    @patch("quotation.services.export_pipeline.resolve_document_path")
+    def test_public_attachment_merge_rejects_unsupported_content(
+        self,
+        resolve_document_path,
+    ):
+        resolve_document_path.return_value.read_bytes.return_value = (
+            b"\x89PNG\r\n\x1a\ncontent"
+        )
+        asset = SimpleNamespace(
+            storage_key="documents/test",
+            file_name="screenshot.png",
+        )
+
+        with self.assertRaisesMessage(
+            TemplateValidationError,
+            "Public attachment format is not supported",
+        ):
+            _attachment_pdf_bytes(asset, "job-id")
 
     @patch(
         "quotation.services.export_renderer.subprocess.Popen",

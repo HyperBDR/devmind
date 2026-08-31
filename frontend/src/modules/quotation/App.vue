@@ -1257,6 +1257,7 @@ function reloadPage() {
           :services="services"
           :discounts="discounts"
           :product-line-options="productLineOptions"
+          :current-user="auth.currentUser"
           @add-product="handleAddProduct"
           @update-product="handleUpdateProduct"
           @delete-product="handleDeleteProduct"

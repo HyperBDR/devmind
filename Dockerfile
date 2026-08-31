@@ -183,6 +183,7 @@ RUN apt-get update \
         fonts-liberation2 \
         fonts-noto-cjk \
         libreoffice-calc \
+        libreoffice-writer \
     && fc-cache -f \
     && rm -rf /var/lib/apt/lists/* /tmp/* /root/.cache
 

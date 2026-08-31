@@ -148,3 +148,76 @@ def validate_quotation_upload(upload) -> None:
         raise ValueError("File content does not match PDF")
     if extension == ".xlsx" and not signature.startswith(b"PK\x03\x04"):
         raise ValueError("File content does not match XLSX")
+
+
+def validate_public_attachment_upload(upload) -> None:
+    """Validate a PDF, Word, or Excel public attachment."""
+    file_name = str(getattr(upload, "name", "") or "")
+    extension = Path(file_name).suffix.lower()
+    if extension not in settings.QUOTATION_PUBLIC_ATTACHMENT_EXTENSIONS:
+        raise ValueError(
+            "Only PDF, Word, and Excel public attachments are supported"
+        )
+    size = int(getattr(upload, "size", 0) or 0)
+    if size <= 0:
+        raise ValueError("File is empty")
+    if size > settings.QUOTATION_MAX_UPLOAD_BYTES:
+        raise ValueError(
+            f"File must be {settings.QUOTATION_MAX_UPLOAD_BYTES} bytes or smaller"
+        )
+    original_position = upload.tell()
+    try:
+        upload.seek(0)
+        signature = upload.read(16)
+        if extension == ".docx" and signature.startswith(b"PK\x03\x04"):
+            upload.seek(0)
+            _validate_docx_archive(upload)
+        if extension == ".xlsx" and signature.startswith(b"PK\x03\x04"):
+            upload.seek(0)
+            validate_xlsx_archive(upload)
+    finally:
+        upload.seek(original_position)
+    signatures = {
+        ".pdf": signature.startswith(b"%PDF-"),
+        ".doc": signature.startswith(b"\xd0\xcf\x11\xe0"),
+        ".docx": signature.startswith(b"PK\x03\x04"),
+        ".xls": signature.startswith(b"\xd0\xcf\x11\xe0"),
+        ".xlsx": signature.startswith(b"PK\x03\x04"),
+    }
+    if not signatures[extension]:
+        raise ValueError(
+            f"File content does not match {extension[1:].upper()}"
+        )
+
+
+def _validate_docx_archive(upload) -> None:
+    """Ensure an OpenXML ZIP contains a Word document package."""
+    try:
+        with ZipFile(upload) as archive:
+            entries = archive.infolist()
+    except (BadZipFile, OSError, ValueError) as exc:
+        raise ValueError("File content does not match DOCX") from exc
+    if len(entries) > settings.QUOTATION_XLSX_MAX_ENTRIES:
+        raise ValueError(
+            "DOCX archive has more than "
+            f"{settings.QUOTATION_XLSX_MAX_ENTRIES} entries"
+        )
+    expanded_bytes = 0
+    names = set()
+    for entry in entries:
+        _validate_xlsx_path(entry.filename)
+        if entry.flag_bits & 0x1:
+            raise ValueError("Encrypted DOCX entries are not supported")
+        if entry.file_size > settings.QUOTATION_XLSX_MAX_ENTRY_BYTES:
+            raise ValueError("DOCX entry exceeds the expanded size limit")
+        expanded_bytes += entry.file_size
+        if expanded_bytes > settings.QUOTATION_XLSX_MAX_EXPANDED_BYTES:
+            raise ValueError("DOCX expanded content exceeds the size limit")
+        if entry.file_size:
+            ratio = entry.file_size / max(entry.compress_size, 1)
+            if ratio > settings.QUOTATION_XLSX_MAX_COMPRESSION_RATIO:
+                raise ValueError("DOCX entry exceeds the compression ratio limit")
+        names.add(entry.filename.replace("\\", "/").lower())
+    required = {"[content_types].xml", "word/document.xml"}
+    if not required.issubset(names):
+        raise ValueError("File content does not match DOCX")

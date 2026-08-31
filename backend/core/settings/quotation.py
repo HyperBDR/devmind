@@ -48,6 +48,13 @@ QUOTATION_UPLOAD_CHUNK_BYTES = int(
     os.getenv("QUOTATION_UPLOAD_CHUNK_BYTES", str(1024 * 1024))
 )
 QUOTATION_ALLOWED_EXTENSIONS = (".xlsx", ".pdf")
+QUOTATION_PUBLIC_ATTACHMENT_EXTENSIONS = (
+    ".pdf",
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+)
 QUOTATION_ALLOWED_CURRENCIES = tuple(
     currency.strip().upper()
     for currency in os.getenv(

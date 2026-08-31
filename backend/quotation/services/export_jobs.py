@@ -9,6 +9,7 @@ from quotation.audit import AUDIT_CONTEXT
 from quotation.models import (
     ExportJob,
     ExportJobStatus,
+    PublicAttachment,
     Quotation,
     QuotationTemplate,
     QuotationTemplateStatus,
@@ -95,6 +96,7 @@ def _idempotency_key(
     template: QuotationTemplate,
     formats: list[str],
     archive_folder_token: str = "",
+    attachment_selection: list[str] | None = None,
 ) -> str:
     material = "|".join(
         [
@@ -105,6 +107,7 @@ def _idempotency_key(
             renderer_version(),
             ",".join(formats),
             archive_folder_token,
+            ",".join(attachment_selection or []),
         ]
     )
     return sha256(material.encode("utf-8")).hexdigest()
@@ -142,6 +145,7 @@ def create_export_job(
     template_id: str | None = None,
     archive_to_feishu: bool = False,
     archive_folder_token: str = "",
+    attachment_selection: list[str] | None = None,
     request=None,
 ) -> tuple[ExportJob, bool]:
     normalized_formats = sorted(set(formats))
@@ -158,6 +162,18 @@ def create_export_job(
             template_id=template_id,
             actor=actor,
         )
+        selected_attachments = list(dict.fromkeys(attachment_selection or []))
+        if selected_attachments:
+            available = set(
+                PublicAttachment.objects.filter(
+                    id__in=selected_attachments,
+                    status="active",
+                ).values_list("id", flat=True)
+            )
+            if len(available) != len(selected_attachments):
+                raise ExportRequestError(
+                    "one or more selected attachments are unavailable"
+                )
         context = AUDIT_CONTEXT.get()
         request_id = getattr(request, "audit_request_id", "") or context.get(
             "request_id", ""
@@ -168,6 +184,7 @@ def create_export_job(
             template=template,
             formats=normalized_formats,
             archive_folder_token=archive_folder_token,
+            attachment_selection=selected_attachments,
         )
         job, created = ExportJob.objects.get_or_create(
             idempotency_key=key,
@@ -179,6 +196,7 @@ def create_export_job(
                 "template_version": template.version,
                 "renderer_version": renderer_version(),
                 "formats": normalized_formats,
+                "attachment_selection": selected_attachments,
                 "archive_to_feishu": archive_to_feishu,
                 "archive_folder_token": archive_folder_token,
                 "requested_by": actor,
