@@ -54,7 +54,6 @@ import {
 } from './api/catalog'
 import {
   createQuotation as createQuotationApi,
-  copyQuotation as copyQuotationApi,
   deleteQuotation as deleteQuotationApi,
   generateQuotation as generateQuotationApi,
   getQuotation as getQuotationApi,
@@ -174,10 +173,17 @@ function syncTabFromRoute() {
   if (nextTab === 'create') {
     const editId = route.query.edit
     editingQuoteId.value = typeof editId === 'string' ? editId : null
+    if (!editingQuoteId.value) {
+      editingQuote.value = null
+    } else {
+      copySourceQuote.value = null
+    }
     return
   }
 
   editingQuoteId.value = null
+  editingQuote.value = null
+  copySourceQuote.value = null
 }
 
 const quotations = ref<Quotation[]>([])
@@ -194,6 +200,7 @@ const activeQuote = ref<Quotation | null>(null)
 const activeQuoteLoading = ref(false)
 const drawerQuoteId = ref<string | null>(null)
 const editingQuote = ref<Quotation | null>(null)
+const copySourceQuote = ref<Quotation | null>(null)
 const quotationFormContext = ref<Quotation[]>([])
 const quotationFormContextQuoteNumbers = ref<string[]>([])
 const lineItemDescriptionHistory = ref<LineItemDescriptionHistory[]>([])
@@ -538,6 +545,7 @@ async function handleLogout() {
   activeQuote.value = null
   drawerQuoteId.value = null
   editingQuote.value = null
+  copySourceQuote.value = null
   quotationFormContext.value = []
   quotationFormContextQuoteNumbers.value = []
   lineItemDescriptionHistory.value = []
@@ -567,7 +575,11 @@ function navClass(tab: string) {
 function goTab(tab: string, listFilters?: ListDateFilters) {
   selectedQuotationId.value = null
   drawerQuoteId.value = null
-  if (tab === 'create') editingQuoteId.value = null
+  if (tab === 'create') {
+    editingQuoteId.value = null
+    editingQuote.value = null
+    copySourceQuote.value = null
+  }
   if (tab === 'create') void loadQuotationFormContext()
   if (tab === 'list') {
     applyListDateFilters(listFilters)
@@ -706,6 +718,8 @@ async function handleSaveQuotation(newQuote: Quotation) {
     }
 
     editingQuoteId.value = null
+    editingQuote.value = null
+    copySourceQuote.value = null
     await refreshQuotations(quotationListQuery.value)
     if (wasCreate) await loadQuotationFormContext()
   } catch (error: unknown) {
@@ -896,6 +910,7 @@ function handleDeleteProductLine(productLine: QuoteProductLine) {
 }
 
 async function handleEditQuote(id: string) {
+  copySourceQuote.value = null
   editingQuoteId.value = id
   await loadEditingQuote(id)
   if (auth.embeddedAuth) {
@@ -907,19 +922,15 @@ async function handleEditQuote(id: string) {
 
 async function handleCopyQuote(id: string) {
   try {
-    const copied = await copyQuotationApi(id)
-    editingQuoteId.value = copied.id
-    editingQuote.value = copied
-    triggerToast(
-      t('quotation.app.quoteCopied', { quoteNo: copied.quoteNo }),
-      'success',
-    )
-    await refreshQuotations(quotationListQuery.value)
+    const sourceQuote = await getQuotationApi(id)
+    if (sourceQuote.sourceType === 'document_import') {
+      throw new Error('document-imported quotations cannot be copied')
+    }
+    editingQuoteId.value = null
+    editingQuote.value = null
+    copySourceQuote.value = sourceQuote
     if (auth.embeddedAuth) {
-      await router.push({
-        path: '/quotation/create',
-        query: { edit: copied.id },
-      })
+      await router.push('/quotation/create')
     } else {
       currentTab.value = 'create'
     }
@@ -932,6 +943,9 @@ async function handleCopyQuote(id: string) {
 }
 
 function handleBackToList() {
+  editingQuoteId.value = null
+  editingQuote.value = null
+  copySourceQuote.value = null
   if (auth.embeddedAuth) {
     router.push('/quotation/list')
     return
@@ -1211,6 +1225,7 @@ function reloadPage() {
           :history-has-more="quotationFormContextHasMore"
           :history-loading="quotationFormContextLoading"
           :editing-quote="editingQuote"
+          :copy-quote="copySourceQuote"
           :customer-prefill="customerPrefill"
           :current-user="auth.currentUser"
           :product-line-options="productLineOptions"
