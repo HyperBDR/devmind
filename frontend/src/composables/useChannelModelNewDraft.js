@@ -80,14 +80,18 @@ export function useChannelModelNewDraft({
 
   function addSelectedModels() {
     if (!canAddSelectedModels.value) return
-    const modelsToAdd = selectedResolvedModels.value
-      .map((item) => item.model)
-      .filter(Boolean)
-    modelsToAdd.forEach((model) => {
-      drafts.value[model.id] = buildDraftForModel(model)
+    const modelsToAdd = selectedResolvedModels.value.filter(
+      (item) => item.model
+    )
+    modelsToAdd.forEach((item) => {
+      const model = item.model
+      drafts.value[model.id] = buildDraftForModel(
+        model,
+        item.selectedSourceOfferingId
+      )
       applyPriceMode(drafts.value[model.id])
     })
-    recentlyAddedModelId.value = modelsToAdd.at(-1)?.id || null
+    recentlyAddedModelId.value = modelsToAdd.at(-1)?.model?.id || null
     resetNewDraft()
     modelSearch.value = ''
     clearSelectedModels()
@@ -100,7 +104,10 @@ export function useChannelModelNewDraft({
     })
   }
 
-  function buildDraftForModel(model) {
+  function buildDraftForModel(model, sourceOfferingId = '') {
+    const sourcePriceItem = (props.priceItems || []).find(
+      (item) => String(item.offering) === String(sourceOfferingId)
+    )
     return {
       ...draftDefaults(model, null),
       is_configured: true,
@@ -110,6 +117,9 @@ export function useChannelModelNewDraft({
       price_source_name: model.source_name || '',
       price_source_category: modelSourceCategory(model) || '',
       price_source_endpoint_url: model.source_endpoint_url || '',
+      source_offering: sourceOfferingId || '',
+      source_sku_code: sourcePriceItem?.sku_code || '',
+      source_sku_region: sourcePriceItem?.sku_region || '',
       currency: newDraft.value.currency,
       settlement_ratio:
         newDraft.value.price_mode === 'discount'

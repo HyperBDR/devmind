@@ -68,7 +68,11 @@ export function useChannelModelPricing({
         Number.POSITIVE_INFINITY
       )
     }
-    const previewItems = draftPricePreview(row?.draft, row?.model)
+    const previewItems = draftPricePreview(
+      row?.draft,
+      row?.model,
+      row?.draft?.source_offering
+    )
     if (!previewItems.length) {
       return translate('llmOps.channelModelDrawer.pendingCostGeneration')
     }
@@ -83,8 +87,8 @@ export function useChannelModelPricing({
     )
   }
 
-  function upstreamPriceSummary(model) {
-    const rows = providerPriceSummary(model)
+  function upstreamPriceSummary(model, sourceOfferingId = '') {
+    const rows = providerPriceSummary(model, sourceOfferingId)
     if (!rows.length) return '-'
     return priceSummaryText(rows, model, Number.POSITIVE_INFINITY)
   }
@@ -109,14 +113,14 @@ export function useChannelModelPricing({
     })
   }
 
-  function batchUpstreamPriceSummary(model) {
-    const rows = providerPriceSummary(model)
+  function batchUpstreamPriceSummary(model, sourceOfferingId = '') {
+    const rows = providerPriceSummary(model, sourceOfferingId)
     if (!rows.length) return '-'
     return batchPriceSummaryText(rows, model)
   }
 
-  function batchPendingDraftPriceSummary(draft, model) {
-    const rows = draftPricePreview(draft, model)
+  function batchPendingDraftPriceSummary(draft, model, sourceOfferingId = '') {
+    const rows = draftPricePreview(draft, model, sourceOfferingId)
     if (!rows.length) return '-'
     return batchPriceSummaryText(
       rows.map((item) => ({
@@ -226,8 +230,8 @@ export function useChannelModelPricing({
     return false
   }
 
-  function providerPriceSummary(model) {
-    const itemRows = providerPriceItemsForModel(model)
+  function providerPriceSummary(model, sourceOfferingId = '') {
+    const itemRows = providerPriceItemsForModel(model, sourceOfferingId)
     if (itemRows.length) {
       return channelPriceSummaryRows(itemRows)
     }
@@ -257,8 +261,17 @@ export function useChannelModelPricing({
     ])
   }
 
-  function providerPriceItemsForModel(model) {
+  function providerPriceItemsForModel(model, sourceOfferingId = '') {
     if (!model) return []
+    if (sourceOfferingId) {
+      return sortPriceItems(
+        props.priceItems.filter(
+          (item) =>
+            String(item.offering) === String(sourceOfferingId) &&
+            item.is_current !== false
+        )
+      )
+    }
     const exactRows = sortPriceItems(
       props.priceItems.filter(
         (item) =>
@@ -392,7 +405,7 @@ export function useChannelModelPricing({
     return ''
   }
 
-  function draftPricePreview(draft, model) {
+  function draftPricePreview(draft, model, sourceOfferingId = '') {
     if (!model) return []
     const targetCurrency =
       draft.currency || props.channel?.currency || model.currency
@@ -403,13 +416,15 @@ export function useChannelModelPricing({
       return discountPricePreview(
         model,
         targetCurrency,
-        Number(draft.settlement_ratio || 0)
+        Number(draft.settlement_ratio || 0),
+        sourceOfferingId
       )
     }
     return discountPricePreview(
       model,
       targetCurrency,
-      Number(props.channel?.settlement_ratio || 1)
+      Number(props.channel?.settlement_ratio || 1),
+      sourceOfferingId
     )
   }
 
@@ -423,9 +438,9 @@ export function useChannelModelPricing({
       .filter((item) => item.value !== '')
   }
 
-  function discountPricePreview(model, currency, ratio) {
+  function discountPricePreview(model, currency, ratio, sourceOfferingId = '') {
     if (!Number.isFinite(ratio) || ratio <= 0) return []
-    return providerPriceSummary(model)
+    return providerPriceSummary(model, sourceOfferingId)
       .map((item) => {
         const sourceCurrency = item.currency || model.currency || currency
         const baseAmount = convertAmountBetween(
@@ -483,8 +498,12 @@ export function useChannelModelPricing({
       row.draft.price_source_name ||
       row.model.price_source_name ||
       upstreamSourceLabel(row.model)
-    const version = row.model.sku_code || row.model.sku_display_name || ''
-    const region = row.model.sku_region || ''
+    const version =
+      row.draft.source_sku_code ||
+      row.model.sku_code ||
+      row.model.sku_display_name ||
+      ''
+    const region = row.draft.source_sku_region || row.model.sku_region || ''
     return [source, version, region].filter(Boolean).join(' · ')
   }
 

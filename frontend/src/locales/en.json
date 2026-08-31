@@ -1444,6 +1444,7 @@
       "selectedMetaModels": "{count} meta models selected",
       "selectedModels": "Selected models",
       "selectedModelsHint": "Choose the actual channel upstream used by each meta model.",
+      "selectRegion": "Select regional price",
       "selectedShort": "{count} selected",
       "showAll": "Show all {count}",
       "sourceCategory": {

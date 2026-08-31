@@ -9,6 +9,7 @@ from django.test.utils import CaptureQueriesContext
 from llm_ops.models import (
     ChannelModelPrice,
     ChannelModelPriceHistory,
+    ChannelOffering,
     ChannelPriceItem,
     LLMModel,
     LLMProvider,
@@ -686,6 +687,63 @@ class LLMOpsPricingServiceTests(TestCase):
         self.assertEqual(items[0].base_price_item, selected_item)
         self.assertEqual(items[0].unit_price, Decimal("1.500000"))
         self.assertEqual(cost, Decimal("1.500000"))
+
+    def test_sync_does_not_mix_regions_for_selected_source_offering(self):
+        source = PriceCollectionSource.objects.create(
+            name="Regional supplier",
+            slug="regional-supplier",
+            provider=self.provider,
+        )
+        offerings = []
+        for region, amount in (("Global", "9"), ("Japan", "3")):
+            sku = ModelSku.objects.create(
+                provider=self.provider,
+                meta_model=self.model.meta_model,
+                canonical_sku_code="gpt-4o",
+                upstream_model_name="gpt-4o",
+                display_name=f"GPT-4o {region}",
+                region=region,
+            )
+            offering = SourceSkuOffering.objects.create(
+                source=source,
+                sku=sku,
+                provider=self.provider,
+                exposed_model_name="gpt-4o",
+            )
+            ModelPriceItem.objects.create(
+                provider=self.provider,
+                sku=sku,
+                offering=offering,
+                meta_model=self.model.meta_model,
+                source=source,
+                dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+                billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+                currency="USD",
+                unit_price=Decimal(amount),
+                price_fingerprint=f"region-{region}",
+                is_current=True,
+            )
+            offerings.append(offering)
+        channel_offering = ChannelOffering.objects.create(
+            channel=self.channel,
+            meta_model=self.model.meta_model,
+            model=self.model,
+            source_offering=offerings[1],
+            offering_key="japan",
+            display_name="Japan",
+        )
+        price = ChannelModelPrice.objects.create(
+            channel=self.channel,
+            model=self.model,
+            offering=channel_offering,
+            price_source=source,
+            settlement_ratio=Decimal("1"),
+        )
+
+        items = sync_channel_price_items(price)
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].unit_price, Decimal("3"))
 
     def test_sync_selects_price_group_matching_model_base_prices(self):
         source = PriceCollectionSource.objects.create(

@@ -105,6 +105,7 @@ from .serializers import (
     ResaleWorkflowConfigSerializer,
     UsageReconciliationRecordSerializer,
     YunceCollectionRequestSerializer,
+    get_or_create_channel_offering,
 )
 from .services import (
     OPERATION_SCOPE_MARKET_REFERENCE,
@@ -1555,6 +1556,8 @@ class ChannelModelPriceViewSet(
             "model",
             "model__provider",
             "offering",
+            "offering__source_offering",
+            "offering__source_offering__sku",
             "price_source",
         )
         channel = self.request.query_params.get("channel")
@@ -1650,6 +1653,12 @@ class ChannelModelPriceViewSet(
                     existing_queryset = existing_queryset.filter(
                         offering_id=item.get("offering")
                     )
+                elif item.get("source_offering") is not None:
+                    existing_queryset = existing_queryset.filter(
+                        offering__source_offering_id=item.get(
+                            "source_offering"
+                        )
+                    )
                 else:
                     existing_queryset = existing_queryset.filter(
                         offering__is_default=True
@@ -1664,6 +1673,13 @@ class ChannelModelPriceViewSet(
                 serializer.is_valid(raise_exception=True)
                 data = serializer.validated_data
                 offering = data.get("offering")
+                source_offering = data.get("source_offering")
+                if offering is None and source_offering is not None:
+                    offering = get_or_create_channel_offering(
+                        data["channel"],
+                        data["model"],
+                        source_offering,
+                    )
                 if offering is None:
                     offering, _created = ChannelOffering.objects.get_or_create(
                         channel=data["channel"],
@@ -1684,7 +1700,8 @@ class ChannelModelPriceViewSet(
                 defaults = {
                     key: value
                     for key, value in data.items()
-                    if key not in {"channel", "model", "offering"}
+                    if key
+                    not in {"channel", "model", "offering", "source_offering"}
                 }
                 defaults["meta_model"] = data["model"].meta_model
                 price, created = ChannelModelPrice.objects.update_or_create(

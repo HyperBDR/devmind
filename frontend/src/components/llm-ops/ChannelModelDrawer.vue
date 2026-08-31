@@ -379,11 +379,23 @@
                         {{ t('llmOps.channelModelDrawer.noAvailableUpstream') }}
                       </span>
                     </div>
+                    <CompactSelect
+                      v-if="item.sourceOfferingOptions?.length > 1"
+                      :model-value="item.selectedSourceOfferingId || ''"
+                      :options="item.sourceOfferingOptions"
+                      :placeholder="t('llmOps.channelModelDrawer.selectRegion')"
+                      @change="
+                        (value) => selectSourceOffering(item.group.key, value)
+                      "
+                    />
                     <div v-if="item.model" class="batch-price-preview">
                       <span>
                         {{
                           t('llmOps.channelModelDrawer.upstreamSummary', {
-                            value: batchUpstreamPriceSummary(item.model)
+                            value: batchUpstreamPriceSummary(
+                              item.model,
+                              item.selectedSourceOfferingId
+                            )
                           })
                         }}
                       </span>
@@ -392,7 +404,8 @@
                           t('llmOps.channelModelDrawer.costSummary', {
                             value: batchPendingDraftPriceSummary(
                               newDraft,
-                              item.model
+                              item.model,
+                              item.selectedSourceOfferingId
                             )
                           })
                         }}
@@ -586,7 +599,9 @@
                   </strong>
                   <strong>
                     <em>{{ t('llmOps.channelModelDrawer.upstream') }}</em>
-                    {{ upstreamPriceSummary(row.model) }}
+                    {{
+                      upstreamPriceSummary(row.model, row.draft.source_offering)
+                    }}
                   </strong>
                 </div>
                 <div class="channel-model-ability-summary">
@@ -613,7 +628,10 @@
                     }}</span>
                     <div class="mt-1 space-y-1 font-mono">
                       <p
-                        v-for="item in providerPriceSummary(row.model)"
+                        v-for="item in providerPriceSummary(
+                          row.model,
+                          row.draft.source_offering
+                        )"
                         :key="item.label"
                       >
                         <span class="text-slate-400">{{ item.label }}</span>
@@ -870,7 +888,12 @@
                                 </span>
                               </div>
                               <strong v-else class="price-tier-missing">
-                                {{ upstreamPriceSummary(row.model) }}
+                                {{
+                                  upstreamPriceSummary(
+                                    row.model,
+                                    row.draft.source_offering
+                                  )
+                                }}
                               </strong>
                             </div>
                           </div>
@@ -883,7 +906,14 @@
                         </span>
                         <span>
                           <em>{{ t('llmOps.channelModelDrawer.upstream') }}</em>
-                          <strong>{{ upstreamPriceSummary(row.model) }}</strong>
+                          <strong>
+                            {{
+                              upstreamPriceSummary(
+                                row.model,
+                                row.draft.source_offering
+                              )
+                            }}
+                          </strong>
                         </span>
                       </template>
                     </div>
@@ -996,6 +1026,10 @@ const props = defineProps({
     type: Array,
     default: () => []
   },
+  channelOfferings: {
+    type: Array,
+    default: () => []
+  },
   channelPriceItems: {
     type: Array,
     default: () => []
@@ -1023,6 +1057,7 @@ const selectedVendorKey = ref('')
 const modelSearch = ref('')
 const selectedModelKeys = ref(new Set())
 const selectedProviderByModelKey = ref({})
+const selectedSourceOfferingByModelKey = ref({})
 const modelDropdownOpen = ref(false)
 const modelDropdownRef = ref(null)
 const modelSearchInput = ref(null)
@@ -1225,6 +1260,7 @@ const {
   selectedModelCount,
   selectedModelOptions,
   selectedResolvedModels,
+  selectSourceOffering,
   toggleModelSelection,
   vendorOptions
 } = useChannelModelSelection({
@@ -1241,10 +1277,12 @@ const {
   modelSourceCategory,
   normalizeSearch,
   providerModelDescription,
+  priceItems: props.priceItems,
   providerPriceSummary,
   purchaseSourceLabel,
   selectedModelKeys,
   selectedProviderByModelKey,
+  selectedSourceOfferingByModelKey,
   selectedVendorKey,
   sourceCategoryBadge,
   t
@@ -1406,7 +1444,10 @@ function priceTierComparisonRows(row) {
   }
 
   append(row?.priceItems || [], 'costPrices')
-  append(providerPriceItemsForModel(row?.model), 'upstreamPrices')
+  append(
+    providerPriceItemsForModel(row?.model, row?.draft?.source_offering),
+    'upstreamPrices'
+  )
   return Array.from(tiers.values())
 }
 
