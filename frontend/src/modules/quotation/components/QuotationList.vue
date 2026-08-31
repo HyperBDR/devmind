@@ -15,7 +15,6 @@ import {
   FileSpreadsheet,
   FileText,
   Pencil,
-  RefreshCw,
   RotateCcw,
   Search,
   Trash2,
@@ -24,10 +23,8 @@ import {
 } from 'lucide-vue-next'
 import {
   checkFeishuFileAccess,
-  getFeishuSyncJob,
   isFeishuFolderItem,
   listFeishuFolder,
-  syncFeishuArchiveFolder,
 } from '../api/feishu'
 import { getAccessRequestContext } from '../api/accessRequests'
 import {
@@ -263,9 +260,7 @@ const selectedSource = ref('ALL')
 const selectedCurrency = ref('ALL')
 const createdFrom = ref(props.initialCreatedFrom || '')
 const createdTo = ref(props.initialCreatedTo || '')
-const syncingFeishu = ref(false)
 const uploadAccessLoading = ref(false)
-const uploadAccessChecked = ref(false)
 const hasUploadAccess = ref(false)
 const uploadUnavailable = computed(
   () => uploadAccessLoading.value || !hasUploadAccess.value,
@@ -370,7 +365,6 @@ async function loadUploadAccess() {
   } catch {
     hasUploadAccess.value = false
   } finally {
-    uploadAccessChecked.value = true
     uploadAccessLoading.value = false
   }
 }
@@ -572,9 +566,6 @@ function exportProgressLabel(quoteId: string): string {
 
 function openFeishuUploadPicker(quote: Quotation, format: FeishuUploadFormat) {
   if (quote.status === 'Cancelled' || !hasUploadAccess.value) {
-    if (!hasUploadAccess.value) {
-      emit('toast', t('quotation.pages.list.uploadAccessRequired'), 'info')
-    }
     return
   }
   closeActionMenu()
@@ -925,66 +916,6 @@ watch(searchText, () => {
   },
 )
 
-function wait(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
-}
-
-async function waitForFeishuSyncJob(jobId: string) {
-  const deadline = Date.now() + 10 * 60 * 1000
-  while (Date.now() < deadline) {
-    const job = await getFeishuSyncJob(jobId)
-    if (job.status === 'success') return job.result
-    if (job.status === 'failed') {
-      throw new Error(
-        job.error_message || t('quotation.pages.list.feishuSyncFailed'),
-      )
-    }
-    await wait(1000)
-  }
-  throw new Error(t('quotation.pages.list.feishuSyncTimeout'))
-}
-
-async function handleManualFeishuSync() {
-  if (syncingFeishu.value) return
-  syncingFeishu.value = true
-  try {
-    let result = await syncFeishuArchiveFolder({ source: 'user' })
-    if (result.sync_job_id && result.sync_status !== 'success') {
-      const completed = await waitForFeishuSyncJob(result.sync_job_id)
-      result = {
-        ...result,
-        ...(completed as Partial<typeof result>),
-      }
-    }
-    emit('feishuUploadDone', '')
-    const errorCount = result.errors?.length || 0
-    emit(
-      'toast',
-      t(
-        errorCount
-          ? 'quotation.pages.list.feishuSyncPartial'
-          : 'quotation.pages.list.feishuSyncComplete',
-        {
-          created: result.created_count || 0,
-          queued: result.queued_parse_count || 0,
-          errors: errorCount,
-        },
-      ),
-      errorCount ? 'info' : 'success',
-    )
-  } catch (error: unknown) {
-    emit(
-      'toast',
-      error instanceof Error
-        ? error.message
-        : t('quotation.pages.list.feishuSyncFailed'),
-      'error',
-    )
-  } finally {
-    syncingFeishu.value = false
-  }
-}
-
 const hasActiveFilters = computed(
   () =>
     searchText.value.trim() !== '' ||
@@ -1040,18 +971,6 @@ function displayQuoteDate(quote: Quotation): string {
     id="quote-list-root"
     class="flex h-full min-h-[calc(100dvh-7.0625rem)] flex-col gap-3"
   >
-    <div
-      v-if="uploadAccessChecked && !hasUploadAccess"
-      class="flex flex-col gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:flex-row sm:items-center sm:justify-between"
-    >
-      <span>{{ t('quotation.pages.list.uploadAccessRequired') }}</span>
-      <RouterLink
-        to="/quotation/permissions"
-        class="shrink-0 font-semibold text-amber-900 underline underline-offset-2"
-      >
-        {{ t('quotation.pages.list.requestUploadAccess') }}
-      </RouterLink>
-    </div>
     <div
       id="filter-panel"
       data-filter-toolbar
@@ -1182,23 +1101,6 @@ function displayQuoteDate(quote: Quotation): string {
                 </button>
               </div>
             </div>
-            <button
-              type="button"
-              data-feishu-sync-button
-              class="inline-flex h-9 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-blue-300 bg-blue-50 px-2.5 text-xs font-semibold text-blue-700 transition hover:border-blue-400 hover:bg-blue-100 focus:outline-hidden focus:ring-2 focus:ring-blue-200 disabled:cursor-wait disabled:opacity-70"
-              :disabled="syncingFeishu"
-              @click="handleManualFeishuSync"
-            >
-              <RefreshCw
-                class="h-3.5 w-3.5"
-                :class="{ 'animate-spin': syncingFeishu }"
-              />
-              {{
-                syncingFeishu
-                  ? t('quotation.pages.list.feishuSyncing')
-                  : t('quotation.pages.list.feishuSync')
-              }}
-            </button>
             <button
               type="button"
               :class="`inline-flex h-9 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 text-xs font-semibold transition cursor-pointer ${
@@ -1459,9 +1361,7 @@ function displayQuoteDate(quote: Quotation): string {
                       :title="
                         quote.status === 'Cancelled'
                           ? t('quotation.pages.list.uploadDisabled')
-                          : uploadUnavailable
-                            ? t('quotation.pages.list.uploadAccessRequired')
-                            : t('quotation.pages.list.uploadFeishu')
+                          : t('quotation.pages.list.uploadFeishu')
                       "
                       :disabled="quote.status === 'Cancelled' || uploadingQuoteId === quote.id || uploadUnavailable"
                       :class="`p-1 rounded-sm transition duration-100 ${

@@ -12,6 +12,7 @@ import FormSelect from './FormSelect.vue'
 import {
   ChevronDown,
   FolderOpen,
+  Pencil,
   Percent,
   Plus,
   Search,
@@ -20,6 +21,10 @@ import {
 } from 'lucide-vue-next'
 
 type CatalogCurrency = 'CNY' | 'USD' | 'EUR'
+
+function toCatalogCurrency(value?: string): CatalogCurrency {
+  return value === 'CNY' || value === 'EUR' ? value : 'USD'
+}
 
 function buildAutoCode(prefix: string): string {
   return `${prefix}-${Date.now().toString(36).toUpperCase().slice(-7)}`
@@ -39,8 +44,10 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   addProduct: [prod: Product]
+  updateProduct: [prod: Product]
   deleteProduct: [id: string]
   addService: [serv: Service]
+  updateService: [serv: Service]
   deleteService: [id: string]
   addDiscount: [disc: DiscountOption]
   deleteDiscount: [id: string]
@@ -51,6 +58,8 @@ const { t } = useQuotationI18n()
 const subTab = ref<'products' | 'services' | 'discounts'>('products')
 const searchQuery = ref('')
 const isFormOpen = ref(false)
+const editingProduct = ref<Product | null>(null)
+const editingService = ref<Service | null>(null)
 const quoteDescriptionsExpanded = ref(true)
 const discountSettingsExpanded = ref(true)
 
@@ -58,7 +67,34 @@ function setSubTab(next: 'products' | 'services' | 'discounts') {
   subTab.value = next
   pendingDelete.value = null
   searchQuery.value = ''
+  closeForm()
+}
+
+function openProductEditor(product: Product) {
+  editingProduct.value = product
+  editingService.value = null
+  pName.value = product.name
+  pPrice.value = product.listPrice
+  pCurrency.value = toCatalogCurrency(product.currency)
+  pCategory.value = product.category || ''
+  pDesc.value = product.description || ''
+  isFormOpen.value = true
+}
+
+function openServiceEditor(service: Service) {
+  editingService.value = service
+  editingProduct.value = null
+  sName.value = service.name
+  sPrice.value = service.listPrice
+  sCurrency.value = toCatalogCurrency(service.currency)
+  sDesc.value = service.description || ''
+  isFormOpen.value = true
+}
+
+function closeForm() {
   isFormOpen.value = false
+  editingProduct.value = null
+  editingService.value = null
 }
 
 const normalizedSearch = computed(() => searchQuery.value.trim().toLowerCase())
@@ -142,20 +178,23 @@ function handleCreateProduct(e: Event) {
     alert(t('quotation.pages.catalog.validationProductIncomplete'))
     return
   }
-  emit('addProduct', {
-    id: `prod-${Date.now()}`,
+  const product: Product = {
+    ...(editingProduct.value || {}),
+    id: editingProduct.value?.id || `prod-${Date.now()}`,
     name: pName.value,
-    code: buildAutoCode('SW'),
+    code: editingProduct.value?.code || buildAutoCode('SW'),
     listPrice: pPrice.value,
     currency: pCurrency.value,
     category: pCategory.value,
     description: pDesc.value || t('quotation.pages.catalog.noDescription'),
-  })
+  }
+  if (editingProduct.value) emit('updateProduct', product)
+  else emit('addProduct', product)
   pName.value = ''
   pPrice.value = 0
   pCurrency.value = 'USD'
   pDesc.value = ''
-  isFormOpen.value = false
+  closeForm()
 }
 
 function handleCreateService(e: Event) {
@@ -164,20 +203,23 @@ function handleCreateService(e: Event) {
     alert(t('quotation.pages.catalog.validationServiceIncomplete'))
     return
   }
-  emit('addService', {
-    id: `serv-${Date.now()}`,
+  const service: Service = {
+    ...(editingService.value || {}),
+    id: editingService.value?.id || `serv-${Date.now()}`,
     name: sName.value,
-    code: buildAutoCode('OT'),
+    code: editingService.value?.code || buildAutoCode('OT'),
     listPrice: sPrice.value,
     currency: sCurrency.value,
     unit: 'item',
     description: sDesc.value || t('quotation.pages.catalog.noServiceDetails'),
-  })
+  }
+  if (editingService.value) emit('updateService', service)
+  else emit('addService', service)
   sName.value = ''
   sPrice.value = 0
   sCurrency.value = 'USD'
   sDesc.value = ''
-  isFormOpen.value = false
+  closeForm()
 }
 
 function handleCreateDiscount(e: Event) {
@@ -385,6 +427,15 @@ watch(
                   <button
                     type="button"
                     class="cursor-pointer rounded-sm p-1 text-dm-text-tertiary hover:bg-red-50 hover:text-red-500"
+                    :aria-label="t('quotation.pages.catalog.editProduct', { name: p.name })"
+                    :title="t('quotation.pages.catalog.editProduct', { name: p.name })"
+                    @click.stop="openProductEditor(p)"
+                  >
+                    <Pencil class="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    class="cursor-pointer rounded-sm p-1 text-dm-text-tertiary hover:bg-red-50 hover:text-red-500"
                     :aria-label="t('quotation.pages.catalog.deleteProduct', { name: p.name })"
                     :title="t('quotation.pages.catalog.deleteProduct', { name: p.name })"
                     @click.stop="requestDeleteProduct(p)"
@@ -423,6 +474,15 @@ watch(
                 </td>
                 <td class="px-4 py-3 text-right font-mono font-bold text-dm-text">{{ formatCatalogItemPrice(s.listPrice, s.pricingNote, s.currency || 'USD') }}</td>
                 <td class="px-4 py-3 text-center">
+                  <button
+                    type="button"
+                    class="cursor-pointer rounded-sm p-1 text-dm-text-tertiary hover:bg-red-50 hover:text-red-500"
+                    :aria-label="t('quotation.pages.catalog.editService', { name: s.name })"
+                    :title="t('quotation.pages.catalog.editService', { name: s.name })"
+                    @click.stop="openServiceEditor(s)"
+                  >
+                    <Pencil class="h-4 w-4" />
+                  </button>
                   <button
                     type="button"
                     class="cursor-pointer rounded-sm p-1 text-dm-text-tertiary hover:bg-red-50 hover:text-red-500"
@@ -483,11 +543,11 @@ watch(
       </section>
     </div>
 
-    <div v-if="isFormOpen" data-catalog-form-modal class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/35 p-4" @click.self="isFormOpen = false">
+    <div v-if="isFormOpen" data-catalog-form-modal class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/35 p-4" @click.self="closeForm">
       <div class="w-full max-w-md overflow-hidden rounded-lg bg-white shadow-xl">
         <div class="flex items-center justify-between border-b border-dm-border-light px-5 py-4">
           <h3 class="text-sm font-bold text-dm-text">{{ t(`quotation.pages.catalog.${subTab}Add`) }}</h3>
-          <button type="button" class="rounded-md p-1 text-dm-text-tertiary hover:bg-slate-100 hover:text-dm-text" :aria-label="t('quotation.common.close')" @click="isFormOpen = false"><X class="h-4 w-4" /></button>
+          <button type="button" class="rounded-md p-1 text-dm-text-tertiary hover:bg-slate-100 hover:text-dm-text" :aria-label="t('quotation.common.close')" @click="closeForm"><X class="h-4 w-4" /></button>
         </div>
         <form v-if="subTab === 'products'" class="space-y-4 p-5 text-sm" @submit="handleCreateProduct">
           <label class="block"><span class="mb-1 block font-semibold text-dm-text-tertiary">{{ t('quotation.pages.catalog.productName') }} *</span><input v-model="pName" required :placeholder="t('quotation.pages.catalog.productNamePlaceholder')" class="catalog-input" /></label>

@@ -6,6 +6,13 @@ const app = readFileSync(
   new URL('../src/modules/quotation/App.vue', import.meta.url),
   'utf8',
 )
+const create = readFileSync(
+  new URL(
+    '../src/modules/quotation/components/QuotationCreate.vue',
+    import.meta.url,
+  ),
+  'utf8',
+)
 const quotationList = readFileSync(
   new URL(
     '../src/modules/quotation/components/QuotationList.vue',
@@ -78,4 +85,28 @@ test('imported quotations do not render the copy action', () => {
 
   assert.ok(copyStart >= 0)
   assert.match(copyBlock, /v-if="quote\.sourceType !== 'document_import'"/)
+})
+
+test('copy opens a create form without creating a quotation first', () => {
+  const copyStart = app.indexOf('async function handleCopyQuote')
+  const copyEnd = app.indexOf('function handleBackToList')
+  const copyFlow = app.slice(copyStart, copyEnd)
+
+  assert.ok(copyStart >= 0)
+  assert.ok(copyEnd > copyStart)
+  assert.match(copyFlow, /getQuotationApi\(id\)/)
+  assert.match(copyFlow, /copySourceQuote\.value = sourceQuote/)
+  assert.match(copyFlow, /router\.push\('\/quotation\/create'\)/)
+  assert.doesNotMatch(copyFlow, /copyQuotationApi/)
+  assert.doesNotMatch(copyFlow, /refreshQuotations/)
+})
+
+test('copied quotation data is treated as create-form prefill', () => {
+  assert.match(app, /:copy-quote="copySourceQuote"/)
+  assert.match(create, /copyQuote\?: Quotation \| null/)
+  assert.match(create, /function loadCopiedQuoteIntoForm\(/)
+  assert.match(create, /quoteNoMode\.value = 'auto'/)
+  assert.match(create, /quoteDate\.value = todayInput/)
+  assert.match(create, /applyingCreateDraft\.value = false\n    if \(quoteNoMode\.value === 'auto'\) regenerateQuoteNo\(\)/)
+  assert.match(create, /props\.editingQuote \|\| props\.copyQuote \|\| applyingCreateDraft\.value/)
 })

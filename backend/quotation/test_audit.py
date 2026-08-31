@@ -387,6 +387,7 @@ class QuotationAuditEventTests(TestCase):
     def test_quote_update_audit_event_stores_json_change_details(self):
         quotation = Quotation.objects.create(
             quote_no="Q-AUDIT-JSON-001",
+            status="generated",
             project_name="Before",
             payment_terms="CIA",
             quote_date="2026-07-21",

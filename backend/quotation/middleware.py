@@ -220,8 +220,7 @@ def _audit_metadata(
     """Return safe linkage metadata for an audit event."""
     metadata = {"status_code": response.status_code}
     version_no = payload.get("version_current")
-    skip_pending_version = action == "update" and "skip_version" in changed_fields
-    if isinstance(version_no, int) and not skip_pending_version:
+    if isinstance(version_no, int):
         metadata["version_no"] = version_no
     return metadata
 

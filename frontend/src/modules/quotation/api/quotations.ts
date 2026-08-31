@@ -28,8 +28,10 @@ interface ApiQuotationVersion {
 
 interface ApiQuotation {
   id: string;
-  quote_no: string;
+  quote_no: string | null;
   display_quote_no?: string;
+  draft_quote_no?: string | null;
+  numbering_mode?: 'auto' | 'custom';
   source_quote_no?: string;
   status: string;
   version_current: number;
@@ -86,8 +88,10 @@ interface ApiQuotation {
 
 interface ApiQuotationListItem {
   id: string;
-  quote_no: string;
+  quote_no: string | null;
   display_quote_no: string;
+  draft_quote_no?: string | null;
+  numbering_mode?: 'auto' | 'custom';
   project_name: string;
   client_company: string;
   contact_person: string;
@@ -119,8 +123,10 @@ interface ApiQuotationListItem {
 
 interface ApiQuotationFormContextItem {
   id: string;
-  quote_no: string;
+  quote_no: string | null;
   display_quote_no: string;
+  draft_quote_no?: string | null;
+  numbering_mode?: 'auto' | 'custom';
   project_name: string;
   client_company: string;
   contact_person: string;
@@ -382,7 +388,13 @@ function mapApiVersion(version: ApiQuotationVersion): QuoteVersion {
 export function mapApiQuotation(api: ApiQuotation): Quotation {
   return {
     id: api.id,
-    quoteNo: api.display_quote_no || api.source_quote_no || api.quote_no,
+    quoteNo:
+      api.display_quote_no
+      || api.source_quote_no
+      || api.quote_no
+      || api.draft_quote_no
+      || '',
+    quoteNoMode: api.numbering_mode,
     sourceType: api.source_type || 'manual',
     sourceDocumentType: api.source_document_type || undefined,
     versionCurrent: api.version_current || 0,
@@ -443,7 +455,8 @@ export function mapApiQuotation(api: ApiQuotation): Quotation {
 function mapApiQuotationListItem(api: ApiQuotationListItem): Quotation {
   return {
     id: api.id,
-    quoteNo: api.display_quote_no || api.quote_no,
+    quoteNo: api.display_quote_no || api.quote_no || api.draft_quote_no || '',
+    quoteNoMode: api.numbering_mode,
     sourceType: api.source_type || 'manual',
     sourceDocumentType: api.source_document_type || undefined,
     sourceDocument: api.source_document
@@ -492,7 +505,8 @@ function mapApiQuotationFormContextItem(
 ): Quotation {
   return {
     id: api.id,
-    quoteNo: api.display_quote_no || api.quote_no,
+    quoteNo: api.display_quote_no || api.quote_no || api.draft_quote_no || '',
+    quoteNoMode: api.numbering_mode,
     projectName: api.project_name,
     clientCompany: api.client_company,
     contactPerson: api.contact_person,
@@ -525,7 +539,11 @@ function mapApiQuotationFormContextItem(
 
 export function mapQuotationToCreatePayload(quote: Quotation) {
   return {
-    quote_no: quote.quoteNo,
+    quote_no:
+      quote.status === 'Draft' ? undefined : quote.quoteNo || undefined,
+    draft_quote_no:
+      quote.status === 'Draft' ? quote.quoteNo || '' : undefined,
+    numbering_mode: quote.quoteNoMode || 'auto',
     product_line: quote.productLine || 'BDR',
     product_line_name: quote.productLineName || '',
     project_name: quote.projectName,
@@ -645,7 +663,6 @@ export async function createQuotation(quote: Quotation): Promise<Quotation> {
     method: 'POST',
     body: JSON.stringify({
       ...mapQuotationToCreatePayload(quote),
-      numbering_mode: quote.quoteNoMode || 'custom',
     }),
   });
   return mapApiQuotation(created);
@@ -653,12 +670,11 @@ export async function createQuotation(quote: Quotation): Promise<Quotation> {
 
 export async function updateQuotation(
   quote: Quotation,
-  options?: { notes?: string; skipVersion?: boolean },
+  options?: { notes?: string },
 ): Promise<Quotation> {
   const payload = {
     ...mapQuotationToCreatePayload(quote),
     ...(options?.notes ? { notes: options.notes } : {}),
-    ...(options?.skipVersion ? { skip_version: true } : {}),
   };
   const updated = await apiRequest<ApiQuotation>(`/quotations/${quote.id}`, {
     method: 'PUT',
@@ -667,12 +683,21 @@ export async function updateQuotation(
   return mapApiQuotation(updated);
 }
 
-export async function generateQuotation(quoteId: string, operatorEmail?: string): Promise<Quotation> {
+export async function generateQuotation(
+  quoteId: string,
+  operatorEmail?: string,
+  options?: {
+    quoteNoMode?: 'auto' | 'custom'
+    draftQuoteNo?: string
+  },
+): Promise<Quotation> {
   const generated = await apiRequest<ApiQuotation>(`/quotations/${quoteId}/generate`, {
     method: 'POST',
     body: JSON.stringify({
       operator_email: operatorEmail,
       notes: 'Generated quotation',
+      numbering_mode: options?.quoteNoMode,
+      draft_quote_no: options?.draftQuoteNo,
     }),
   });
   return mapApiQuotation(generated);

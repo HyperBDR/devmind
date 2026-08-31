@@ -14,7 +14,10 @@ from quotation.access import (
     forbidden_response,
     upload_forbidden_response,
 )
-from quotation.audit import set_request_audit_target
+from quotation.audit import (
+    quotation_audit_label,
+    set_request_audit_target,
+)
 from quotation.models import (
     EXPORT_ARCHIVE_SYNC_STAGE,
     ExportJob,
@@ -218,7 +221,7 @@ class QuotationExportCreateView(APIView):
         set_request_audit_target(
             request,
             target_id=quotation.id,
-            target_label=quotation.quote_no,
+            target_label=quotation_audit_label(quotation),
         )
         try:
             job, _ = create_export_job(
@@ -264,7 +267,7 @@ class ExportJobDetailView(APIView):
         set_request_audit_target(
             request,
             target_id=job.quotation_id,
-            target_label=job.quotation.quote_no,
+            target_label=quotation_audit_label(job.quotation),
         )
         return Response(export_job_data(job))
 

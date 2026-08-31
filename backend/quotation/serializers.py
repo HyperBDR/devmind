@@ -9,6 +9,7 @@ from django.db.models import Q
 from django.utils import timezone
 from rest_framework import serializers
 
+from quotation.audit import quotation_audit_label
 from quotation.models import (
     AuditEvent,
     DocumentAsset,
@@ -448,7 +449,7 @@ class QuotationListSerializer(serializers.ModelSerializer):
     )
 
     def get_display_quote_no(self, obj: Quotation) -> str:
-        return obj.source_quote_no or obj.quote_no
+        return quotation_audit_label(obj)
 
     class Meta:
         model = Quotation
@@ -456,6 +457,8 @@ class QuotationListSerializer(serializers.ModelSerializer):
             "id",
             "quote_no",
             "display_quote_no",
+            "draft_quote_no",
+            "numbering_mode",
             "project_name",
             "client_company",
             "contact_person",
@@ -484,7 +487,7 @@ class QuotationFormContextSerializer(serializers.ModelSerializer):
     display_quote_no = serializers.SerializerMethodField()
 
     def get_display_quote_no(self, obj: Quotation) -> str:
-        return obj.source_quote_no or obj.quote_no
+        return quotation_audit_label(obj)
 
     class Meta:
         model = Quotation
@@ -492,6 +495,8 @@ class QuotationFormContextSerializer(serializers.ModelSerializer):
             "id",
             "quote_no",
             "display_quote_no",
+            "draft_quote_no",
+            "numbering_mode",
             "project_name",
             "client_company",
             "contact_person",
@@ -549,7 +554,7 @@ class QuotationSerializer(serializers.ModelSerializer):
     source_document_type = serializers.SerializerMethodField()
 
     def get_display_quote_no(self, obj: Quotation) -> str:
-        return obj.source_quote_no or obj.quote_no
+        return quotation_audit_label(obj)
 
     def get_source_document_type(self, obj: Quotation) -> str | None:
         if obj.source_type != "document_import":
@@ -703,6 +708,8 @@ class QuotationSerializer(serializers.ModelSerializer):
             "id",
             "quote_no",
             "display_quote_no",
+            "draft_quote_no",
+            "numbering_mode",
             "source_quote_no",
             "status",
             "version_current",
@@ -765,7 +772,16 @@ class QuotationCreateSerializer(serializers.Serializer):
         default="custom",
     )
     quote_no = serializers.CharField(
+        allow_blank=True,
+        allow_null=True,
+        required=False,
         max_length=Quotation._meta.get_field("quote_no").max_length,
+    )
+    draft_quote_no = serializers.CharField(
+        allow_blank=True,
+        allow_null=True,
+        required=False,
+        max_length=Quotation._meta.get_field("draft_quote_no").max_length,
     )
     product_line = serializers.CharField(
         allow_blank=True,
@@ -882,6 +898,10 @@ class QuotationCreateSerializer(serializers.Serializer):
     items = QuotationItemWriteSerializer(many=True, required=False)
 
     def validate(self, attrs):
+        if self.context.get("document_import") and not attrs.get("quote_no"):
+            raise serializers.ValidationError(
+                {"quote_no": "This field is required for document imports."}
+            )
         if not self.context.get("document_import"):
             for field in (
                 "contact_person",
@@ -903,8 +923,20 @@ class QuotationCreateSerializer(serializers.Serializer):
 
 class QuotationUpdateSerializer(serializers.Serializer):
     quote_no = serializers.CharField(
+        allow_blank=True,
+        allow_null=True,
         required=False,
         max_length=Quotation._meta.get_field("quote_no").max_length,
+    )
+    draft_quote_no = serializers.CharField(
+        allow_blank=True,
+        allow_null=True,
+        required=False,
+        max_length=Quotation._meta.get_field("draft_quote_no").max_length,
+    )
+    numbering_mode = serializers.ChoiceField(
+        choices=("auto", "custom"),
+        required=False,
     )
     project_name = serializers.CharField(
         required=False,
@@ -1028,6 +1060,16 @@ class QuotationUpdateSerializer(serializers.Serializer):
 
 
 class QuotationGenerateSerializer(serializers.Serializer):
+    draft_quote_no = serializers.CharField(
+        allow_blank=True,
+        allow_null=True,
+        required=False,
+        max_length=Quotation._meta.get_field("draft_quote_no").max_length,
+    )
+    numbering_mode = serializers.ChoiceField(
+        choices=("auto", "custom"),
+        required=False,
+    )
     operator_email = serializers.CharField(required=False, allow_null=True)
     notes = serializers.CharField(
         required=False, default="Generated quotation"
@@ -1097,19 +1139,39 @@ class AuditEventSerializer(serializers.ModelSerializer):
         if cache_key not in cache:
             label = ""
             if quotation_id:
-                label = (
+                quotation = (
                     Quotation.objects.filter(pk=quotation_id)
-                    .values_list("quote_no", flat=True)
+                    .values(
+                        "source_quote_no",
+                        "quote_no",
+                        "draft_quote_no",
+                    )
                     .first()
-                    or ""
                 )
+                if quotation:
+                    label = (
+                        quotation["source_quote_no"]
+                        or quotation["quote_no"]
+                        or quotation["draft_quote_no"]
+                        or ""
+                    )
             elif document_id:
-                label = (
+                quotation = (
                     DocumentAsset.objects.filter(pk=document_id)
-                    .values_list("quotation__quote_no", flat=True)
+                    .values(
+                        "quotation__source_quote_no",
+                        "quotation__quote_no",
+                        "quotation__draft_quote_no",
+                    )
                     .first()
-                    or ""
                 )
+                if quotation:
+                    label = (
+                        quotation["quotation__source_quote_no"]
+                        or quotation["quotation__quote_no"]
+                        or quotation["quotation__draft_quote_no"]
+                        or ""
+                    )
             cache[cache_key] = label
         return cache[cache_key]
 
@@ -1240,7 +1302,7 @@ class DocumentAssetSerializer(serializers.ModelSerializer):
         quotation = obj.quotation
         if quotation is None:
             return None
-        return quotation.source_quote_no or quotation.quote_no
+        return quotation_audit_label(quotation) or None
 
     def get_can_archive(self, obj: DocumentAsset) -> bool:
         return (

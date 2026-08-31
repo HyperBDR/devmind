@@ -47,7 +47,7 @@ from quotation.services.storage import (
 LEGACY_DEFAULT_TEMPLATE_NAME = "DevMind standard quotation"
 DEFAULT_TEMPLATE_NAME = "DevMind managed standard quotation"
 DEFAULT_TEMPLATE_VERSION = 2
-CURRENT_RENDERER_VERSION = "quotation-preview-xlsx-v5"
+CURRENT_RENDERER_VERSION = "quotation-preview-xlsx-v7"
 DEFAULT_WORKSHEET = "Quotation"
 
 
@@ -890,11 +890,12 @@ def render_quotation_xlsx(
         alignment=Alignment(horizontal="center", vertical="center"),
     )
     merged(4, 1, 7, "")
+    merged(5, 1, 7, "")
 
     right_details = (
-        (5, "Date:", value("quote_date")),
-        (6, "Quote No.:", value("quote_no")),
-        (7, "Quote Valid Till:", value("expire_date")),
+        (6, "Date:", value("quote_date")),
+        (7, "Quote No.:", value("quote_no")),
+        (8, "Quote Valid Till:", value("expire_date")),
     )
     for row, label, content in right_details:
         sheet.cell(row, 6, label)
@@ -915,7 +916,7 @@ def render_quotation_xlsx(
         )
 
     merged(
-        6,
+        7,
         1,
         2,
         "Ship to",
@@ -925,9 +926,9 @@ def render_quotation_xlsx(
         alignment=Alignment(horizontal="center", vertical="center"),
     )
     customer_details = (
-        (7, "Company :", value("client_company")),
-        (8, "Name :", value("contact_person")),
-        (9, "Email :", value("email")),
+        (8, "Company :", value("client_company")),
+        (9, "Name :", value("contact_person")),
+        (10, "Email :", value("email")),
     )
     for row, label, content in customer_details:
         merged(
@@ -937,10 +938,10 @@ def render_quotation_xlsx(
             f"{label} {content}",
             border=dark_border,
         )
-    merged(10, 1, 7, "")
-    sheet.row_dimensions[10].height = 9
+    merged(11, 1, 7, "")
+    sheet.row_dimensions[11].height = 9
     merged(
-        11,
+        12,
         1,
         2,
         "Bill to:",
@@ -951,16 +952,16 @@ def render_quotation_xlsx(
     )
     billing_details = (
         (
-            12,
+            13,
             "Company :",
             issuer_value("billing_company", value("client_company")),
         ),
         (
-            13,
+            14,
             "Name :",
             issuer_value("billing_contact", value("contact_person")),
         ),
-        (14, "Email :", issuer_value("billing_email", value("email"))),
+        (15, "Email :", issuer_value("billing_email", value("email"))),
     )
     for row, label, content in billing_details:
         merged(
@@ -970,8 +971,10 @@ def render_quotation_xlsx(
             f"{label} {content}",
             border=dark_border,
         )
-    merged(15, 1, 7, "")
-    sheet.row_dimensions[15].height = 12
+    merged(16, 1, 7, "")
+    sheet.row_dimensions[16].height = 12
+    merged(17, 1, 7, "")
+    sheet.row_dimensions[17].height = 12
 
     meta_headers = (
         "Contact Person",
@@ -991,7 +994,7 @@ def render_quotation_xlsx(
     meta_font = Font(name="Arial", size=9, bold=True, color="0F172A")
     for content, (start, end) in zip(meta_headers, meta_positions):
         merged(
-            16,
+            18,
             start,
             end,
             content,
@@ -999,33 +1002,33 @@ def render_quotation_xlsx(
             fill=header_fill,
             border=cell_border,
         )
-    sheet.cell(17, 1, meta_values[0])
-    sheet.cell(17, 2, meta_values[1])
-    merged(17, 3, 5, meta_values[2])
-    sheet.cell(17, 6, meta_values[3])
-    sheet.cell(17, 7, meta_values[4])
-    style_range(17, border=cell_border)
-    for cell in sheet[17]:
+    sheet.cell(19, 1, meta_values[0])
+    sheet.cell(19, 2, meta_values[1])
+    merged(19, 3, 5, meta_values[2])
+    sheet.cell(19, 6, meta_values[3])
+    sheet.cell(19, 7, meta_values[4])
+    style_range(19, border=cell_border)
+    for cell in sheet[19]:
         cell.alignment = Alignment(vertical="center", wrap_text=True)
-    merged(18, 1, 7, "")
-    sheet.row_dimensions[18].height = 15
+    merged(20, 1, 7, "")
+    sheet.row_dimensions[20].height = 15
 
     items = list(snapshot.get("items") or [])
     groups = (
         (
             "Software",
             [item for item in items if item.get("type") == "Software"],
-            3,
+            1,
             snapshot.get("software_subtotal"),
         ),
         (
             "Others",
             [item for item in items if item.get("type") != "Software"],
-            5,
+            1,
             snapshot.get("others_subtotal"),
         ),
     )
-    row = 19
+    row = 21
     headers = (
         "Item",
         "Description",
@@ -1168,6 +1171,9 @@ def render_quotation_xlsx(
             alignment=Alignment(horizontal="right", vertical="center"),
         )
         row += 1
+    merged(row, 1, 7, "")
+    sheet.row_dimensions[row].height = 9
+    row += 1
     merged(row, 1, 7, "")
     sheet.row_dimensions[row].height = 9
     row += 1

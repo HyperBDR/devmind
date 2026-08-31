@@ -62,7 +62,10 @@ export function isCreateQuoteDraftMeaningful(
   ) {
     return true;
   }
-  return (draft.items || []).some(
+  const items = draft.items || [];
+  if (items.length > 1) return true;
+
+  return items.some(
     (item) =>
       Boolean(item.description?.trim() || item.name?.trim() || item.itemId?.trim()) ||
       Number(item.listPrice) > 0 ||

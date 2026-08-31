@@ -60,18 +60,7 @@ test.describe('Quotation desktop experience', () => {
     })
   }
 
-  test('sidebar links expose the complete quote workflow', async ({ page }) => {
-    await page.route('**/api/v1/quotation/feishu/sync-folder', async (route) => {
-      await route.fulfill({
-        json: {
-          created_count: 0,
-          skipped_count: 0,
-          errors: [],
-          folders: [],
-          file_locations: [],
-        },
-      })
-    })
+  test('sidebar links expose the managed quote workflow', async ({ page }) => {
     await page.route('**/api/v1/quotation/documents?source=feishu', async (route) => {
       await route.fulfill({ json: [] })
     })
@@ -87,7 +76,7 @@ test.describe('Quotation desktop experience', () => {
     await expect(page.getByLabel('Quote filters')).toBeVisible()
     await expect(
       page.getByRole('button', { name: 'Sync from Feishu' }),
-    ).toBeVisible()
+    ).toHaveCount(0)
   })
 
   test('platform switch opens Quote Desk without an embedded sign-in error', async ({

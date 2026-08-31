@@ -20,7 +20,10 @@ from quotation.access import (
     get_accessible_quotation,
     upload_forbidden_response,
 )
-from quotation.audit import set_request_audit_target
+from quotation.audit import (
+    quotation_audit_label,
+    set_request_audit_target,
+)
 from quotation.models import (
     DocumentAsset,
     Quotation,
@@ -94,7 +97,7 @@ class FeishuUploadView(APIView):
                 )
             set_request_audit_target(
                 request,
-                target_label=quotation.quote_no,
+                target_label=quotation_audit_label(quotation),
             )
 
         try:

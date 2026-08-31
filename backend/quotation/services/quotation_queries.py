@@ -26,6 +26,7 @@ from quotation.models import (
 
 SEARCH_FIELDS = (
     "quote_no",
+    "draft_quote_no",
     "source_quote_no",
     "project_name",
     "client_company",

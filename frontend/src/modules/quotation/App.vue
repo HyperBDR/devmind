@@ -42,7 +42,6 @@ import {
 import { ensureQuoteOwnership } from './utils/quoteOwnership'
 import { clearCreateQuoteDraft } from './utils/createDraftStorage'
 import {
-  upsertDescriptionsToCatalog,
   type LineItemDescriptionHistory,
 } from './utils/descriptionCatalog'
 import { PAYMENT_TERM_OPTIONS } from './utils/paymentTerms'
@@ -55,7 +54,6 @@ import {
 } from './api/catalog'
 import {
   createQuotation as createQuotationApi,
-  copyQuotation as copyQuotationApi,
   deleteQuotation as deleteQuotationApi,
   generateQuotation as generateQuotationApi,
   getQuotation as getQuotationApi,
@@ -66,6 +64,7 @@ import {
 } from './api/quotations'
 import { useAuthStore } from './stores/auth'
 import { useQuotationI18n } from './composables/useQuotationI18n'
+import { saveContactTitle } from './utils/contactTitleStorage'
 
 const auth = useAuthStore()
 const { t, quoteStatusLabel } = useQuotationI18n()
@@ -174,10 +173,17 @@ function syncTabFromRoute() {
   if (nextTab === 'create') {
     const editId = route.query.edit
     editingQuoteId.value = typeof editId === 'string' ? editId : null
+    if (!editingQuoteId.value) {
+      editingQuote.value = null
+    } else {
+      copySourceQuote.value = null
+    }
     return
   }
 
   editingQuoteId.value = null
+  editingQuote.value = null
+  copySourceQuote.value = null
 }
 
 const quotations = ref<Quotation[]>([])
@@ -194,6 +200,7 @@ const activeQuote = ref<Quotation | null>(null)
 const activeQuoteLoading = ref(false)
 const drawerQuoteId = ref<string | null>(null)
 const editingQuote = ref<Quotation | null>(null)
+const copySourceQuote = ref<Quotation | null>(null)
 const quotationFormContext = ref<Quotation[]>([])
 const quotationFormContextQuoteNumbers = ref<string[]>([])
 const lineItemDescriptionHistory = ref<LineItemDescriptionHistory[]>([])
@@ -538,6 +545,7 @@ async function handleLogout() {
   activeQuote.value = null
   drawerQuoteId.value = null
   editingQuote.value = null
+  copySourceQuote.value = null
   quotationFormContext.value = []
   quotationFormContextQuoteNumbers.value = []
   lineItemDescriptionHistory.value = []
@@ -567,7 +575,11 @@ function navClass(tab: string) {
 function goTab(tab: string, listFilters?: ListDateFilters) {
   selectedQuotationId.value = null
   drawerQuoteId.value = null
-  if (tab === 'create') editingQuoteId.value = null
+  if (tab === 'create') {
+    editingQuoteId.value = null
+    editingQuote.value = null
+    copySourceQuote.value = null
+  }
   if (tab === 'create') void loadQuotationFormContext()
   if (tab === 'list') {
     applyListDateFilters(listFilters)
@@ -667,47 +679,28 @@ async function handleSaveQuotation(newQuote: Quotation) {
     const wasCreate = !editingQuoteId.value
     const exists = Boolean(editingQuoteId.value)
     const willGenerate = ownedQuote.status === 'Generated'
-    const usesQuoteRevisions = [
-      'Uploaded',
-      'Sent',
-      'Accepted',
-      'Rejected',
-      'Expired',
-      'Cancelled',
-    ].includes(ownedQuote.status)
     let saved = exists
       ? await updateQuotationApi(ownedQuote, {
           notes: t('quotation.app.versionNotesEditQuote'),
-          skipVersion: !usesQuoteRevisions,
         })
       : await createQuotationApi(ownedQuote)
-
-    const catalogSync = upsertDescriptionsToCatalog(
-      ownedQuote.items,
-      products.value,
-      services.value,
-      productLineOptions.value.find(
-        (option) => option.value === ownedQuote.productLine,
-      )?.label || ownedQuote.productLine || 'HyperBDR',
-      ownedQuote.currency,
-    )
-    if (catalogSync.added > 0) {
-      products.value = catalogSync.products
-      services.value = catalogSync.services
-      triggerToast(
-        t('quotation.app.catalogDescriptionsSynced', {
-          count: catalogSync.added,
-        }),
-        'info',
-      )
-    }
 
     if (wasCreate) {
       clearCreateQuoteDraft(auth.currentUser.email)
     }
 
+    saveContactTitle(auth.currentUser.email, ownedQuote.issuerContactTitle)
+
     if (willGenerate) {
-      saved = await generateQuotationApi(saved.id, auth.currentUser.email)
+      saved = await generateQuotationApi(
+        saved.id,
+        auth.currentUser.email,
+        {
+          quoteNoMode: ownedQuote.quoteNoMode,
+          draftQuoteNo: ownedQuote.quoteNo,
+        },
+      )
+      activeQuote.value = saved
       triggerToast(t('quotation.app.quoteGenerated', { quoteNo: saved.quoteNo }), 'success')
       selectedQuotationId.value = saved.id
       if (auth.embeddedAuth) {
@@ -725,6 +718,8 @@ async function handleSaveQuotation(newQuote: Quotation) {
     }
 
     editingQuoteId.value = null
+    editingQuote.value = null
+    copySourceQuote.value = null
     await refreshQuotations(quotationListQuery.value)
     if (wasCreate) await loadQuotationFormContext()
   } catch (error: unknown) {
@@ -800,11 +795,19 @@ async function handleUpdateQuote(
           ? {
               ...q,
               status: saved.status,
+              quoteNo: saved.quoteNo,
+              quoteNoMode: saved.quoteNoMode,
               region: q.region,
               industry: q.industry,
             }
           : q,
       )
+      if (activeQuote.value?.id === id) {
+        activeQuote.value = {
+          ...activeQuote.value,
+          ...saved,
+        }
+      }
     } catch (err) {
       quotations.value = quotations.value.map((q) =>
         q.id === id ? previousListQuote : q,
@@ -850,6 +853,13 @@ function handleAddProduct(prod: Product) {
   triggerToast(t('quotation.app.productAdded', { name: prod.name }), 'success')
 }
 
+function handleUpdateProduct(product: Product) {
+  products.value = products.value.map((item) => (
+    item.id === product.id ? product : item
+  ))
+  triggerToast(t('quotation.app.productUpdated', { name: product.name }), 'success')
+}
+
 function handleDeleteProduct(id: string) {
   products.value = products.value.filter((p) => p.id !== id)
   triggerToast(t('quotation.app.productRemoved'), 'info')
@@ -858,6 +868,13 @@ function handleDeleteProduct(id: string) {
 function handleAddService(serv: Service) {
   services.value = [serv, ...services.value]
   triggerToast(t('quotation.app.serviceAdded', { name: serv.name }), 'success')
+}
+
+function handleUpdateService(service: Service) {
+  services.value = services.value.map((item) => (
+    item.id === service.id ? service : item
+  ))
+  triggerToast(t('quotation.app.serviceUpdated', { name: service.name }), 'success')
 }
 
 function handleDeleteService(id: string) {
@@ -893,6 +910,7 @@ function handleDeleteProductLine(productLine: QuoteProductLine) {
 }
 
 async function handleEditQuote(id: string) {
+  copySourceQuote.value = null
   editingQuoteId.value = id
   await loadEditingQuote(id)
   if (auth.embeddedAuth) {
@@ -904,19 +922,15 @@ async function handleEditQuote(id: string) {
 
 async function handleCopyQuote(id: string) {
   try {
-    const copied = await copyQuotationApi(id)
-    editingQuoteId.value = copied.id
-    editingQuote.value = copied
-    triggerToast(
-      t('quotation.app.quoteCopied', { quoteNo: copied.quoteNo }),
-      'success',
-    )
-    await refreshQuotations(quotationListQuery.value)
+    const sourceQuote = await getQuotationApi(id)
+    if (sourceQuote.sourceType === 'document_import') {
+      throw new Error('document-imported quotations cannot be copied')
+    }
+    editingQuoteId.value = null
+    editingQuote.value = null
+    copySourceQuote.value = sourceQuote
     if (auth.embeddedAuth) {
-      await router.push({
-        path: '/quotation/create',
-        query: { edit: copied.id },
-      })
+      await router.push('/quotation/create')
     } else {
       currentTab.value = 'create'
     }
@@ -929,6 +943,9 @@ async function handleCopyQuote(id: string) {
 }
 
 function handleBackToList() {
+  editingQuoteId.value = null
+  editingQuote.value = null
+  copySourceQuote.value = null
   if (auth.embeddedAuth) {
     router.push('/quotation/list')
     return
@@ -1208,6 +1225,7 @@ function reloadPage() {
           :history-has-more="quotationFormContextHasMore"
           :history-loading="quotationFormContextLoading"
           :editing-quote="editingQuote"
+          :copy-quote="copySourceQuote"
           :customer-prefill="customerPrefill"
           :current-user="auth.currentUser"
           :product-line-options="productLineOptions"
@@ -1240,8 +1258,10 @@ function reloadPage() {
           :discounts="discounts"
           :product-line-options="productLineOptions"
           @add-product="handleAddProduct"
+          @update-product="handleUpdateProduct"
           @delete-product="handleDeleteProduct"
           @add-service="handleAddService"
+          @update-service="handleUpdateService"
           @delete-service="handleDeleteService"
           @add-discount="handleAddDiscount"
           @delete-discount="handleDeleteDiscount"

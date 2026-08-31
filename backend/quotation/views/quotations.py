@@ -16,6 +16,7 @@ from quotation.access import (
     forbidden_response,
 )
 from quotation.audit import (
+    quotation_audit_label,
     set_request_audit_change_details,
     set_request_audit_changed_fields,
     set_request_audit_target,
@@ -43,15 +44,15 @@ from quotation.services.quotation_queries import (
     quotation_currency_facets,
     filter_quotation_list,
     quotation_product_line_facets,
-    quotation_currency_facets,
 )
 from quotation.services.quotation_service import (
+    FormalQuotationNumberError,
+    QuotationNotFoundError,
     build_quotation,
-    calculate_totals,
     copy_quotation,
-    create_version_snapshot,
+    formalize_quotation,
     get_next_auto_quote_number,
-    replace_items,
+    update_quotation,
 )
 
 
@@ -63,6 +64,8 @@ def _ensure_access(user, quotation: Quotation) -> Response | None:
 
 QUOTATION_UPDATE_FIELDS = (
     "quote_no",
+    "draft_quote_no",
+    "numbering_mode",
     "project_name",
     "product_line",
     "product_line_name",
@@ -260,23 +263,22 @@ class QuotationListCreateView(APIView):
         data = ser.validated_data
         data["created_by_email"] = user_display_email(request.user)
         numbering_mode = data.pop("numbering_mode", "custom")
+        draft_quote_no = data.pop("draft_quote_no", None)
+        if draft_quote_no is None:
+            draft_quote_no = data.pop("quote_no", "")
+        else:
+            data.pop("quote_no", None)
+        if numbering_mode == "auto":
+            draft_quote_no = get_next_auto_quote_number(
+                data["product_line"],
+                data["quote_date"],
+            )
+        data["quote_no"] = None
+        data["draft_quote_no"] = draft_quote_no or ""
+        data["numbering_mode"] = numbering_mode
         items = data.pop("items", [])
-        for attempt in range(3):
-            try:
-                with transaction.atomic():
-                    if numbering_mode == "auto":
-                        data["quote_no"] = get_next_auto_quote_number(
-                            data["product_line"],
-                            data["quote_date"],
-                        )
-                    quotation = build_quotation(data=data, items_data=items)
-                break
-            except IntegrityError:
-                if numbering_mode != "auto" or attempt == 2:
-                    return Response(
-                        {"detail": "quote_no already exists"},
-                        status=409,
-                    )
+        with transaction.atomic():
+            quotation = build_quotation(data=data, items_data=items)
         quotation = Quotation.objects.prefetch_related(
             "items", "documents__replicas", "versions"
         ).get(pk=quotation.pk)
@@ -317,7 +319,11 @@ class QuotationFormContextView(APIView):
             filter_accessible_quotations(
                 request.user,
                 Quotation.objects.all(),
-            ).values_list("quote_no", flat=True)
+            )
+            .exclude(status=QuoteStatus.DRAFT)
+            .exclude(quote_no__isnull=True)
+            .exclude(quote_no="")
+            .values_list("quote_no", flat=True)
         )
         return Response(
             {
@@ -353,7 +359,10 @@ class QuotationDetailView(APIView):
         denied = _ensure_access(request.user, quotation)
         if denied:
             return denied
-        set_request_audit_target(request, target_label=quotation.quote_no)
+        set_request_audit_target(
+            request,
+            target_label=quotation_audit_label(quotation),
+        )
         return Response(QuotationSerializer(quotation).data)
 
     def post(self, request, quotation_id: str):
@@ -372,7 +381,10 @@ class QuotationDetailView(APIView):
                 {"detail": "document-imported quotations cannot be copied"},
                 status=status.HTTP_409_CONFLICT,
             )
-        set_request_audit_target(request, target_label=quotation.quote_no)
+        set_request_audit_target(
+            request,
+            target_label=quotation_audit_label(quotation),
+        )
         for attempt in range(3):
             try:
                 with transaction.atomic():
@@ -387,14 +399,14 @@ class QuotationDetailView(APIView):
             except IntegrityError:
                 if attempt == 2:
                     return Response(
-                        {"detail": "could not generate a unique quote_no"},
+                        {"detail": "could not create quotation draft"},
                         status=status.HTTP_409_CONFLICT,
                     )
         copied = self.get_object(copied.pk)
         set_request_audit_target(
             request,
             target_id=copied.pk,
-            target_label=copied.quote_no,
+            target_label=quotation_audit_label(copied),
         )
         return Response(QuotationSerializer(copied).data, status=201)
 
@@ -410,7 +422,10 @@ class QuotationDetailView(APIView):
                 {"detail": "document-imported quotations are read-only"},
                 status=409,
             )
-        set_request_audit_target(request, target_label=quotation.quote_no)
+        set_request_audit_target(
+            request,
+            target_label=quotation_audit_label(quotation),
+        )
         ser = QuotationUpdateSerializer(
             data=request.data,
             context={"quotation": quotation},
@@ -419,86 +434,36 @@ class QuotationDetailView(APIView):
         data = ser.validated_data
         changed_fields = _quotation_changed_fields(quotation, data)
         change_details = _quotation_change_details(quotation, data)
-        previous_status = quotation.status
-        for field in QUOTATION_UPDATE_FIELDS:
-            if field in data:
-                setattr(quotation, field, data[field])
-        try:
-            with transaction.atomic():
-                if "items" in data:
-                    replace_items(quotation, data["items"])
-                    cache = getattr(
-                        quotation,
-                        "_prefetched_objects_cache",
-                        None,
-                    )
-                    if cache is not None:
-                        cache.pop("items", None)
-                if "items" in data or "vat_rate" in data:
-                    items_for_totals = (
-                        data["items"]
-                        if "items" in data
-                        else [
-                            {
-                                "type": item.type,
-                                "extended_price": item.extended_price,
-                            }
-                            for item in quotation.items.all()
-                        ]
-                    )
-                    totals = calculate_totals(
-                        [type("I", (), item)() for item in items_for_totals],
-                        Decimal(str(quotation.vat_rate)),
-                    )
-                    for k, v in totals.items():
-                        setattr(quotation, k, v)
-                status_changed = (
-                    "status" in data
-                    and data["status"] != previous_status
+        for attempt in range(3):
+            try:
+                quotation, _version, _content_changed = update_quotation(
+                    quotation_id,
+                    data,
+                    operator_email=user_display_email(request.user),
+                    notes=data.get("notes") or "Updated quotation",
                 )
-                items_changed = "items" in data
-                quotation.save()
-                skip_version = bool(data.get("skip_version"))
-                draft_edit = (
-                    previous_status == QuoteStatus.DRAFT
-                    and quotation.status == QuoteStatus.DRAFT
+                break
+            except IntegrityError:
+                if attempt == 2:
+                    return Response(
+                        {"detail": "could not allocate a quotation revision"},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+            except FormalQuotationNumberError as exc:
+                return Response(
+                    {"detail": str(exc)},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
-                revision_statuses = {
-                    QuoteStatus.UPLOADED,
-                    QuoteStatus.SENT,
-                    QuoteStatus.ACCEPTED,
-                    QuoteStatus.REJECTED,
-                    QuoteStatus.EXPIRED,
-                    QuoteStatus.CANCELLED,
-                }
-                if (
-                    not skip_version
-                    and not draft_edit
-                    and (
-                        (
-                            previous_status in revision_statuses
-                            and (status_changed or items_changed)
-                        )
-                        or (
-                            status_changed
-                            and quotation.status != QuoteStatus.DRAFT
-                        )
-                    )
-                ):
-                    default_notes = (
-                        f"Updated status to {data['status']}"
-                        if status_changed
-                        else "Updated quotation content"
-                    )
-                    create_version_snapshot(
-                        quotation,
-                        operator_email=user_display_email(request.user),
-                        notes=data.get("notes") or default_notes,
-                    )
-        except IntegrityError:
-            return Response({"detail": "quote_no already exists"}, status=409)
+            except QuotationNotFoundError:
+                return Response(
+                    {"detail": "quotation not found"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
         quotation = self.get_object(quotation_id)
-        set_request_audit_target(request, target_label=quotation.quote_no)
+        set_request_audit_target(
+            request,
+            target_label=quotation_audit_label(quotation),
+        )
         set_request_audit_changed_fields(request, changed_fields)
         set_request_audit_change_details(request, change_details)
         return Response(QuotationSerializer(quotation).data)
@@ -515,7 +480,10 @@ class QuotationDetailView(APIView):
                 {"detail": "document-imported quotations cannot be deleted"},
                 status=409,
             )
-        set_request_audit_target(request, target_label=quotation.quote_no)
+        set_request_audit_target(
+            request,
+            target_label=quotation_audit_label(quotation),
+        )
         try:
             with transaction.atomic():
                 quotation.delete()
@@ -545,24 +513,51 @@ class QuotationGenerateView(APIView):
         denied = _ensure_access(request.user, quotation)
         if denied:
             return denied
-        set_request_audit_target(request, target_label=quotation.quote_no)
+        set_request_audit_target(
+            request,
+            target_label=quotation_audit_label(quotation),
+        )
         changed_fields = (
             ["status"]
             if quotation.status != QuoteStatus.GENERATED
             else []
         )
+        if quotation.status == QuoteStatus.DRAFT or not quotation.quote_no:
+            changed_fields.insert(0, "quote_no")
         ser = QuotationGenerateSerializer(data=request.data or {})
         ser.is_valid(raise_exception=True)
-        quotation.status = QuoteStatus.GENERATED
-        quotation.save(update_fields=["status", "updated_at"])
-        create_version_snapshot(
-            quotation,
-            operator_email=ser.validated_data.get("operator_email")
-            or user_display_email(request.user),
-            notes=ser.validated_data.get("notes") or "Generated quotation",
-        )
+        try:
+            for attempt in range(5):
+                try:
+                    formalize_quotation(
+                        quotation,
+                        operator_email=(
+                            ser.validated_data.get("operator_email")
+                            or user_display_email(request.user)
+                        ),
+                        notes=ser.validated_data.get("notes")
+                        or "Generated quotation",
+                        numbering_mode=ser.validated_data.get(
+                            "numbering_mode"
+                        ),
+                        draft_quote_no=ser.validated_data.get(
+                            "draft_quote_no"
+                        ),
+                    )
+                    break
+                except IntegrityError:
+                    if attempt == 4:
+                        raise
+        except IntegrityError:
+            return Response({"detail": "quote_no already exists"}, status=409)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
         quotation = Quotation.objects.prefetch_related(
             "items", "documents__replicas", "versions"
         ).get(pk=quotation_id)
+        set_request_audit_target(
+            request,
+            target_label=quotation_audit_label(quotation),
+        )
         set_request_audit_changed_fields(request, changed_fields)
         return Response(QuotationSerializer(quotation).data)

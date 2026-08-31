@@ -97,6 +97,7 @@ class QuotationListAPITests(TestCase):
         imported = self._quote(
             1,
             owner="other@example.com",
+            status=QuoteStatus.GENERATED,
             source_type=QuotationSourceType.DOCUMENT_IMPORT,
         )
         QuotationItem.objects.create(
@@ -128,7 +129,6 @@ class QuotationListAPITests(TestCase):
         ]
         assert set(response.data["quote_numbers"]) == {
             imported.quote_no,
-            "Q-LIST-002",
         }
 
     def test_default_page_size_and_stable_second_page(self):
@@ -180,7 +180,7 @@ class QuotationListAPITests(TestCase):
                 assert len(response.data["items"]) == page_size
                 assert response.data["page_size"] == page_size
 
-    def test_copy_creates_independent_draft_with_new_number(self):
+    def test_copy_creates_independent_unnumbered_draft(self):
         source = self._quote(1, status=QuoteStatus.ACCEPTED)
         source.remarks_disclaimer = "Customer-specific notes"
         source.save(update_fields=["remarks_disclaimer"])
@@ -212,7 +212,14 @@ class QuotationListAPITests(TestCase):
         assert response.status_code == 201
         copied = Quotation.objects.get(pk=response.data["id"])
         assert copied.pk != source.pk
-        assert copied.quote_no == "BDR010726.1"
+        assert copied.quote_no is None
+        copied_date = timezone.localdate()
+        expected_draft_no = (
+            f"BDR{copied_date.day:02d}{copied_date.month:02d}"
+            f"{copied_date.year % 100:02d}"
+        )
+        assert copied.draft_quote_no == expected_draft_no
+        assert copied.quote_date == copied_date
         assert copied.status == QuoteStatus.DRAFT
         assert copied.source_type == QuotationSourceType.MANUAL
         assert copied.client_company == source.client_company

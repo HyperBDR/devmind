@@ -15,7 +15,10 @@ from quotation.access import (
     get_accessible_document,
     get_accessible_quotation,
 )
-from quotation.audit import set_request_audit_target
+from quotation.audit import (
+    quotation_audit_label,
+    set_request_audit_target,
+)
 from quotation.models import (
     DocumentAsset,
     DocumentParseResult,
@@ -213,7 +216,7 @@ class QuotationDocumentListCreateView(APIView):
             return denied
         set_request_audit_target(
             request,
-            target_label=quotation.quote_no,
+            target_label=quotation_audit_label(quotation),
         )
         qs = DocumentAsset.objects.filter(quotation_id=quotation_id).order_by(
             "-created_at"
@@ -234,7 +237,7 @@ class QuotationDocumentListCreateView(APIView):
             return denied
         set_request_audit_target(
             request,
-            target_label=quotation.quote_no,
+            target_label=quotation_audit_label(quotation),
         )
         upload = request.FILES.get("file")
         if not upload:
@@ -289,7 +292,7 @@ class DocumentDownloadView(APIView):
         set_request_audit_target(
             request,
             target_label=(
-                asset.quotation.quote_no
+                quotation_audit_label(asset.quotation)
                 if asset.quotation_id
                 else asset.file_name
             ),
