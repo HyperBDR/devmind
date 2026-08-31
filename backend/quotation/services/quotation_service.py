@@ -18,6 +18,61 @@ from quotation.models import (
 )
 
 
+QUOTATION_BUSINESS_FIELDS = (
+    "product_line",
+    "product_line_name",
+    "project_name",
+    "currency",
+    "payment_term_option",
+    "payment_terms",
+    "quote_date",
+    "expire_date",
+    "tax_label",
+    "vat_rate",
+    "remarks_disclaimer",
+    "issuer_company_name",
+    "issuer_contact_name",
+    "issuer_contact_email",
+    "issuer_contact_title",
+    "issuer_signature",
+    "client_company",
+    "contact_person",
+    "email",
+    "billing_company",
+    "billing_contact",
+    "billing_email",
+)
+QUOTATION_ITEM_BUSINESS_FIELDS = (
+    "line_no",
+    "type",
+    "item_id",
+    "name",
+    "description",
+    "qty",
+    "list_price",
+    "discount_percent",
+    "net_unit_price",
+    "extended_price",
+)
+QUOTATION_DECIMAL_FIELDS = {
+    "vat_rate",
+    "qty",
+    "list_price",
+    "discount_percent",
+    "net_unit_price",
+    "extended_price",
+}
+REVISION_SUFFIX_PATTERN = re.compile(r"_R\d+$", re.IGNORECASE)
+
+
+class FormalQuotationNumberError(ValueError):
+    """Raised when a formal quotation number cannot be changed by a client."""
+
+
+class QuotationNotFoundError(ValueError):
+    """Raised when a locked quotation disappears during an operation."""
+
+
 def round_money(value: Decimal) -> Decimal:
     return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
@@ -90,6 +145,105 @@ def coerce_item_type(raw_type: str) -> str:
     return ItemType.OTHER
 
 
+def is_formal_quotation(status: str) -> bool:
+    """Return whether a quotation has crossed the formal boundary."""
+    return status != QuoteStatus.DRAFT
+
+
+def _normalized_business_value(field: str, value: Any) -> str:
+    if field in QUOTATION_DECIMAL_FIELDS:
+        return format(Decimal(str(value or 0)).quantize(Decimal("0.01")), "f")
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value or "")
+
+
+def quotation_business_signature(
+    quotation: Quotation,
+    items: list[QuotationItem] | list[dict[str, Any]] | None = None,
+) -> tuple:
+    """Return the persisted business content in a stable comparable form."""
+    fields = tuple(
+        _normalized_business_value(field, getattr(quotation, field))
+        for field in QUOTATION_BUSINESS_FIELDS
+    )
+    line_items = items
+    if line_items is None:
+        line_items = list(quotation.items.order_by("line_no", "id"))
+    item_signatures = []
+    for item in line_items:
+        values = []
+        for field in QUOTATION_ITEM_BUSINESS_FIELDS:
+            value = (
+                item.get(field)
+                if isinstance(item, dict)
+                else getattr(item, field)
+            )
+            if field == "type":
+                value = coerce_item_type(str(value or ""))
+            values.append(_normalized_business_value(field, value))
+        item_signatures.append(tuple(values))
+    return fields, tuple(item_signatures)
+
+
+def _quotation_number_root(quote_no: str) -> str:
+    return REVISION_SUFFIX_PATTERN.sub("", (quote_no or "").strip())
+
+
+def get_next_revision_quote_number(
+    current_quote_no: str,
+    quotation: Quotation | None = None,
+) -> str:
+    """Return the next monotonic revision number for a formal quote."""
+    root = _quotation_number_root(current_quote_no)
+    pattern = rf"^{re.escape(root)}_R[0-9]+$"
+    existing = Quotation.objects.select_for_update().filter(
+        quote_no__iregex=pattern,
+    ).values_list("quote_no", flat=True)
+    used = set()
+    for quote_no in existing:
+        match = re.search(r"_R(\d+)$", quote_no, re.IGNORECASE)
+        if match:
+            used.add(int(match.group(1)))
+    if quotation is not None:
+        for version in quotation.versions.all():
+            snapshot = version.snapshot_json
+            if not isinstance(snapshot, dict):
+                continue
+            match = re.search(
+                r"_R(\d+)$",
+                str(snapshot.get("quote_no") or ""),
+                re.IGNORECASE,
+            )
+            if match:
+                used.add(int(match.group(1)))
+    revision = max(used, default=0) + 1
+    candidate = f"{root}_R{revision}"
+    if len(candidate) > Quotation._meta.get_field("quote_no").max_length:
+        raise FormalQuotationNumberError(
+            "formal quotation number is too long for a revision"
+        )
+    return candidate
+
+
+def _formal_quote_number_is_known(
+    quotation: Quotation,
+    requested_quote_no: str,
+) -> bool:
+    """Allow stale formal numbers from a concurrent client update."""
+    requested = (requested_quote_no or "").strip()
+    current = (quotation.quote_no or "").strip()
+    if requested == current:
+        return True
+    if requested == _quotation_number_root(current):
+        return True
+    return any(
+        isinstance(version.snapshot_json, dict)
+        and version.snapshot_json.get("quote_no") == requested
+        for version in quotation.versions.all()
+    )
+
+
 def _clear_prefetched(quotation: Quotation, related: str) -> None:
     cache = getattr(quotation, "_prefetched_objects_cache", None)
     if cache is not None:
@@ -99,10 +253,11 @@ def _clear_prefetched(quotation: Quotation, related: str) -> None:
 def build_quotation_snapshot(
     quotation: Quotation,
     items: list[QuotationItem] | None = None,
+    version_no: int | None = None,
 ) -> dict[str, Any]:
     """Full quote snapshot for version history UI."""
     line_items = items if items is not None else list(quotation.items.all())
-    return {
+    snapshot = {
         "id": quotation.id,
         "quote_no": quotation.quote_no,
         "source_quote_no": quotation.source_quote_no,
@@ -153,6 +308,9 @@ def build_quotation_snapshot(
             for item in line_items
         ],
     }
+    if version_no is not None:
+        snapshot["version_no"] = version_no
+    return snapshot
 
 
 def build_quotation(
@@ -170,7 +328,12 @@ def build_quotation(
         quote_no=data.get("quote_no") or None,
         draft_quote_no=data.get("draft_quote_no") or "",
         numbering_mode=(
-            data.get("numbering_mode") or QuotationNumberingMode.AUTO
+            data.get("numbering_mode")
+            or (
+                QuotationNumberingMode.CUSTOM
+                if data.get("quote_no")
+                else QuotationNumberingMode.AUTO
+            )
         ),
         source_quote_no=data.get("source_quote_no") or "",
         status=QuoteStatus.DRAFT,
@@ -227,20 +390,35 @@ def get_next_auto_quote_number(product_line: str, quote_date) -> str:
         f"{quote_date.day:02d}{quote_date.month:02d}"
         f"{quote_date.year % 100:02d}"
     )
-    existing = set(
-        Quotation.objects.filter(
-            quote_no__isnull=False,
-            quote_no__gt="",
-        )
-        .exclude(status=QuoteStatus.DRAFT)
-        .filter(
-            quote_no__regex=rf"^{re.escape(base)}(?:\.[0-9]+)?$",
-        ).values_list("quote_no", flat=True)
+    number_pattern = re.compile(
+        rf"^{re.escape(base)}(?:\.(\d+))?(?:_R\d+)?$",
+        re.IGNORECASE,
     )
-    if base not in existing:
+    used_sequences = set()
+
+    current_numbers = Quotation.objects.filter(
+        quote_no__isnull=False,
+        quote_no__gt="",
+    ).exclude(status=QuoteStatus.DRAFT).values_list("quote_no", flat=True)
+    historical_snapshots = QuotationVersion.objects.values_list(
+        "snapshot_json",
+        flat=True,
+    )
+    for quote_no in current_numbers:
+        match = number_pattern.match(str(quote_no))
+        if match:
+            used_sequences.add(int(match.group(1) or 0))
+    for snapshot in historical_snapshots:
+        if not isinstance(snapshot, dict):
+            continue
+        match = number_pattern.match(str(snapshot.get("quote_no") or ""))
+        if match:
+            used_sequences.add(int(match.group(1) or 0))
+
+    if not used_sequences:
         return base
     suffix = 1
-    while f"{base}.{suffix}" in existing:
+    while suffix in used_sequences:
         suffix += 1
     return f"{base}.{suffix}"
 
@@ -256,10 +434,16 @@ def formalize_quotation(
 ) -> Quotation:
     """Assign a formal number and create the first formal version."""
     with transaction.atomic():
-        locked = Quotation.objects.select_for_update().get(pk=quotation.pk)
+        locked = (
+            Quotation.objects.select_for_update()
+            .filter(pk=quotation.pk)
+            .first()
+        )
+        if locked is None:
+            raise QuotationNotFoundError("quotation not found")
         mode = numbering_mode or locked.numbering_mode
         candidate = (
-            locked.draft_quote_no
+            locked.draft_quote_no or locked.quote_no
             if draft_quote_no is None
             else draft_quote_no
         )
@@ -390,6 +574,168 @@ def replace_items(
         )
 
 
+def update_quotation(
+    quotation_id: str,
+    data: dict[str, Any],
+    *,
+    operator_email: str | None,
+    notes: str,
+) -> tuple[Quotation, QuotationVersion | None, bool]:
+    """Apply a quotation update and atomically record formal changes."""
+    with transaction.atomic():
+        locked = (
+            Quotation.objects.select_for_update()
+            .filter(pk=quotation_id)
+            .first()
+        )
+        if locked is None:
+            raise QuotationNotFoundError("quotation not found")
+
+        requested_quote_no = data.get("quote_no")
+        if (
+            is_formal_quotation(locked.status)
+            and requested_quote_no
+            and not _formal_quote_number_is_known(
+                locked,
+                requested_quote_no,
+            )
+        ):
+            raise FormalQuotationNumberError(
+                "formal quotation number cannot be replaced"
+            )
+
+        previous_status = locked.status
+        previous_content = quotation_business_signature(locked)
+        previous_formal = is_formal_quotation(previous_status)
+        target_status = data.get("status", previous_status)
+        numbering_mode = data.get(
+            "numbering_mode",
+            locked.numbering_mode,
+        )
+        if numbering_mode not in QuotationNumberingMode.values:
+            raise ValueError("invalid numbering mode")
+
+        for field in QUOTATION_BUSINESS_FIELDS:
+            if field in data:
+                setattr(locked, field, data[field])
+        locked.status = target_status
+
+        draft_candidate = data.get("draft_quote_no")
+        if draft_candidate is None:
+            draft_candidate = requested_quote_no
+        if draft_candidate is None:
+            draft_candidate = locked.draft_quote_no or locked.quote_no
+        draft_candidate = str(draft_candidate or "").strip()
+
+        if target_status == QuoteStatus.DRAFT:
+            if numbering_mode == QuotationNumberingMode.AUTO:
+                draft_candidate = get_next_auto_quote_number(
+                    data.get("product_line", locked.product_line),
+                    data.get("quote_date", locked.quote_date),
+                )
+            locked.quote_no = None
+            locked.draft_quote_no = draft_candidate
+            locked.numbering_mode = numbering_mode
+        elif not previous_formal:
+            if numbering_mode == QuotationNumberingMode.AUTO:
+                locked.quote_no = get_next_auto_quote_number(
+                    locked.product_line,
+                    locked.quote_date,
+                )
+            elif draft_candidate:
+                locked.quote_no = draft_candidate
+            else:
+                raise ValueError("quote_no is required for custom numbering")
+            locked.draft_quote_no = ""
+            locked.numbering_mode = numbering_mode
+
+        incoming_items = data.get("items")
+        if incoming_items is not None:
+            replace_items(locked, incoming_items)
+            current_items = list(locked.items.order_by("line_no", "id"))
+        else:
+            current_items = list(locked.items.order_by("line_no", "id"))
+
+        if "items" in data or "vat_rate" in data:
+            total_items = [
+                item
+                if not isinstance(item, dict)
+                else type("Item", (), item)()
+                for item in current_items
+            ]
+            totals = calculate_totals(
+                total_items,
+                Decimal(str(locked.vat_rate)),
+            )
+            for field, value in totals.items():
+                setattr(locked, field, value)
+
+        current_content = quotation_business_signature(
+            locked,
+            items=current_items,
+        )
+        content_changed = previous_content != current_content
+        current_formal = is_formal_quotation(target_status)
+        became_formal = not previous_formal and current_formal
+
+        if previous_formal and current_formal and content_changed:
+            locked.quote_no = get_next_revision_quote_number(
+                locked.quote_no,
+                quotation=locked,
+            )
+
+        locked.save()
+        version = None
+        if current_formal and (became_formal or content_changed):
+            version = create_version_snapshot(
+                locked,
+                operator_email=operator_email,
+                notes=notes,
+            )
+        return locked, version, content_changed
+
+
+def formally_generate_quotation(
+    quotation_id: str,
+    *,
+    operator_email: str | None,
+    notes: str,
+) -> Quotation:
+    """Cross the formal boundary and create its first version atomically."""
+    quotation = Quotation.objects.filter(pk=quotation_id).first()
+    if quotation is None:
+        raise QuotationNotFoundError("quotation not found")
+    return formalize_quotation(
+        quotation,
+        operator_email=operator_email,
+        notes=notes,
+    )
+
+
+def _snapshots_match(left: Any, right: Any) -> bool:
+    """Compare snapshots while accepting pre-contract historical rows."""
+    if not isinstance(left, dict) or not isinstance(right, dict):
+        return left == right
+    left_without_version = dict(left)
+    right_without_version = dict(right)
+    left_without_version.pop("version_no", None)
+    right_without_version.pop("version_no", None)
+    for snapshot in (left_without_version, right_without_version):
+        items = snapshot.get("items")
+        if isinstance(items, list):
+            snapshot["items"] = [
+                {
+                    key: value
+                    for key, value in item.items()
+                    if key != "id"
+                }
+                if isinstance(item, dict)
+                else item
+                for item in items
+            ]
+    return left_without_version == right_without_version
+
+
 def create_version_snapshot(
     quotation: Quotation,
     operator_email: str | None,
@@ -421,13 +767,14 @@ def create_version_snapshot(
         if (
             latest
             and latest.status == locked.status
-            and latest.snapshot_json == snapshot
+            and _snapshots_match(latest.snapshot_json, snapshot)
         ):
             locked.version_current = latest.version_no
             locked.save(update_fields=["version_current", "updated_at"])
             version = latest
         else:
             next_version_no = (latest.version_no + 1) if latest else 1
+            snapshot["version_no"] = next_version_no
             version = QuotationVersion.objects.create(
                 quotation=locked,
                 version_no=next_version_no,

@@ -1,11 +1,12 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from decimal import Decimal
+from unittest import skipUnless
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import close_old_connections
+from django.db import close_old_connections, connection
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -20,6 +21,7 @@ from quotation.services.quotation_service import (
     build_quotation,
     create_version_snapshot,
     formalize_quotation,
+    update_quotation,
 )
 
 
@@ -130,6 +132,46 @@ class QuotationBoundaryTests(TestCase):
         )
         self.assertEqual(generate_other.status_code, 200, generate_other.data)
         self.assertEqual(generate_other.data["quote_no"], "BDR150726.1")
+
+    def test_auto_numbering_reserves_roots_from_formal_revision_history(self):
+        payload = quote_payload("ignored-by-auto-numbering")
+        payload["numbering_mode"] = "auto"
+        created = self.api.post(
+            "/api/v1/quotation/quotations",
+            payload,
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201, created.data)
+
+        generated = self.api.post(
+            f"/api/v1/quotation/quotations/{created.data['id']}/generate",
+            {"numbering_mode": "auto"},
+            format="json",
+        )
+        self.assertEqual(generated.status_code, 200, generated.data)
+        self.assertEqual(generated.data["quote_no"], "BDR150726")
+
+        revised = self.api.put(
+            f"/api/v1/quotation/quotations/{created.data['id']}",
+            {"project_name": "Formal revision"},
+            format="json",
+        )
+        self.assertEqual(revised.status_code, 200, revised.data)
+        self.assertEqual(revised.data["quote_no"], "BDR150726_R1")
+
+        next_draft = self.api.post(
+            "/api/v1/quotation/quotations",
+            payload,
+            format="json",
+        )
+        self.assertEqual(next_draft.status_code, 201, next_draft.data)
+        next_generated = self.api.post(
+            f"/api/v1/quotation/quotations/{next_draft.data['id']}/generate",
+            {"numbering_mode": "auto"},
+            format="json",
+        )
+        self.assertEqual(next_generated.status_code, 200, next_generated.data)
+        self.assertEqual(next_generated.data["quote_no"], "BDR150726.1")
 
     def test_draft_does_not_require_a_custom_number(self):
         payload = quote_payload()
@@ -707,6 +749,10 @@ class QuotationRollbackTests(TestCase):
 class QuotationConcurrencyTests(TransactionTestCase):
     reset_sequences = True
 
+    @skipUnless(
+        connection.vendor == "postgresql",
+        "quotation locking requires PostgreSQL",
+    )
     def test_concurrent_identical_snapshots_create_only_one_version(self):
         payload = quote_payload("QA-CONCURRENT-001")
         items = payload.pop("items")
@@ -732,3 +778,48 @@ class QuotationConcurrencyTests(TransactionTestCase):
         assert version_numbers == [1] * 6
         assert quote.version_current == 1
         assert quote.versions.count() == 1
+
+    @skipUnless(
+        connection.vendor == "postgresql",
+        "formal revision locking requires PostgreSQL",
+    )
+    def test_concurrent_formal_revisions_receive_distinct_numbers(self):
+        payload = quote_payload("BDR-CONCURRENT-REVISION")
+        items = payload.pop("items")
+        quote = build_quotation(data=payload, items_data=items)
+        quote.status = "generated"
+        quote.save(update_fields=["status", "updated_at"])
+        create_version_snapshot(
+            quote,
+            operator_email="admin@example.com",
+            notes="Initial formal version",
+        )
+
+        def update_project(project_name):
+            close_old_connections()
+            try:
+                updated, version, _ = update_quotation(
+                    quote.id,
+                    {"project_name": project_name},
+                    operator_email="admin@example.com",
+                    notes="Concurrent formal revision",
+                )
+                return updated.quote_no, version.version_no
+            finally:
+                close_old_connections()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(
+                executor.map(
+                    update_project,
+                    ("Concurrent project A", "Concurrent project B"),
+                )
+            )
+
+        assert sorted(results) == [
+            ("BDR-CONCURRENT-REVISION_R1", 2),
+            ("BDR-CONCURRENT-REVISION_R2", 3),
+        ]
+        quote.refresh_from_db()
+        assert quote.version_current == 3
+        assert quote.versions.count() == 3

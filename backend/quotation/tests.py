@@ -64,6 +64,67 @@ class QuotationVersionHistoryTests(TestCase):
             "created_by_email": "alice.chen@oneprocloud.com",
         }
 
+    def _update_payload(self, quotation: Quotation, **changes) -> dict:
+        payload = {
+            "quote_no": quotation.quote_no,
+            "status": quotation.status,
+            "product_line": quotation.product_line,
+            "product_line_name": quotation.product_line_name,
+            "project_name": quotation.project_name,
+            "currency": quotation.currency,
+            "payment_term_option": quotation.payment_term_option,
+            "payment_terms": quotation.payment_terms,
+            "quote_date": str(quotation.quote_date),
+            "expire_date": str(quotation.expire_date),
+            "tax_label": quotation.tax_label,
+            "vat_rate": str(quotation.vat_rate),
+            "remarks_disclaimer": quotation.remarks_disclaimer,
+            "issuer_company_name": quotation.issuer_company_name,
+            "issuer_contact_name": quotation.issuer_contact_name,
+            "issuer_contact_email": quotation.issuer_contact_email,
+            "issuer_contact_title": quotation.issuer_contact_title,
+            "issuer_signature": quotation.issuer_signature,
+            "client_company": quotation.client_company,
+            "contact_person": quotation.contact_person,
+            "email": quotation.email,
+            "billing_company": quotation.billing_company,
+            "billing_contact": quotation.billing_contact,
+            "billing_email": quotation.billing_email,
+            "items": [
+                {
+                    "line_no": item.line_no,
+                    "type": item.type,
+                    "item_id": item.item_id,
+                    "name": item.name,
+                    "description": item.description,
+                    "qty": str(item.qty),
+                    "list_price": str(item.list_price),
+                    "discount_percent": str(item.discount_percent),
+                    "net_unit_price": str(item.net_unit_price),
+                    "extended_price": str(item.extended_price),
+                }
+                for item in quotation.items.order_by("line_no", "id")
+            ],
+        }
+        payload.update(changes)
+        return payload
+
+    def _generate(self, quotation: Quotation) -> dict:
+        user = User.objects.create_user(
+            username=f"generate-{quotation.id[:8]}",
+            email=quotation.created_by_email,
+            password="password",
+        )
+        api = APIClient()
+        api.force_authenticate(user=user)
+        response = api.post(
+            f"/api/v1/quotation/quotations/{quotation.id}/generate",
+            {},
+            format="json",
+        )
+        assert response.status_code == 200, response.data
+        return {"api": api, "data": response.data}
+
     def test_create_quotation_does_not_write_initial_version(self):
         quotation = build_quotation(
             data=self._base_quote_data(),
@@ -124,7 +185,7 @@ class QuotationVersionHistoryTests(TestCase):
         assert "snapshot" in versions[0]
         assert versions[0]["snapshot"]["status"] == "sent"
 
-    def test_first_formal_update_always_appends_initial_snapshot(self):
+    def test_draft_update_does_not_append_formal_snapshot(self):
         user = User.objects.create_user(
             username="alice-skip-version",
             email="alice.chen@oneprocloud.com",
@@ -139,7 +200,7 @@ class QuotationVersionHistoryTests(TestCase):
         response = api.put(
             f"/api/v1/quotation/quotations/{quotation.id}",
             {
-                "status": "generated",
+                "status": "draft",
                 "notes": "Quote edited",
                 "skip_version": True,
                 "project_name": quotation.project_name,
@@ -156,9 +217,8 @@ class QuotationVersionHistoryTests(TestCase):
             format="json",
         )
         assert response.status_code == 200
-        assert len(response.data["versions"]) == 1
-        assert response.data["versions"][0]["version_no"] == 1
-        assert response.data["status"] == "generated"
+        assert response.data["versions"] == []
+        assert response.data["status"] == "draft"
 
     def test_editing_draft_keeps_preview_number_and_has_no_version(self):
         user = User.objects.create_user(
@@ -272,6 +332,243 @@ class QuotationVersionHistoryTests(TestCase):
         assert latest.version_no == 1
         assert latest.notes == "Manual snapshot"
         quotation.refresh_from_db()
+        assert quotation.version_current == 1
+
+    def test_formal_generation_creates_v1_and_unchanged_save_is_idempotent(
+        self,
+    ):
+        quotation = build_quotation(
+            data=self._base_quote_data("BDR150726"),
+            items_data=[],
+        )
+        generated = self._generate(quotation)
+        assert generated["data"]["quote_no"] == "BDR150726"
+        assert generated["data"]["version_current"] == 1
+        assert generated["data"]["versions"][0]["snapshot"]["quote_no"] == (
+            "BDR150726"
+        )
+        assert generated["data"]["versions"][0]["snapshot"]["version_no"] == 1
+
+        quotation.refresh_from_db()
+        response = generated["api"].put(
+            f"/api/v1/quotation/quotations/{quotation.id}",
+            self._update_payload(quotation),
+            format="json",
+        )
+        assert response.status_code == 200, response.data
+        assert response.data["quote_no"] == "BDR150726"
+        assert response.data["version_current"] == 1
+        assert len(response.data["versions"]) == 1
+
+    def test_formal_status_change_without_content_does_not_create_version(
+        self,
+    ):
+        quotation = build_quotation(
+            data=self._base_quote_data("BDR150726"),
+            items_data=[],
+        )
+        generated = self._generate(quotation)
+        api = generated["api"]
+
+        quotation.refresh_from_db()
+        response = api.put(
+            f"/api/v1/quotation/quotations/{quotation.id}",
+            self._update_payload(quotation, status="sent"),
+            format="json",
+        )
+
+        assert response.status_code == 200, response.data
+        assert response.data["quote_no"] == "BDR150726"
+        assert response.data["version_current"] == 1
+        assert len(response.data["versions"]) == 1
+
+    def test_each_business_field_change_creates_a_revision(self):
+        quotation = build_quotation(
+            data=self._base_quote_data("BDR150726"),
+            items_data=[],
+        )
+        generated = self._generate(quotation)
+        api = generated["api"]
+        field_changes = (
+            ("product_line", "Motion"),
+            ("product_line_name", "HyperMotion"),
+            ("project_name", "Changed project"),
+            ("currency", "EUR"),
+            ("payment_term_option", "NET 30"),
+            ("payment_terms", "NET 30"),
+            ("quote_date", "2026-07-10"),
+            ("expire_date", "2026-08-09"),
+            ("tax_label", "GST"),
+            ("vat_rate", "5.00"),
+            ("remarks_disclaimer", "Changed remarks"),
+            ("issuer_company_name", "Another issuer"),
+            ("issuer_contact_name", "Bob Chen"),
+            ("issuer_contact_email", "bob@example.com"),
+            ("issuer_contact_title", "Director"),
+            ("issuer_signature", "signature"),
+            ("client_company", "Another client"),
+            ("contact_person", "Jane Tan"),
+            ("email", "jane@example.com"),
+            ("billing_company", "Another billing company"),
+            ("billing_contact", "Billing Person"),
+            ("billing_email", "billing@example.com"),
+        )
+        for revision, (field, value) in enumerate(field_changes, start=1):
+            quotation.refresh_from_db()
+            response = api.put(
+                f"/api/v1/quotation/quotations/{quotation.id}",
+                self._update_payload(quotation, **{field: value}),
+                format="json",
+            )
+            with self.subTest(field=field):
+                assert response.status_code == 200, response.data
+                assert response.data["quote_no"] == f"BDR150726_R{revision}"
+                assert response.data["version_current"] == revision + 1
+                latest = response.data["versions"][-1]
+                assert latest["version_no"] == revision + 1
+                assert latest["snapshot"]["quote_no"] == (
+                    f"BDR150726_R{revision}"
+                )
+
+    def test_line_item_changes_create_revisions(self):
+        items = [
+            {
+                "line_no": 1,
+                "type": "Software",
+                "item_id": "SKU-1",
+                "name": "First",
+                "description": "First item",
+                "qty": Decimal("1"),
+                "list_price": Decimal("100"),
+                "discount_percent": Decimal("0"),
+                "net_unit_price": Decimal("100"),
+                "extended_price": Decimal("100"),
+            },
+            {
+                "line_no": 2,
+                "type": "Other",
+                "item_id": "SKU-2",
+                "name": "Second",
+                "description": "Second item",
+                "qty": Decimal("1"),
+                "list_price": Decimal("200"),
+                "discount_percent": Decimal("0"),
+                "net_unit_price": Decimal("200"),
+                "extended_price": Decimal("200"),
+            },
+        ]
+        quotation = build_quotation(
+            data=self._base_quote_data("BDR150726"),
+            items_data=items,
+        )
+        generated = self._generate(quotation)
+        api = generated["api"]
+
+        quotation.refresh_from_db()
+        changed = self._update_payload(quotation)
+        changed["items"][0]["list_price"] = "150.00"
+        changed["items"][0]["net_unit_price"] = "150.00"
+        changed["items"][0]["extended_price"] = "150.00"
+        response = api.put(
+            f"/api/v1/quotation/quotations/{quotation.id}",
+            changed,
+            format="json",
+        )
+        assert response.status_code == 200, response.data
+        assert response.data["quote_no"] == "BDR150726_R1"
+
+        quotation.refresh_from_db()
+        added = self._update_payload(quotation)
+        added["items"].append(
+            {
+                "line_no": 3,
+                "type": "Other",
+                "item_id": "SKU-3",
+                "name": "Third",
+                "description": "Third item",
+                "qty": "1.00",
+                "list_price": "300.00",
+                "discount_percent": "0.00",
+                "net_unit_price": "300.00",
+                "extended_price": "300.00",
+            }
+        )
+        response = api.put(
+            f"/api/v1/quotation/quotations/{quotation.id}",
+            added,
+            format="json",
+        )
+        assert response.status_code == 200, response.data
+        assert response.data["quote_no"] == "BDR150726_R2"
+
+        quotation.refresh_from_db()
+        reordered = self._update_payload(quotation)
+        reordered["items"][0]["line_no"] = 2
+        reordered["items"][1]["line_no"] = 1
+        reordered["items"][2]["line_no"] = 3
+        response = api.put(
+            f"/api/v1/quotation/quotations/{quotation.id}",
+            reordered,
+            format="json",
+        )
+        assert response.status_code == 200, response.data
+        assert response.data["quote_no"] == "BDR150726_R3"
+
+        quotation.refresh_from_db()
+        removed = self._update_payload(quotation)
+        removed["items"] = removed["items"][:2]
+        response = api.put(
+            f"/api/v1/quotation/quotations/{quotation.id}",
+            removed,
+            format="json",
+        )
+        assert response.status_code == 200, response.data
+        assert response.data["quote_no"] == "BDR150726_R4"
+
+    def test_custom_and_existing_revision_numbers_keep_their_root(self):
+        custom = build_quotation(
+            data=self._base_quote_data("CUSTOM-2026"),
+            items_data=[],
+        )
+        generated = self._generate(custom)
+        custom.refresh_from_db()
+        response = generated["api"].put(
+            f"/api/v1/quotation/quotations/{custom.id}",
+            self._update_payload(custom, project_name="Custom revision"),
+            format="json",
+        )
+        assert response.status_code == 200, response.data
+        assert response.data["quote_no"] == "CUSTOM-2026_R1"
+
+        revised = build_quotation(
+            data=self._base_quote_data("BDR150726_R1"),
+            items_data=[],
+        )
+        generated = self._generate(revised)
+        revised.refresh_from_db()
+        response = generated["api"].put(
+            f"/api/v1/quotation/quotations/{revised.id}",
+            self._update_payload(revised, project_name="Second revision"),
+            format="json",
+        )
+        assert response.status_code == 200, response.data
+        assert response.data["quote_no"] == "BDR150726_R2"
+
+    def test_formal_number_cannot_be_arbitrarily_replaced(self):
+        quotation = build_quotation(
+            data=self._base_quote_data("BDR150726"),
+            items_data=[],
+        )
+        generated = self._generate(quotation)
+        quotation.refresh_from_db()
+        response = generated["api"].put(
+            f"/api/v1/quotation/quotations/{quotation.id}",
+            self._update_payload(quotation, quote_no="ARBITRARY-001"),
+            format="json",
+        )
+        assert response.status_code == 400
+        quotation.refresh_from_db()
+        assert quotation.quote_no == "BDR150726"
         assert quotation.version_current == 1
 
     def test_delete_quotation_removes_row(self):

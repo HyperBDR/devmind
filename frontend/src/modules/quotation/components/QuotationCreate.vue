@@ -52,7 +52,6 @@ import {
   dateFromInput,
   getNextAutoQuoteNumber,
   getProductLineDeletionState,
-  getNextRevisionQuoteNumber,
   inferProductLineFromQuoteNumber,
   isProductLinePrefixUnique,
   isProductLinePrefixValid,
@@ -113,6 +112,7 @@ const props = withDefaults(
     historyHasMore?: boolean
     historyLoading?: boolean
     editingQuote?: Quotation | null
+    copyQuote?: Quotation | null
     customerPrefill?: {
       company: string
       contact: string
@@ -133,6 +133,7 @@ const props = withDefaults(
     historyHasMore: false,
     historyLoading: false,
     editingQuote: null,
+    copyQuote: null,
     customerPrefill: null,
   },
 )
@@ -314,11 +315,16 @@ const quoteNoIsUnique = computed(() =>
       props.editingQuote?.id,
     ),
 )
-const editingQuoteUsesRevisions = computed(() =>
+const draftSubmittedQuoteNo = computed(() =>
+  props.editingQuote && quoteNoMode.value !== 'custom'
+    ? props.editingQuote.quoteNo
+    : quoteNo.value,
+)
+
+const editingQuoteIsFormal = computed(() =>
   Boolean(
     props.editingQuote &&
-      ['Uploaded', 'Sent', 'Accepted', 'Rejected', 'Expired', 'Cancelled']
-        .includes(props.editingQuote.status),
+      props.editingQuote.status !== 'Draft',
   ),
 )
 
@@ -368,8 +374,8 @@ const productLineSelectOptions = computed(() => [
 ])
 
 function regenerateQuoteNo(line = productLine.value, date = quoteDate.value) {
-  if (props.editingQuote && editingQuoteUsesRevisions.value) {
-    quoteNo.value = getNextRevisionQuoteNumber(props.editingQuote.quoteNo, existingQuoteNumbers.value)
+  if (props.editingQuote && editingQuoteIsFormal.value) {
+    quoteNo.value = props.editingQuote.quoteNo
     return
   }
   if (props.editingQuote && !draftLifecycleForm.value) {
@@ -604,12 +610,7 @@ function loadEditingQuoteIntoForm(editingQuote: Quotation) {
     ? editingQuote.expireDate
       || getDefaultExpireDate(dateFromInput(quoteDate.value))
     : getDefaultExpireDate(dateFromInput(todayInput))
-  if (editingQuoteUsesRevisions.value) {
-    quoteNo.value = getNextRevisionQuoteNumber(
-      editingQuote.quoteNo,
-      existingQuoteNumbers.value,
-    )
-  } else if (draftLifecycleForm.value && quoteNoMode.value === 'auto') {
+  if (draftLifecycleForm.value && quoteNoMode.value === 'auto') {
     quoteNo.value = getNextAutoQuoteNumber(
       productLine.value,
       dateFromInput(quoteDate.value),
@@ -631,6 +632,68 @@ function loadEditingQuoteIntoForm(editingQuote: Quotation) {
     name: '',
     description: item.description || item.name || '',
   }))
+}
+
+function loadCopiedQuoteIntoForm(sourceQuote: Quotation) {
+  applyingCreateDraft.value = true
+  preferDraftQuoteNo.value = false
+  quoteNoMode.value = 'auto'
+  productLine.value =
+    sourceQuote.productLine ||
+    inferProductLineFromQuoteNumber(sourceQuote.quoteNo, props.productLineOptions)
+  projectName.value = sourceQuote.projectName
+  clientCompany.value = sourceQuote.clientCompany
+  contactPerson.value = sourceQuote.contactPerson
+  email.value = sourceQuote.email
+  billingCompany.value = sourceQuote.billingCompany || sourceQuote.clientCompany
+  billingContact.value = sourceQuote.billingContact || sourceQuote.contactPerson
+  billingEmail.value = sourceQuote.billingEmail || sourceQuote.email
+  region.value = sourceQuote.region || ''
+  industry.value = sourceQuote.industry || ''
+  salesperson.value = sourceQuote.salesperson
+  currency.value = ['CNY', 'USD', 'EUR'].includes(sourceQuote.currency)
+    ? sourceQuote.currency as 'CNY' | 'USD' | 'EUR'
+    : 'USD'
+  const loadedPaymentTermOption =
+    sourceQuote.paymentTermOption || inferPaymentTermOption(sourceQuote.paymentTerms || '')
+  paymentTermOption.value = loadedPaymentTermOption
+  paymentTermsCustom.value =
+    loadedPaymentTermOption === 'Others' ? sourceQuote.paymentTerms || '' : ''
+  vatRateInput.value = formatVatRateForInput(sourceQuote.vatRate)
+  taxLabel.value = resolveTaxLabel(sourceQuote.taxLabel)
+  const todayInput = formatDateInput(new Date())
+  quoteDate.value = todayInput
+  expireDate.value = getDefaultExpireDate(dateFromInput(todayInput))
+  quoteNo.value = getNextAutoQuoteNumber(
+    productLine.value,
+    dateFromInput(todayInput),
+    existingQuoteNumbers.value,
+  )
+  remarksDisclaimer.value = sourceQuote.remarksDisclaimer ?? ''
+  issuerCompanyName.value =
+    sourceQuote.issuerCompanyName ?? DEFAULT_ISSUER_COMPANY_NAME
+  issuerContactName.value =
+    sourceQuote.issuerContactName
+    || sourceQuote.salesperson
+    || props.currentUser?.name
+    || ''
+  issuerContactEmail.value =
+    sourceQuote.issuerContactEmail || props.currentUser?.email || ''
+  issuerContactTitle.value =
+    sourceQuote.issuerContactTitle || props.currentUser?.title || ''
+  issuerSignature.value = sourceQuote.issuerSignature ?? ''
+  items.value = JSON.parse(JSON.stringify(sourceQuote.items)).map(
+    (item: QuotationLineItem) => ({
+      ...item,
+      type: item.type === 'Software' ? 'Software' : 'Other',
+      name: '',
+      description: item.description || item.name || '',
+    }),
+  )
+  window.setTimeout(() => {
+    applyingCreateDraft.value = false
+    if (quoteNoMode.value === 'auto') regenerateQuoteNo()
+  }, 0)
 }
 
 function resetCreateForm() {
@@ -762,12 +825,12 @@ function applyCreateDraft(draft: CreateQuoteDraft) {
 }
 
 function persistCreateDraftSoon() {
-  if (props.editingQuote || applyingCreateDraft.value) return
+  if (props.editingQuote || props.copyQuote || applyingCreateDraft.value) return
   const emailKey = props.currentUser?.email
   if (!emailKey) return
   window.clearTimeout(createDraftSaveTimer)
   createDraftSaveTimer = window.setTimeout(() => {
-    if (props.editingQuote || applyingCreateDraft.value) return
+    if (props.editingQuote || props.copyQuote || applyingCreateDraft.value) return
     saveCreateQuoteDraft(emailKey, buildCreateDraftPayload())
   }, 300)
 }
@@ -794,13 +857,21 @@ onBeforeUnmount(() => {
 })
 
 watch(
-  () => [props.editingQuote?.id ?? null, props.currentUser?.email ?? null] as const,
-  ([editingQuoteId]) => {
+  () => [
+    props.editingQuote?.id ?? null,
+    props.copyQuote?.id ?? null,
+    props.currentUser?.email ?? null,
+  ] as const,
+  ([editingQuoteId, copyQuoteId]) => {
     if (editingQuoteId && props.editingQuote) {
       loadEditingQuoteIntoForm(props.editingQuote)
       return
     }
-    if (!editingQuoteId) {
+    if (copyQuoteId && props.copyQuote) {
+      loadCopiedQuoteIntoForm(props.copyQuote)
+      return
+    }
+    if (!editingQuoteId && !copyQuoteId) {
       initCreateForm()
     }
   },
@@ -1053,17 +1124,17 @@ const previewQuote = computed<Quotation>(() => ({
 
 function validateForm(status: 'Draft' | 'Generated') {
   const tempErrors: Record<string, string> = {}
-  const targetQuoteNo = quoteNo.value.trim()
-  if (status === 'Generated' && !targetQuoteNo) {
+  const targetQuoteNo =
+    status === 'Draft' ? draftSubmittedQuoteNo.value : quoteNo.value
+  if (!targetQuoteNo.trim()) {
     tempErrors.quoteNo = t('quotation.pages.create.errors.quoteNoRequired')
   }
   if (
     targetQuoteNo.trim() &&
-    status === 'Generated' &&
     quoteNoMode.value === 'custom' &&
     !isQuotationNumberUnique(
       targetQuoteNo,
-      props.quotations.filter((quote) => quote.status !== 'Draft'),
+      props.quotations,
       props.editingQuote?.id,
     )
   ) {
@@ -1147,7 +1218,7 @@ function handleSubmit(status: 'Draft' | 'Generated') {
 
   const newQuote: Quotation = {
     id: props.editingQuote ? props.editingQuote.id : `quote-${Date.now()}`,
-    quoteNo: quoteNo.value,
+    quoteNo: status === 'Draft' ? draftSubmittedQuoteNo.value : quoteNo.value,
     quoteNoMode: quoteNoMode.value,
     productLine: productLine.value,
     productLineName: selectedProductLineOption.value?.label || '',
@@ -1294,7 +1365,7 @@ const itemErrorEntries = computed(() =>
                 <span class="text-xs font-bold text-dm-text-tertiary">
                   {{ t('quotation.pages.create.numberingSettings') }}
                 </span>
-                <span v-if="editingQuoteUsesRevisions" class="text-xs font-semibold text-dm-primary">
+                <span v-if="editingQuoteIsFormal" class="text-xs font-semibold text-dm-primary">
                   {{ t('quotation.pages.create.revisionAutoSuffix') }}
                 </span>
               </div>
@@ -1309,7 +1380,6 @@ const itemErrorEntries = computed(() =>
                       test-id="quote-product-line-select"
                       class-name="min-w-0 flex-1"
                       :model-value="productLine"
-                      :disabled="editingQuoteUsesRevisions && quoteNoMode === 'auto'"
                       :options="productLineSelectOptions"
                       panel-class-name="qmp-dropdown-panel--product-line"
                       @update:model-value="onProductLineSelect"
@@ -1341,6 +1411,7 @@ const itemErrorEntries = computed(() =>
                     <button
                       type="button"
                       class="cursor-pointer rounded-lg border p-2 font-bold transition"
+                      :disabled="editingQuoteIsFormal"
                       :class="
                         quoteNoMode === 'auto'
                           ? 'border-blue-500 bg-dm-primary-bg text-dm-primary'
@@ -1358,6 +1429,7 @@ const itemErrorEntries = computed(() =>
                     <button
                       type="button"
                       class="cursor-pointer rounded-lg border p-2 font-bold transition"
+                      :disabled="editingQuoteIsFormal"
                       :class="
                         quoteNoMode === 'custom'
                           ? 'border-blue-500 bg-dm-primary-bg text-dm-primary'
@@ -1455,13 +1527,15 @@ const itemErrorEntries = computed(() =>
                   v-model="quoteNo"
                   data-testid="quote-number-input"
                   type="text"
-                  :readonly="quoteNoMode === 'auto'"
+                  :readonly="quoteNoMode === 'auto' || editingQuoteIsFormal"
                   class="w-full rounded-lg border p-2 font-mono focus:border-blue-500 focus:outline-hidden"
                   :class="[
                     quoteNoIsUnique
                       ? 'border-dm-border bg-white text-dm-text'
                       : 'border-red-400 bg-red-50/30 text-red-700',
-                    quoteNoMode === 'auto' ? 'cursor-default' : '',
+                    quoteNoMode === 'auto' || editingQuoteIsFormal
+                      ? 'cursor-default'
+                      : '',
                   ]"
                 />
                 <p

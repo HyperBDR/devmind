@@ -46,13 +46,13 @@ from quotation.services.quotation_queries import (
     quotation_product_line_facets,
 )
 from quotation.services.quotation_service import (
+    FormalQuotationNumberError,
+    QuotationNotFoundError,
     build_quotation,
-    calculate_totals,
     copy_quotation,
-    create_version_snapshot,
     formalize_quotation,
     get_next_auto_quote_number,
-    replace_items,
+    update_quotation,
 )
 
 
@@ -432,149 +432,34 @@ class QuotationDetailView(APIView):
         )
         ser.is_valid(raise_exception=True)
         data = ser.validated_data
-        previous_status = quotation.status
-        previous_quote_no = quotation.quote_no
-        target_status = data.get("status", previous_status)
-        formal_generation = (
-            previous_status == QuoteStatus.DRAFT
-            and target_status != QuoteStatus.DRAFT
-        )
-        if formal_generation:
-            draft_quote_no = data.get("draft_quote_no")
-            if draft_quote_no is None:
-                draft_quote_no = data.get(
-                    "quote_no",
-                    quotation.draft_quote_no,
-                )
-            data["draft_quote_no"] = draft_quote_no or ""
-            data["quote_no"] = None
-        if (
-            previous_status == QuoteStatus.DRAFT
-            and target_status == QuoteStatus.DRAFT
-        ):
-            draft_quote_no = data.get("draft_quote_no")
-            if draft_quote_no is None and "quote_no" in data:
-                draft_quote_no = data["quote_no"]
-            mode = data.get("numbering_mode", quotation.numbering_mode)
-            if mode == "auto":
-                draft_quote_no = get_next_auto_quote_number(
-                    data.get("product_line", quotation.product_line),
-                    data.get("quote_date", quotation.quote_date),
-                )
-            data["draft_quote_no"] = draft_quote_no or ""
-            data["quote_no"] = None
         changed_fields = _quotation_changed_fields(quotation, data)
         change_details = _quotation_change_details(quotation, data)
-        if formal_generation:
-            changed_fields = list(
-                dict.fromkeys(["quote_no", "status", *changed_fields])
-            )
-        for field in QUOTATION_UPDATE_FIELDS:
-            if field in data:
-                setattr(quotation, field, data[field])
-        try:
-            with transaction.atomic():
-                if "items" in data:
-                    replace_items(quotation, data["items"])
-                    cache = getattr(
-                        quotation,
-                        "_prefetched_objects_cache",
-                        None,
-                    )
-                    if cache is not None:
-                        cache.pop("items", None)
-                if "items" in data or "vat_rate" in data:
-                    items_for_totals = (
-                        data["items"]
-                        if "items" in data
-                        else [
-                            {
-                                "type": item.type,
-                                "extended_price": item.extended_price,
-                            }
-                            for item in quotation.items.all()
-                        ]
-                    )
-                    totals = calculate_totals(
-                        [type("I", (), item)() for item in items_for_totals],
-                        Decimal(str(quotation.vat_rate)),
-                    )
-                    for k, v in totals.items():
-                        setattr(quotation, k, v)
-                status_changed = (
-                    "status" in data
-                    and data["status"] != previous_status
+        for attempt in range(3):
+            try:
+                quotation, _version, _content_changed = update_quotation(
+                    quotation_id,
+                    data,
+                    operator_email=user_display_email(request.user),
+                    notes=data.get("notes") or "Updated quotation",
                 )
-                items_changed = "items" in data
-                if formal_generation:
-                    quotation.status = QuoteStatus.DRAFT
-                quotation.save()
-                if formal_generation:
-                    for attempt in range(5):
-                        try:
-                            formalize_quotation(
-                                quotation,
-                                operator_email=user_display_email(
-                                    request.user
-                                ),
-                                notes=data.get("notes")
-                                or "Generated quotation",
-                                status=target_status,
-                                numbering_mode=data.get("numbering_mode"),
-                                draft_quote_no=data.get("draft_quote_no"),
-                            )
-                            break
-                        except IntegrityError:
-                            if attempt == 4:
-                                raise
-                skip_version = bool(data.get("skip_version"))
-                draft_edit = (
-                    previous_status == QuoteStatus.DRAFT
-                    and quotation.status == QuoteStatus.DRAFT
+                break
+            except IntegrityError:
+                if attempt == 2:
+                    return Response(
+                        {"detail": "could not allocate a quotation revision"},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+            except FormalQuotationNumberError as exc:
+                return Response(
+                    {"detail": str(exc)},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
-                revision_statuses = {
-                    QuoteStatus.UPLOADED,
-                    QuoteStatus.SENT,
-                    QuoteStatus.ACCEPTED,
-                    QuoteStatus.REJECTED,
-                    QuoteStatus.EXPIRED,
-                    QuoteStatus.CANCELLED,
-                }
-                if not formal_generation and (
-                    not skip_version
-                    and not draft_edit
-                    and (
-                        (
-                            previous_status in revision_statuses
-                            and (status_changed or items_changed)
-                        )
-                        or (
-                            status_changed
-                            and quotation.status != QuoteStatus.DRAFT
-                        )
-                    )
-                ):
-                    default_notes = (
-                        f"Updated status to {data['status']}"
-                        if status_changed
-                        else "Updated quotation content"
-                    )
-                    create_version_snapshot(
-                        quotation,
-                        operator_email=user_display_email(request.user),
-                        notes=data.get("notes") or default_notes,
-                    )
-        except IntegrityError:
-            return Response({"detail": "quote_no already exists"}, status=409)
-        except ValueError as exc:
-            return Response({"detail": str(exc)}, status=400)
+            except QuotationNotFoundError:
+                return Response(
+                    {"detail": "quotation not found"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
         quotation = self.get_object(quotation_id)
-        if formal_generation:
-            change_details.pop("draft_quote_no", None)
-            change_details["quote_no"] = {
-                "old": previous_quote_no,
-                "new": quotation.quote_no,
-            }
         set_request_audit_target(
             request,
             target_label=quotation_audit_label(quotation),

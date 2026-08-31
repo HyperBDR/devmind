@@ -670,12 +670,11 @@ export async function createQuotation(quote: Quotation): Promise<Quotation> {
 
 export async function updateQuotation(
   quote: Quotation,
-  options?: { notes?: string; skipVersion?: boolean },
+  options?: { notes?: string },
 ): Promise<Quotation> {
   const payload = {
     ...mapQuotationToCreatePayload(quote),
     ...(options?.notes ? { notes: options.notes } : {}),
-    ...(options?.skipVersion ? { skip_version: true } : {}),
   };
   const updated = await apiRequest<ApiQuotation>(`/quotations/${quote.id}`, {
     method: 'PUT',
