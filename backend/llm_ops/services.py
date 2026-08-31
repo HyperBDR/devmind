@@ -2283,6 +2283,17 @@ def current_model_price_items_for_channel_price(
     price: ChannelModelPrice,
 ) -> list[ModelPriceItem]:
     """Return current price items for the selected procurement source."""
+    source_offering_id = getattr(price.offering, "source_offering_id", None)
+    if source_offering_id:
+        rows = list(
+            ModelPriceItem.objects.filter(
+                offering_id=source_offering_id,
+                is_current=True,
+            ).order_by("dimension", "tier_start", "id")
+        )
+        if rows:
+            return selected_price_item_group(rows, model=price.model)
+        return []
     if price.price_source_id:
         rows = current_price_items_for_model(
             price.model,

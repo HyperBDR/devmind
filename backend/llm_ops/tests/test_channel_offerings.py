@@ -11,7 +11,10 @@ from llm_ops.models import (
     LLMModel,
     LLMProvider,
     MetaModel,
+    ModelSku,
+    PriceCollectionSource,
     ProcurementChannel,
+    SourceSkuOffering,
 )
 
 
@@ -155,6 +158,75 @@ class ChannelOfferingAPITests(TestCase):
         custom_price.refresh_from_db()
         self.assertEqual(default_price.settlement_ratio, Decimal("0.5"))
         self.assertEqual(custom_price.settlement_ratio, Decimal("0.7"))
+
+    def test_bulk_upsert_binds_selected_source_offering(self):
+        source = PriceCollectionSource.objects.create(
+            name="Aliyun official",
+            slug="aliyun-official-region-test",
+            provider=self.provider,
+        )
+        sku = ModelSku.objects.create(
+            provider=self.provider,
+            meta_model=self.meta_model,
+            canonical_sku_code="deepseek-v4-flash",
+            upstream_model_name="deepseek-v4-flash",
+            display_name="DeepSeek V4 Flash",
+            region="Japan",
+        )
+        source_offering = SourceSkuOffering.objects.create(
+            source=source,
+            sku=sku,
+            provider=self.provider,
+            exposed_model_name="deepseek-v4-flash",
+        )
+
+        response = self.client.post(
+            reverse("channel-model-price-bulk-upsert"),
+            {
+                "items": [
+                    {
+                        "channel": self.channel.id,
+                        "model": self.model.id,
+                        "price_source": source.id,
+                        "source_offering": source_offering.id,
+                    }
+                ]
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        price = ChannelModelPrice.objects.get()
+        self.assertEqual(
+            price.offering.source_offering_id,
+            source_offering.id,
+        )
+        self.assertEqual(response.data[0]["offering"], price.offering_id)
+        self.assertEqual(
+            response.data[0]["source_offering_id"],
+            source_offering.id,
+        )
+
+        response = self.client.post(
+            reverse("channel-model-price-bulk-upsert"),
+            {
+                "items": [
+                    {
+                        "channel": self.channel.id,
+                        "model": self.model.id,
+                        "price_source": source.id,
+                        "source_offering": source_offering.id,
+                        "settlement_ratio": "0.6",
+                    }
+                ]
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(ChannelModelPrice.objects.count(), 1)
+        price.refresh_from_db()
+        self.assertEqual(price.settlement_ratio, Decimal("0.6"))
 
     def _create_offering(self, key, name):
         response = self.client.post(

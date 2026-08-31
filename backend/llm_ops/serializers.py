@@ -43,6 +43,7 @@ from .models import (
     ResaleListingPriceRevision,
     ResalePlatform,
     ResaleWorkflowConfig,
+    SourceSkuOffering,
     UsageReconciliationRecord,
 )
 from .price_table_validation import (
@@ -731,13 +732,13 @@ class LLMModelSerializer(serializers.ModelSerializer):
         read_only=True,
         allow_null=True,
     )
-    sku_display_name = serializers.CharField(
-        source="sku.display_name",
+    sku_region = serializers.CharField(
+        source="sku.region",
         read_only=True,
         allow_null=True,
     )
-    sku_region = serializers.CharField(
-        source="sku.region",
+    sku_display_name = serializers.CharField(
+        source="sku.display_name",
         read_only=True,
         allow_null=True,
     )
@@ -859,6 +860,11 @@ class ModelPriceItemSerializer(serializers.ModelSerializer):
     )
     sku_code = serializers.CharField(
         source="sku.canonical_sku_code",
+        read_only=True,
+        allow_null=True,
+    )
+    sku_region = serializers.CharField(
+        source="sku.region",
         read_only=True,
         allow_null=True,
     )
@@ -1489,6 +1495,32 @@ class ProcurementChannelSerializer(serializers.ModelSerializer):
         return attrs
 
 
+def get_or_create_channel_offering(channel, model, source_offering):
+    """Return a stable channel offering for a selected source offer."""
+    offering, _created = ChannelOffering.objects.get_or_create(
+        channel=channel,
+        offering_key=f"source-{source_offering.id}",
+        defaults={
+            "meta_model": model.meta_model,
+            "model": model,
+            "source_offering": source_offering,
+            "display_name": (
+                source_offering.exposed_model_name
+                or source_offering.sku.display_name
+                or model.name
+            ),
+        },
+    )
+    if (
+        offering.meta_model_id != model.meta_model_id
+        or offering.source_offering_id != source_offering.id
+    ):
+        raise serializers.ValidationError(
+            {"source_offering": "Selected source offering is already in use."}
+        )
+    return offering
+
+
 class ChannelModelPriceSerializer(serializers.ModelSerializer):
     """Serializer for channel model listing and price overrides."""
 
@@ -1533,6 +1565,27 @@ class ChannelModelPriceSerializer(serializers.ModelSerializer):
         source="offering.display_name",
         read_only=True,
     )
+    source_offering = serializers.PrimaryKeyRelatedField(
+        queryset=SourceSkuOffering.objects.select_related("sku", "source"),
+        write_only=True,
+        required=False,
+        allow_null=True,
+    )
+    source_offering_id = serializers.IntegerField(
+        source="offering.source_offering_id",
+        read_only=True,
+        allow_null=True,
+    )
+    source_sku_code = serializers.CharField(
+        source="offering.source_offering.sku.canonical_sku_code",
+        read_only=True,
+        allow_null=True,
+    )
+    source_sku_region = serializers.CharField(
+        source="offering.source_offering.sku.region",
+        read_only=True,
+        allow_null=True,
+    )
 
     class Meta:
         model = ChannelModelPrice
@@ -1570,6 +1623,7 @@ class ChannelModelPriceSerializer(serializers.ModelSerializer):
             "offering",
             getattr(self.instance, "offering", None),
         )
+        source_offering = attrs.get("source_offering")
         if offering and channel and offering.channel_id != channel.id:
             raise serializers.ValidationError(
                 {"offering": "Offering must belong to the same channel."}
@@ -1586,9 +1640,49 @@ class ChannelModelPriceSerializer(serializers.ModelSerializer):
                     )
                 }
             )
+        if source_offering and model:
+            if source_offering.sku.meta_model_id != model.meta_model_id:
+                raise serializers.ValidationError(
+                    {
+                        "source_offering": (
+                            "Source offering must belong to the model "
+                            "meta model."
+                        )
+                    }
+                )
+            if offering and offering.source_offering_id not in {
+                None,
+                source_offering.id,
+            }:
+                raise serializers.ValidationError(
+                    {
+                        "source_offering": (
+                            "Source offering must match the selected channel "
+                            "offering."
+                        )
+                    }
+                )
+            price_source = attrs.get(
+                "price_source",
+                getattr(self.instance, "price_source", None),
+            )
+            if price_source and source_offering.source_id != price_source.id:
+                raise serializers.ValidationError(
+                    {
+                        "source_offering": (
+                            "Source offering must belong to the selected "
+                            "price source."
+                        )
+                    }
+                )
         if channel and model:
             unique_offering = offering
-            if unique_offering is None:
+            if unique_offering is None and source_offering is not None:
+                unique_offering = ChannelOffering.objects.filter(
+                    channel=channel,
+                    offering_key=f"source-{source_offering.id}",
+                ).first()
+            elif unique_offering is None:
                 unique_offering = ChannelOffering.objects.filter(
                     channel=channel,
                     meta_model=model.meta_model,
@@ -1614,12 +1708,26 @@ class ChannelModelPriceSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
+        source_offering = validated_data.pop("source_offering", None)
         validated_data["meta_model"] = validated_data["model"].meta_model
+        if source_offering and not validated_data.get("offering"):
+            validated_data["offering"] = get_or_create_channel_offering(
+                validated_data["channel"],
+                validated_data["model"],
+                source_offering,
+            )
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
+        source_offering = validated_data.pop("source_offering", None)
         model = validated_data.get("model", instance.model)
         validated_data["meta_model"] = model.meta_model
+        if source_offering and not validated_data.get("offering"):
+            validated_data["offering"] = get_or_create_channel_offering(
+                validated_data.get("channel", instance.channel),
+                model,
+                source_offering,
+            )
         return super().update(instance, validated_data)
 
 

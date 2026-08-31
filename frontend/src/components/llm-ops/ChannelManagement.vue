@@ -191,6 +191,7 @@
       :meta-models="metaModels"
       :models="models"
       :channel-prices="channelPrices"
+      :channel-offerings="channelOfferings"
       :channel-price-items="channelPriceItems"
       :price-items="priceItems"
       :display-currency="displayCurrency"

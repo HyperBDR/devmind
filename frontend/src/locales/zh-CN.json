@@ -1452,6 +1452,7 @@
       "selectedMetaModels": "已选 {count} 个元模型",
       "selectedModels": "已选模型",
       "selectedModelsHint": "为每个元模型指定实际使用的渠道上游。",
+      "selectRegion": "选择区域价格",
       "selectedShort": "已选 {count}",
       "showAll": "显示全部 {count}",
       "sourceCategory": {

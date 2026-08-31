@@ -15,9 +15,11 @@ export function useChannelModelSelection({
   normalizeSearch,
   providerModelDescription,
   providerPriceSummary,
+  priceItems,
   purchaseSourceLabel,
   selectedModelKeys,
   selectedProviderByModelKey,
+  selectedSourceOfferingByModelKey,
   selectedVendorKey,
   sourceCategoryBadge,
   t
@@ -123,10 +125,17 @@ export function useChannelModelSelection({
       const model = group.models.find(
         (item) => String(item.id) === String(selectedProviderId)
       )
+      const sourceOfferingOptions = sourceOfferingOptionsForModel(model)
       return {
         group,
         model: model || null,
-        options: providerOptionsForModelGroup(group)
+        options: providerOptionsForModelGroup(group),
+        sourceOfferingOptions,
+        selectedSourceOfferingId:
+          selectedSourceOfferingByModelKey.value[group.key] ||
+          (sourceOfferingOptions.length === 1
+            ? sourceOfferingOptions[0].value
+            : '')
       }
     })
   )
@@ -143,7 +152,12 @@ export function useChannelModelSelection({
   const canAddSelectedModels = computed(
     () =>
       selectedModelCount.value > 0 &&
-      selectedResolvedCount.value === selectedModelCount.value
+      selectedResolvedCount.value === selectedModelCount.value &&
+      selectedResolvedModels.value.every(
+        (item) =>
+          item.sourceOfferingOptions.length <= 1 ||
+          Boolean(item.selectedSourceOfferingId)
+      )
   )
 
   function providerOptionsForModelGroup(group) {
@@ -166,6 +180,44 @@ export function useChannelModelSelection({
           model.currency
         ].join(' ')
       }))
+  }
+
+  function sourceOfferingOptionsForModel(model) {
+    if (!model) return []
+    const rows = (priceItems?.value || priceItems || []).filter((item) => {
+      return (
+        String(item.meta_model || '') === String(model.meta_model || '') &&
+        String(item.source || '') === String(model.source || '') &&
+        item.is_current !== false &&
+        item.offering
+      )
+    })
+    const regionalRows = rows.map((item) => ({
+      item,
+      region:
+        item.sku_region ||
+        item.spec?.deployment_scope ||
+        item.spec?.region ||
+        item.region ||
+        'Global'
+    }))
+    const options = new Map()
+    regionalRows.forEach(({ item, region }) => {
+      const id = String(item.offering)
+      if (options.has(id)) return
+      const sku = item.sku_code || item.sku_display_name || ''
+      options.set(id, {
+        label:
+          [region, sku].filter(Boolean).join(' · ') ||
+          item.offering_exposed_model_name ||
+          id,
+        value: item.offering,
+        description: item.offering_exposed_model_name || ''
+      })
+    })
+    return Array.from(options.values()).sort((left, right) =>
+      left.label.localeCompare(right.label)
+    )
   }
 
   function uniqueProviderModelsForGroup(group) {
@@ -222,6 +274,7 @@ export function useChannelModelSelection({
   function clearSelectedModels() {
     selectedModelKeys.value = new Set()
     selectedProviderByModelKey.value = {}
+    selectedSourceOfferingByModelKey.value = {}
   }
 
   function ensureDefaultProvider(group) {
@@ -235,11 +288,39 @@ export function useChannelModelSelection({
     const next = { ...selectedProviderByModelKey.value }
     delete next[key]
     selectedProviderByModelKey.value = next
+    const offerings = { ...selectedSourceOfferingByModelKey.value }
+    delete offerings[key]
+    selectedSourceOfferingByModelKey.value = offerings
   }
 
   function selectBatchPriceSourceModel(key, value) {
     selectedProviderByModelKey.value = {
       ...selectedProviderByModelKey.value,
+      [key]: value
+    }
+    const group = candidateMetaModelGroups.value.find(
+      (item) => item.key === key
+    )
+    const model = group?.models?.find(
+      (item) => String(item.id) === String(value)
+    )
+    const options = sourceOfferingOptionsForModel(model)
+    if (options.length === 1) {
+      selectSourceOffering(key, options[0].value)
+    } else if (
+      !options.some(
+        (option) =>
+          String(option.value) ===
+          String(selectedSourceOfferingByModelKey.value[key] || '')
+      )
+    ) {
+      selectSourceOffering(key, '')
+    }
+  }
+
+  function selectSourceOffering(key, value) {
+    selectedSourceOfferingByModelKey.value = {
+      ...selectedSourceOfferingByModelKey.value,
       [key]: value
     }
   }
@@ -254,6 +335,7 @@ export function useChannelModelSelection({
     isModelSelected,
     providerOptionsForModelGroup,
     selectBatchPriceSourceModel,
+    selectSourceOffering,
     selectVisibleModels,
     selectedCostModel,
     selectedModelCount,

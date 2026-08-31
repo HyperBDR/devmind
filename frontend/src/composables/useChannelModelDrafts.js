@@ -63,6 +63,9 @@ export function useChannelModelDrafts({
       price_source_name: '',
       price_source_category: '',
       price_source_endpoint_url: '',
+      source_offering: '',
+      source_sku_code: '',
+      source_sku_region: '',
       is_listed: false,
       price_mode: 'channel_default',
       currency: '',
@@ -88,6 +91,9 @@ export function useChannelModelDrafts({
       price_source_name: normalized.price_source_name || '',
       price_source_category: normalized.price_source_category || '',
       price_source_endpoint_url: normalized.price_source_endpoint_url || '',
+      source_offering: normalized.source_offering || '',
+      source_sku_code: normalized.source_sku_code || '',
+      source_sku_region: normalized.source_sku_region || '',
       is_configured: Boolean(normalized.is_configured),
       is_listed: Boolean(normalized.is_listed),
       price_mode: normalized.price_mode || 'channel_default',
@@ -180,6 +186,10 @@ export function useChannelModelDrafts({
         price?.price_source_category || getModelSourceCategory(model) || '',
       price_source_endpoint_url:
         price?.price_source_endpoint_url || model.source_endpoint_url || '',
+      source_offering:
+        price?.source_offering || price?.source_offering_id || '',
+      source_sku_code: price?.source_sku_code || '',
+      source_sku_region: price?.source_sku_region || '',
       is_configured: Boolean(price?.id),
       is_listed: price?.is_listed || false,
       price_mode: priceModeFromDraft(price || {}),
@@ -276,6 +286,8 @@ export function useChannelModelDrafts({
     delete clean.price_source_name
     delete clean.price_source_category
     delete clean.price_source_endpoint_url
+    delete clean.source_sku_code
+    delete clean.source_sku_region
     return clean
   }
 
@@ -287,6 +299,7 @@ export function useChannelModelDrafts({
         channel: getChannel().id
       },
       [
+        'source_offering',
         'settlement_ratio',
         'custom_input_price_per_million',
         'custom_output_price_per_million',
