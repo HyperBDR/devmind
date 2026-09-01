@@ -6,6 +6,13 @@ const drawerSource = fs.readFileSync(
   new URL('../src/components/llm-ops/ChannelModelDrawer.vue', import.meta.url),
   'utf8'
 )
+const drawerStyles = fs.readFileSync(
+  new URL(
+    '../src/components/llm-ops/channelModelDrawer.css',
+    import.meta.url
+  ),
+  'utf8'
+)
 const workbenchSource = fs.readFileSync(
   new URL('../src/components/llm-ops/ModelWorkbenchPanel.vue', import.meta.url),
   'utf8'
@@ -43,4 +50,14 @@ test('price meaning copy explains dimensions and calculation chain in both local
     assert.ok(guide.listingPrice)
     assert.ok(guide.formula)
   }
+})
+
+test('batch price previews wrap complete price details', () => {
+  const previewRule = drawerStyles.match(
+    /\.channel-model-drawer \.batch-price-preview span,[\s\S]*?\n}\n/
+  )?.[0]
+  assert.ok(previewRule)
+  assert.match(previewRule, /whitespace-normal/)
+  assert.match(previewRule, /break-words/)
+  assert.doesNotMatch(previewRule, /truncate/)
 })

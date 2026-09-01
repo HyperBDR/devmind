@@ -127,7 +127,7 @@
 
 .channel-model-drawer .batch-price-preview span,
 .channel-model-drawer .batch-price-preview strong {
-  @apply truncate font-mono text-xs leading-5;
+  @apply whitespace-normal break-words font-mono text-xs leading-5;
 }
 
 .channel-model-drawer .batch-price-preview span {
