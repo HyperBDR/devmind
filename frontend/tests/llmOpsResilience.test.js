@@ -129,13 +129,8 @@ test('loads publishing-only data when the resale workspace opens', () => {
   ])
 })
 
-test('loads channel pricing data for the contract editor', () => {
-  assert.deepEqual(dataGroupsForSection('channels'), [
-    'channels',
-    'models',
-    'channelPricing',
-    'modelPrices'
-  ])
+test('loads channel model details only when model management opens', () => {
+  assert.deepEqual(dataGroupsForSection('channels'), ['channels'])
   assert.deepEqual(dataGroupsForChannelModelManagement(), [
     'providers',
     'metaModels',
@@ -147,6 +142,24 @@ test('loads channel pricing data for the contract editor', () => {
     llmOpsPageSource,
     /:prepare-model-management="preloadChannelModelData"/
   )
+  assert.match(
+    llmOpsDataSource,
+    /if \(group === 'channelPricing'\) return true/
+  )
+  assert.match(
+    llmOpsDataSource,
+    /function preloadChannelModelData\(channelId\)[\s\S]*group === 'channelPricing'[\s\S]*loadDataGroup[\s\S]*channelId/
+  )
+  assert.match(
+    llmOpsDataSource,
+    /refreshChannelPricingData\(options\.channelId\)/
+  )
+  const refreshChannelBlock = llmOpsDataSource.match(
+    /async function refreshChannelManagementData\(\)[\s\S]*?\n[ ]{2}}/
+  )?.[0]
+  assert.ok(refreshChannelBlock)
+  assert.doesNotMatch(refreshChannelBlock, /refreshChannelPricingData/)
+  assert.doesNotMatch(refreshChannelBlock, /refreshResaleListings/)
 })
 
 test('does not pass unused model price items to the listing status board', () => {
@@ -255,10 +268,7 @@ test('refreshes platform-bound data in every platform-aware section', () => {
 })
 
 test('keeps the persisted platform until platform options have loaded', () => {
-  assert.match(
-    resalePublishingSource,
-    /if \(!platforms\.length\) return/
-  )
+  assert.match(resalePublishingSource, /if \(!platforms\.length\) return/)
   assert.match(
     llmOpsDataSource,
     /const selectedResalePlatformId = ref\([\s\S]*readStorage\('llm_ops_resale_platform'\)/

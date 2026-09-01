@@ -1270,6 +1270,90 @@ class LLMOpsViewTests(TestCase):
             ResaleListing.objects.filter(id=channel_listing.id).exists(),
         )
 
+    def test_channel_detail_collections_filter_by_channel(self):
+        provider = LLMProvider.objects.create(
+            name="OpenAI",
+            code="openai-channel-filter",
+        )
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="GPT Filter",
+            code="gpt-filter",
+        )
+        first_channel = ProcurementChannel.objects.create(
+            name="First Channel",
+            code="first-channel",
+        )
+        second_channel = ProcurementChannel.objects.create(
+            name="Second Channel",
+            code="second-channel",
+        )
+        first_offering = ChannelOffering.objects.create(
+            channel=first_channel,
+            meta_model=model.meta_model,
+            model=model,
+            offering_key="first",
+            display_name="First offering",
+        )
+        second_offering = ChannelOffering.objects.create(
+            channel=second_channel,
+            meta_model=model.meta_model,
+            model=model,
+            offering_key="second",
+            display_name="Second offering",
+        )
+        ChannelModelPrice.objects.create(
+            channel=first_channel,
+            model=model,
+            offering=first_offering,
+        )
+        ChannelModelPrice.objects.create(
+            channel=second_channel,
+            model=model,
+            offering=second_offering,
+        )
+        price_item_kwargs = {
+            "model": model,
+            "meta_model": model.meta_model,
+            "dimension": ModelPriceItem.DIMENSION_TEXT_INPUT,
+            "billing_unit": ModelPriceItem.UNIT_PER_1M_TOKENS,
+            "currency": "USD",
+            "unit_price": "1",
+            "price_fingerprint": "channel-filter-",
+        }
+        ChannelPriceItem.objects.create(
+            channel=first_channel,
+            offering=first_offering,
+            **{**price_item_kwargs, "price_fingerprint": "channel-filter-1"},
+        )
+        ChannelPriceItem.objects.create(
+            channel=second_channel,
+            offering=second_offering,
+            **{**price_item_kwargs, "price_fingerprint": "channel-filter-2"},
+        )
+
+        for route_name in (
+            "channel-offering-list",
+            "channel-model-price-list",
+            "channel-price-item-list",
+        ):
+            response = self.client.get(
+                reverse(route_name),
+                {
+                    "channel": first_channel.id,
+                    "is_effective": "true",
+                    "page_size": 200,
+                },
+            )
+
+            self.assertEqual(response.status_code, 200)
+            results = response.data["results"]
+            self.assertTrue(results)
+            self.assertEqual(
+                {item["channel"] for item in results},
+                {first_channel.id},
+            )
+
     def test_channel_update_records_configuration_audit(self):
         channel = ProcurementChannel.objects.create(
             name="Default Channel",

@@ -122,7 +122,8 @@ export function useLLMOpsData() {
     const requestKey = [
       group,
       options?.modelId || '',
-      options?.platformId || ''
+      options?.platformId || '',
+      options?.channelId || ''
     ].join(':')
     const existingRequest = inFlightGroups.get(requestKey)
     if (existingRequest) return existingRequest
@@ -171,7 +172,7 @@ export function useLLMOpsData() {
       return
     }
     if (group === 'channelPricing') {
-      await refreshChannelPricingData()
+      await refreshChannelPricingData(options.channelId)
       return
     }
     if (group === 'modelPrices') {
@@ -195,11 +196,15 @@ export function useLLMOpsData() {
     }
   }
 
-  async function refreshChannelPricingData() {
+  async function refreshChannelPricingData(channelId = null) {
+    const params = channelId ? { channel: channelId } : {}
     const [offerings, prices, items] = await Promise.all([
-      fetchList(llmOpsApi.listChannelOfferings),
-      fetchList(llmOpsApi.listChannelModelPrices),
-      fetchList(llmOpsApi.listChannelPriceItems, { is_effective: 'true' })
+      fetchList(llmOpsApi.listChannelOfferings, params),
+      fetchList(llmOpsApi.listChannelModelPrices, params),
+      fetchList(llmOpsApi.listChannelPriceItems, {
+        ...params,
+        is_effective: 'true'
+      })
     ])
     channelOfferings.value = asArray(offerings)
     channelPrices.value = asArray(prices)
@@ -276,7 +281,7 @@ export function useLLMOpsData() {
     })
   }
 
-  function preloadChannelModelData() {
+  function preloadChannelModelData(channelId) {
     const groupValues = {
       metaModels,
       modelPrices: modelPriceItems,
@@ -285,16 +290,16 @@ export function useLLMOpsData() {
     }
     const tasks = dataGroupsForChannelModelManagement()
       .filter((group) => {
-        if (group === 'channelPricing') {
-          return (
-            !asArray(channelPrices.value).length ||
-            !asArray(channelPriceItems.value).length ||
-            !asArray(channelOfferings.value).length
-          )
-        }
+        if (group === 'channelPricing') return true
         return !asArray(groupValues[group]?.value).length
       })
-      .map((group) => loadDataGroup(group, 'channels', {}))
+      .map((group) =>
+        loadDataGroup(
+          group,
+          'channels',
+          group === 'channelPricing' ? { channelId } : {}
+        )
+      )
 
     return Promise.all(tasks)
   }
@@ -415,14 +420,10 @@ export function useLLMOpsData() {
 
   async function refreshChannelManagementData() {
     try {
-      const [channelData] = await Promise.all([
-        fetchList(llmOpsApi.listChannels),
-        refreshChannelPricingData()
-      ])
+      const channelData = await fetchList(llmOpsApi.listChannels)
       channels.value = asArray(channelData)
-      refreshResaleListings().catch((error) => {
-        showError(errorMessage(error, t('llmOps.dataErrors.refreshListings')))
-      })
+      loadedSections.clear()
+      loadedSections.add('channels')
     } catch (error) {
       showError(errorMessage(error, t('llmOps.dataErrors.refreshChannels')))
     }

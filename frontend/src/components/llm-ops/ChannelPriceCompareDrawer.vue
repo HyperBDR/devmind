@@ -187,7 +187,6 @@ import {
 import { useI18n } from 'vue-i18n'
 
 import {
-  channelOfferingForOption,
   compareChannelOptions,
   optionFreshness,
   savingsPercent
@@ -214,8 +213,7 @@ const props = defineProps({
   option: { type: Object, default: null },
   dimension: { type: String, default: 'input' },
   action: { type: String, default: 'keep' },
-  actionText: { type: String, default: '' },
-  channelOfferings: { type: Array, default: () => [] }
+  actionText: { type: String, default: '' }
 })
 
 const emit = defineEmits(['apply', 'close', 'view-detail'])
@@ -286,33 +284,15 @@ function freshnessLabel(offer) {
 }
 
 function contractContext(offer) {
-  const candidates = props.channelOfferings.filter((item) =>
-    sameId(item.channel, offer.channel_id)
-  )
-  const offering =
-    channelOfferingForOption(candidates, offer) ||
-    candidates.find((item) =>
-      sameId(item.meta_model, props.row?.meta_model_id)
-    ) ||
-    candidates.find((item) => sameId(item.model, props.row?.model_id)) ||
-    candidates[0]
   const ratio = Number(offer.settlement_ratio)
   return {
-    offering: offering?.display_name || offering?.offering_key || '-',
-    pricingRule: t(
-      'llmOps.channelPriceMatrixPanel.drawer.currentChannelRule'
-    ),
+    offering: offer.offering_name || offer.offering_key || '-',
+    pricingRule: t('llmOps.channelPriceMatrixPanel.drawer.currentChannelRule'),
     contractFx: offer.exchange_rate || '-',
     settlementRatio: Number.isFinite(ratio)
       ? `${(ratio * 100).toFixed(2)}%`
       : '-'
   }
-}
-
-function sameId(left, right) {
-  if (left === null || left === undefined) return false
-  if (right === null || right === undefined) return false
-  return String(left) === String(right)
 }
 
 function close() {

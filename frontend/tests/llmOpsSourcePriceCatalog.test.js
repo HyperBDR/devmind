@@ -157,8 +157,21 @@ test('waits for deferred channel model data before opening its drawer', () => {
   assert.match(channelManagementSource, /prepareModelManagement/)
   assert.match(
     channelManagementSource,
-    /await props\.prepareModelManagement\(\)/
+    /await props\.prepareModelManagement\(channel\.id\)/
   )
+  assert.match(
+    dataComposableSource,
+    /refreshChannelPricingData\(options\.channelId\)/
+  )
+  assert.match(
+    dataComposableSource,
+    /fetchList\(llmOpsApi\.listChannelOfferings, params\)/
+  )
+  assert.match(
+    dataComposableSource,
+    /fetchList\(llmOpsApi\.listChannelModelPrices, params\)/
+  )
+  assert.match(dataComposableSource, /is_effective: 'true'/)
   assert.match(channelManagementSource, /openingChannelId/)
 })
 

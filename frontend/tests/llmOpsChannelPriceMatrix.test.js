@@ -144,13 +144,18 @@ test('calculates savings against the currently listed channel', () => {
   assert.equal(savingsPercent({ options: row.options }, 'input'), null)
 })
 
-test('loads contract pricing data only when the matrix is opened', () => {
+test('uses summary pricing without loading full contract collections', () => {
   assert.deepEqual(dataGroupsForSection('channelMatrix'), [
     'platforms',
     'channels',
-    'channelPricing',
     'summary'
   ])
+  assert.doesNotMatch(
+    pageSource.match(/<ChannelPriceMatrixPanel[\s\S]*?\/>/)?.[0] || '',
+    /:channel-offerings=/
+  )
+  assert.doesNotMatch(matrixSource, /channelOfferings/)
+  assert.match(drawerSource, /offer\.offering_name/)
 })
 
 test('connects dimension pricing, comparison details, and model drill-down', () => {
