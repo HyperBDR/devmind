@@ -146,6 +146,14 @@ test('loads channel model details only when model management opens', () => {
     llmOpsDataSource,
     /if \(group === 'channelPricing'\) return true/
   )
+  assert.match(
+    llmOpsDataSource,
+    /function preloadChannelModelData\(channelId\)[\s\S]*group === 'channelPricing'[\s\S]*loadDataGroup[\s\S]*channelId/
+  )
+  assert.match(
+    llmOpsDataSource,
+    /refreshChannelPricingData\(options\.channelId\)/
+  )
   const refreshChannelBlock = llmOpsDataSource.match(
     /async function refreshChannelManagementData\(\)[\s\S]*?\n[ ]{2}}/
   )?.[0]

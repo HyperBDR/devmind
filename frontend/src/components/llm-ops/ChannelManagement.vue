@@ -389,7 +389,7 @@ async function openChannelModelManagement(channel) {
   openingChannelId.value = channel.id
   try {
     if (props.prepareModelManagement) {
-      await props.prepareModelManagement()
+      await props.prepareModelManagement(channel.id)
     }
     selectedChannelForModels.value = channel
   } catch (error) {
