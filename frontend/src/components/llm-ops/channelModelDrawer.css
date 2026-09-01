@@ -106,7 +106,7 @@
 }
 
 .channel-model-drawer .batch-selection-row {
-  @apply grid gap-2 px-3 py-2.5 xl:grid-cols-[minmax(7.5rem,0.7fr)_minmax(10rem,0.95fr)_minmax(8rem,0.8fr)_minmax(13rem,1.45fr)] xl:items-center;
+  @apply grid gap-2 px-3 py-2.5 xl:grid-cols-[minmax(7.5rem,0.7fr)_minmax(10rem,0.95fr)_minmax(8rem,0.8fr)] xl:items-center;
 }
 
 .channel-model-drawer .batch-model-main {
@@ -122,7 +122,7 @@
 }
 
 .channel-model-drawer .batch-price-preview {
-  @apply grid min-w-0 gap-0.5 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs;
+  @apply grid min-w-0 gap-0.5 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs xl:col-span-3;
 }
 
 .channel-model-drawer .batch-price-preview span,

@@ -113,14 +113,32 @@ export function useChannelModelPricing({
     })
   }
 
-  function batchUpstreamPriceSummary(model, sourceOfferingId = '') {
-    const rows = providerPriceSummary(model, sourceOfferingId)
+  function batchUpstreamPriceSummary(
+    model,
+    sourceOfferingId = '',
+    sourceOfferingRegion = ''
+  ) {
+    const rows = providerPriceSummary(
+      model,
+      sourceOfferingId,
+      sourceOfferingRegion
+    )
     if (!rows.length) return '-'
     return batchPriceSummaryText(rows, model)
   }
 
-  function batchPendingDraftPriceSummary(draft, model, sourceOfferingId = '') {
-    const rows = draftPricePreview(draft, model, sourceOfferingId)
+  function batchPendingDraftPriceSummary(
+    draft,
+    model,
+    sourceOfferingId = '',
+    sourceOfferingRegion = ''
+  ) {
+    const rows = draftPricePreview(
+      draft,
+      model,
+      sourceOfferingId,
+      sourceOfferingRegion
+    )
     if (!rows.length) return '-'
     return batchPriceSummaryText(
       rows.map((item) => ({
@@ -230,8 +248,16 @@ export function useChannelModelPricing({
     return false
   }
 
-  function providerPriceSummary(model, sourceOfferingId = '') {
-    const itemRows = providerPriceItemsForModel(model, sourceOfferingId)
+  function providerPriceSummary(
+    model,
+    sourceOfferingId = '',
+    sourceOfferingRegion = ''
+  ) {
+    const itemRows = providerPriceItemsForModel(
+      model,
+      sourceOfferingId,
+      sourceOfferingRegion
+    )
     if (itemRows.length) {
       return channelPriceSummaryRows(itemRows)
     }
@@ -261,14 +287,19 @@ export function useChannelModelPricing({
     ])
   }
 
-  function providerPriceItemsForModel(model, sourceOfferingId = '') {
+  function providerPriceItemsForModel(
+    model,
+    sourceOfferingId = '',
+    sourceOfferingRegion = ''
+  ) {
     if (!model) return []
     if (sourceOfferingId) {
       return sortPriceItems(
         props.priceItems.filter(
           (item) =>
             String(item.offering) === String(sourceOfferingId) &&
-            item.is_current !== false
+            item.is_current !== false &&
+            matchesSourceOfferingRegion(item, sourceOfferingRegion)
         )
       )
     }
@@ -280,6 +311,28 @@ export function useChannelModelPricing({
     )
     if (exactRows.length) return exactRows
     return fallbackPriceItemsForMetaModel(model)
+  }
+
+  function matchesSourceOfferingRegion(item, region) {
+    if (!region) return true
+    const normalizeRegion = (value) =>
+      String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/^global$/, '全球')
+    const sourceItem = (props.priceItems || []).find(
+      (candidate) =>
+        String(candidate.id || '') === String(item.base_price_item || '')
+    )
+    const itemRegion =
+      item.spec?.deployment_scope ||
+      item.spec?.region ||
+      sourceItem?.spec?.deployment_scope ||
+      sourceItem?.spec?.region ||
+      item.sku_region ||
+      item.region ||
+      'Global'
+    return normalizeRegion(itemRegion) === normalizeRegion(region)
   }
 
   function fallbackPriceItemsForMetaModel(model) {
@@ -405,7 +458,12 @@ export function useChannelModelPricing({
     return ''
   }
 
-  function draftPricePreview(draft, model, sourceOfferingId = '') {
+  function draftPricePreview(
+    draft,
+    model,
+    sourceOfferingId = '',
+    sourceOfferingRegion = ''
+  ) {
     if (!model) return []
     const targetCurrency =
       draft.currency || props.channel?.currency || model.currency
@@ -417,14 +475,16 @@ export function useChannelModelPricing({
         model,
         targetCurrency,
         Number(draft.settlement_ratio || 0),
-        sourceOfferingId
+        sourceOfferingId,
+        sourceOfferingRegion
       )
     }
     return discountPricePreview(
       model,
       targetCurrency,
       Number(props.channel?.settlement_ratio || 1),
-      sourceOfferingId
+      sourceOfferingId,
+      sourceOfferingRegion
     )
   }
 
@@ -438,9 +498,15 @@ export function useChannelModelPricing({
       .filter((item) => item.value !== '')
   }
 
-  function discountPricePreview(model, currency, ratio, sourceOfferingId = '') {
+  function discountPricePreview(
+    model,
+    currency,
+    ratio,
+    sourceOfferingId = '',
+    sourceOfferingRegion = ''
+  ) {
     if (!Number.isFinite(ratio) || ratio <= 0) return []
-    return providerPriceSummary(model, sourceOfferingId)
+    return providerPriceSummary(model, sourceOfferingId, sourceOfferingRegion)
       .map((item) => {
         const sourceCurrency = item.currency || model.currency || currency
         const baseAmount = convertAmountBetween(

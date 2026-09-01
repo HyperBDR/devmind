@@ -135,6 +135,15 @@ export function useChannelModelSelection({
           selectedSourceOfferingByModelKey.value[group.key] ||
           (sourceOfferingOptions.length === 1
             ? sourceOfferingOptions[0].value
+            : ''),
+        selectedSourceOfferingRegion:
+          sourceOfferingOptions.find(
+            (option) =>
+              String(option.value) ===
+              String(selectedSourceOfferingByModelKey.value[group.key] || '')
+          )?.region ||
+          (sourceOfferingOptions.length === 1
+            ? sourceOfferingOptions[0].region
             : '')
       }
     })
@@ -195,9 +204,9 @@ export function useChannelModelSelection({
     const regionalRows = rows.map((item) => ({
       item,
       region:
-        item.sku_region ||
         item.spec?.deployment_scope ||
         item.spec?.region ||
+        item.sku_region ||
         item.region ||
         'Global'
     }))
@@ -206,11 +215,13 @@ export function useChannelModelSelection({
       const id = String(item.offering)
       if (options.has(id)) return
       const sku = item.sku_code || item.sku_display_name || ''
+      const displayRegion = normalizeRegionLabel(region)
       options.set(id, {
         label:
-          [region, sku].filter(Boolean).join(' · ') ||
+          [displayRegion, sku].filter(Boolean).join(' · ') ||
           item.offering_exposed_model_name ||
           id,
+        region,
         value: item.offering,
         description: item.offering_exposed_model_name || ''
       })
@@ -218,6 +229,11 @@ export function useChannelModelSelection({
     return Array.from(options.values()).sort((left, right) =>
       left.label.localeCompare(right.label)
     )
+  }
+
+  function normalizeRegionLabel(value) {
+    const normalized = String(value || '').trim()
+    return normalized.toLowerCase() === 'global' ? '全球' : normalized
   }
 
   function uniqueProviderModelsForGroup(group) {
