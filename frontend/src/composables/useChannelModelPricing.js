@@ -118,6 +118,13 @@ export function useChannelModelPricing({
     sourceOfferingId = '',
     sourceOfferingRegion = ''
   ) {
+    if (
+      !sourceOfferingId &&
+      !sourceOfferingRegion &&
+      hasMultiplePriceRegions(model)
+    ) {
+      return translate('llmOps.channelModelDrawer.selectRegion')
+    }
     const rows = providerPriceSummary(
       model,
       sourceOfferingId,
@@ -133,6 +140,14 @@ export function useChannelModelPricing({
     sourceOfferingId = '',
     sourceOfferingRegion = ''
   ) {
+    if (
+      draft?.price_mode !== 'fixed' &&
+      !sourceOfferingId &&
+      !sourceOfferingRegion &&
+      hasMultiplePriceRegions(model)
+    ) {
+      return translate('llmOps.channelModelDrawer.selectRegion')
+    }
     const rows = draftPricePreview(
       draft,
       model,
@@ -311,6 +326,37 @@ export function useChannelModelPricing({
     )
     if (exactRows.length) return exactRows
     return fallbackPriceItemsForMetaModel(model)
+  }
+
+  function hasMultiplePriceRegions(model) {
+    const rows = providerPriceItemsForModel(model)
+    if (rows.length < 2) return false
+    const regions = new Set(
+      rows.map((item) => normalizePriceRegion(priceItemRegion(item)))
+    )
+    return regions.size > 1
+  }
+
+  function priceItemRegion(item) {
+    const sourceItem = (props.priceItems || []).find(
+      (candidate) =>
+        String(candidate.id || '') === String(item.base_price_item || '')
+    )
+    return (
+      item?.spec?.deployment_scope ||
+      item?.spec?.region ||
+      sourceItem?.spec?.deployment_scope ||
+      sourceItem?.spec?.region ||
+      item?.sku_region ||
+      item?.region ||
+      'Global'
+    )
+  }
+
+  function normalizePriceRegion(value) {
+    return (
+      String(value || 'Global').trim().toLowerCase() || 'global'
+    )
   }
 
   function matchesSourceOfferingRegion(item, region) {

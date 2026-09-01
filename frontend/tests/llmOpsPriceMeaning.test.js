@@ -13,6 +13,10 @@ const drawerStyles = fs.readFileSync(
   ),
   'utf8'
 )
+const pricingSource = fs.readFileSync(
+  new URL('../src/composables/useChannelModelPricing.js', import.meta.url),
+  'utf8'
+)
 const workbenchSource = fs.readFileSync(
   new URL('../src/components/llm-ops/ModelWorkbenchPanel.vue', import.meta.url),
   'utf8'
@@ -70,4 +74,13 @@ test('batch price previews occupy a full row and wrap complete details', () => {
     drawerStyles,
     /batch-price-preview[\s\S]*xl:col-span-3/
   )
+})
+
+test('batch previews require a region before combining multi-region prices', () => {
+  assert.match(pricingSource, /batchUpstreamPriceSummary\([\s\S]*?selectRegion/)
+  assert.match(
+    pricingSource,
+    /batchPendingDraftPriceSummary\([\s\S]*?selectRegion/
+  )
+  assert.match(pricingSource, /hasMultiplePriceRegions\(model\)/)
 })
