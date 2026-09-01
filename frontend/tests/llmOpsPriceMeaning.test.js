@@ -2,15 +2,14 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import test from 'node:test'
 
+import { buildPriceChangeRows } from '../src/utils/llmOpsPriceChanges.js'
+
 const drawerSource = fs.readFileSync(
   new URL('../src/components/llm-ops/ChannelModelDrawer.vue', import.meta.url),
   'utf8'
 )
 const drawerStyles = fs.readFileSync(
-  new URL(
-    '../src/components/llm-ops/channelModelDrawer.css',
-    import.meta.url
-  ),
+  new URL('../src/components/llm-ops/channelModelDrawer.css', import.meta.url),
   'utf8'
 )
 const pricingSource = fs.readFileSync(
@@ -22,10 +21,7 @@ const workbenchSource = fs.readFileSync(
   'utf8'
 )
 const guideSource = fs.readFileSync(
-  new URL(
-    '../src/components/llm-ops/PriceMeaningGuide.vue',
-    import.meta.url
-  ),
+  new URL('../src/components/llm-ops/PriceMeaningGuide.vue', import.meta.url),
   'utf8'
 )
 const zhLocale = JSON.parse(
@@ -70,10 +66,7 @@ test('batch price previews occupy a full row and wrap complete details', () => {
     drawerStyles,
     /batch-selection-row[\s\S]*xl:grid-cols-\[minmax\(7\.5rem,0\.7fr\)/
   )
-  assert.match(
-    drawerStyles,
-    /batch-price-preview[\s\S]*xl:col-span-3/
-  )
+  assert.match(drawerStyles, /batch-price-preview[\s\S]*xl:col-span-3/)
 })
 
 test('batch previews require a region before combining multi-region prices', () => {
@@ -83,4 +76,35 @@ test('batch previews require a region before combining multi-region prices', () 
     /batchPendingDraftPriceSummary\([\s\S]*?selectRegion/
   )
   assert.match(pricingSource, /hasMultiplePriceRegions\(model\)/)
+})
+
+test('includes discount version changes in the price change rows', () => {
+  const rows = buildPriceChangeRows({
+    channelVersions: [
+      {
+        id: 2,
+        version: 2,
+        model: 9,
+        model_name: 'GPT-4o',
+        offering: 3,
+        offering_name: 'API',
+        channel_name: 'Supplier',
+        discount_type: 'ratio',
+        discount_value: '0.85',
+        effective_from: '2026-09-01T00:00:00Z'
+      },
+      {
+        id: 1,
+        version: 1,
+        model: 9,
+        offering: 3,
+        discount_type: 'ratio',
+        discount_value: '0.9',
+        effective_from: '2026-08-01T00:00:00Z'
+      }
+    ]
+  })
+  assert.equal(rows[0].type, 'discount')
+  assert.equal(rows[0].previous, '0.9')
+  assert.equal(rows[0].current, '0.85')
 })

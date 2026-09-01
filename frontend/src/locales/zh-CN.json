@@ -1496,6 +1496,7 @@
         "videoOutput": "视出"
       },
       "dimension": {
+        "discount": "折扣",
         "audioInput": "音频输入",
         "audioOutput": "音频输出",
         "cacheInput": "缓存输入",
@@ -1732,6 +1733,7 @@
       "title": "价格变化看板",
       "types": {
         "channel": "渠道采购价",
+        "discount": "折扣版本",
         "listing": "平台挂售价",
         "official": "标准价格项"
       }

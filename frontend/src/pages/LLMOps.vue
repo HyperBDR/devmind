@@ -216,6 +216,7 @@
               v-else-if="activeSection === 'priceChanges'"
               :focus-model-id="operationTargetModelId"
               :channel-history="channelPriceHistory"
+              :channel-versions="channelPriceVersions"
               :listing-history="listingPriceHistory"
               :official-history="officialPriceHistory"
               :price-items="modelPriceItems"

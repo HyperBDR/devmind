@@ -43,6 +43,7 @@ export function useLLMOpsData() {
   const channelPrices = ref([])
   const channelPriceItems = ref([])
   const channelPriceHistory = ref([])
+  const channelPriceVersions = ref([])
   const modelPriceItems = ref([])
   const officialPriceHistory = ref([])
   const resalePlatforms = ref([])
@@ -294,22 +295,30 @@ export function useLLMOpsData() {
       ? { platform: selectedResalePlatformId.value }
       : {}
     const platformId = selectedResalePlatformId.value
-    const [channelHistoryData, listingHistoryData, officialHistoryData] =
-      await Promise.all([
-        fetchFirstPage(llmOpsApi.listChannelModelPriceHistory, {
-          ...modelFilter,
-          page_size: PRICE_HISTORY_PAGE_SIZE
-        }),
-        fetchFirstPage(llmOpsApi.listResaleListingPriceHistory, {
-          ...modelFilter,
-          ...platformFilter,
-          page_size: PRICE_HISTORY_PAGE_SIZE
-        }),
-        fetchFirstPage(llmOpsApi.listCollectedPriceHistory, {
-          ...modelFilter,
-          page_size: PRICE_HISTORY_PAGE_SIZE
-        })
-      ])
+    const [
+      channelHistoryData,
+      listingHistoryData,
+      officialHistoryData,
+      channelVersionData
+    ] = await Promise.all([
+      fetchFirstPage(llmOpsApi.listChannelModelPriceHistory, {
+        ...modelFilter,
+        page_size: PRICE_HISTORY_PAGE_SIZE
+      }),
+      fetchFirstPage(llmOpsApi.listResaleListingPriceHistory, {
+        ...modelFilter,
+        ...platformFilter,
+        page_size: PRICE_HISTORY_PAGE_SIZE
+      }),
+      fetchFirstPage(llmOpsApi.listCollectedPriceHistory, {
+        ...modelFilter,
+        page_size: PRICE_HISTORY_PAGE_SIZE
+      }),
+      fetchFirstPage(llmOpsApi.listChannelPriceVersions, {
+        ...modelFilter,
+        page_size: PRICE_HISTORY_PAGE_SIZE
+      })
+    ])
     if (
       requestId !== priceHistoryRequestId ||
       String(platformId || '') !== String(selectedResalePlatformId.value || '')
@@ -319,6 +328,7 @@ export function useLLMOpsData() {
     channelPriceHistory.value = asArray(channelHistoryData)
     listingPriceHistory.value = asArray(listingHistoryData)
     officialPriceHistory.value = asArray(officialHistoryData)
+    channelPriceVersions.value = asArray(channelVersionData)
   }
 
   async function refreshLight() {
@@ -480,6 +490,7 @@ export function useLLMOpsData() {
   return {
     channelOfferings,
     channelPriceHistory,
+    channelPriceVersions,
     channelPriceItems,
     channelPrices,
     channels,

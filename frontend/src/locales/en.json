@@ -1488,6 +1488,7 @@
         "videoOutput": "Video out"
       },
       "dimension": {
+        "discount": "Discount",
         "audioInput": "Audio input",
         "audioOutput": "Audio output",
         "cacheInput": "Cache input",
@@ -1724,6 +1725,7 @@
       "title": "Price Change Dashboard",
       "types": {
         "channel": "Channel procurement price",
+        "discount": "Discount version",
         "listing": "Platform listing price",
         "official": "Standard price item"
       }

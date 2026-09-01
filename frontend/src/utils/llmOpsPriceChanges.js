@@ -21,6 +21,7 @@ const listingDimensions = [
 
 export function buildPriceChangeRows({
   channelHistory = [],
+  channelVersions = [],
   listingHistory = [],
   officialHistory = [],
   priceItems = []
@@ -34,6 +35,7 @@ export function buildPriceChangeRows({
       context: (item) => item.offering_name || item.channel_name || '',
       source: (item) => item.price_source_name || item.channel_name || ''
     }),
+    ...discountHistoryRows(channelVersions),
     ...historyRows(listingHistory, {
       type: 'listing',
       dimensions: listingDimensions,
@@ -43,23 +45,61 @@ export function buildPriceChangeRows({
       source: (item) => item.platform_name || ''
     }),
     ...officialHistoryRows(officialHistory),
-    ...(officialHistory.length ? [] : priceItems.map((item) => ({
-      key: `official-${item.id}-${item.dimension}`,
-      type: 'official',
-      modelId: item.model,
-      name: item.model_name || item.meta_model_name || '',
-      context: item.offering_exposed_model_name || item.sku_display_name || '',
-      source: item.source_name || item.provider_name || '',
-      dimension: item.dimension,
-      previous: null,
-      current: item.unit_price,
-      currency: item.currency,
-      time: item.effective_from || item.updated_at || item.created_at
-    })))
+    ...(officialHistory.length
+      ? []
+      : priceItems.map((item) => ({
+          key: `official-${item.id}-${item.dimension}`,
+          type: 'official',
+          modelId: item.model,
+          name: item.model_name || item.meta_model_name || '',
+          context:
+            item.offering_exposed_model_name || item.sku_display_name || '',
+          source: item.source_name || item.provider_name || '',
+          dimension: item.dimension,
+          previous: null,
+          current: item.unit_price,
+          currency: item.currency,
+          time: item.effective_from || item.updated_at || item.created_at
+        })))
   ]
   return rows.sort(
     (left, right) => new Date(right.time || 0) - new Date(left.time || 0)
   )
+}
+
+function discountHistoryRows(items = []) {
+  const groups = new Map()
+  items.forEach((item) => {
+    const key = [item.offering, item.model].join(':')
+    const versions = groups.get(key) || []
+    versions.push(item)
+    groups.set(key, versions)
+  })
+  const rows = []
+  groups.forEach((versions) => {
+    versions.sort(
+      (left, right) => Number(right.version || 0) - Number(left.version || 0)
+    )
+    versions.forEach((item, index) => {
+      const previous = versions[index + 1]
+      rows.push({
+        key: `discount-${item.id}`,
+        type: 'discount',
+        modelId: item.model,
+        name: item.model_name || item.meta_model_name || '',
+        context: item.offering_name || item.channel_name || '',
+        source: item.channel_name || '',
+        dimension: 'discount',
+        previous: previous?.discount_value ?? null,
+        current: item.discount_value,
+        currency: item.discount_type || '',
+        time: item.effective_from || item.created_at,
+        version: item.version,
+        discountType: item.discount_type
+      })
+    })
+  })
+  return rows
 }
 
 export function officialHistoryRows(items = []) {
@@ -132,9 +172,7 @@ function historyRows(items, config) {
 
   const rows = []
   groups.forEach((versions) => {
-    versions.sort(
-      (left, right) => historyTime(right) - historyTime(left)
-    )
+    versions.sort((left, right) => historyTime(right) - historyTime(left))
     versions.forEach((item, index) => {
       const previous = versions[index + 1] || null
       config.dimensions.forEach(([dimension, field]) => {

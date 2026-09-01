@@ -107,6 +107,7 @@ import {
 
 const props = defineProps({
   channelHistory: { type: Array, default: () => [] },
+  channelVersions: { type: Array, default: () => [] },
   focusModelId: { type: [Number, String], default: null },
   listingHistory: { type: Array, default: () => [] },
   officialHistory: { type: Array, default: () => [] },
@@ -119,6 +120,7 @@ const MAX_VISIBLE_ROWS = 120
 const typeFilterOptions = computed(() => [
   { label: t('llmOps.priceChangePanel.filters.all'), value: 'all' },
   { label: t('llmOps.priceChangePanel.types.channel'), value: 'channel' },
+  { label: t('llmOps.priceChangePanel.types.discount'), value: 'discount' },
   { label: t('llmOps.priceChangePanel.types.listing'), value: 'listing' },
   { label: t('llmOps.priceChangePanel.types.official'), value: 'official' }
 ])
@@ -126,6 +128,7 @@ const typeFilterOptions = computed(() => [
 const changeRows = computed(() => {
   return buildPriceChangeRows({
     channelHistory: props.channelHistory,
+    channelVersions: props.channelVersions,
     listingHistory: props.listingHistory,
     officialHistory: props.officialHistory,
     priceItems: props.priceItems
@@ -135,9 +138,12 @@ const changeRows = computed(() => {
       row.name ||
       t('llmOps.priceChangePanel.fallback.model', { id: row.modelId }),
     type_label: t(`llmOps.priceChangePanel.types.${row.type}`),
-    tone: { channel: 'info', listing: 'warn', official: 'success' }[
-      row.type
-    ]
+    tone: {
+      channel: 'info',
+      discount: 'info',
+      listing: 'warn',
+      official: 'success'
+    }[row.type]
   }))
 })
 
@@ -188,6 +194,7 @@ const metrics = computed(() => [
 function dimensionLabel(value) {
   return (
     {
+      discount: t('llmOps.priceChangePanel.dimension.discount'),
       text_input: t('llmOps.priceChangePanel.dimension.textInput'),
       text_output: t('llmOps.priceChangePanel.dimension.textOutput'),
       cache_input: t('llmOps.priceChangePanel.dimension.cacheInput'),
@@ -211,6 +218,8 @@ function deltaText(row) {
 
 function money(value, currency) {
   if (value === null || value === undefined || value === '') return '-'
+  if (currency === 'ratio') return `${(Number(value) * 100).toFixed(2)}%`
+  if (currency === 'fixed') return Number(value).toFixed(6)
   return `${currency || ''} ${Number(value).toFixed(6)}`
 }
 
