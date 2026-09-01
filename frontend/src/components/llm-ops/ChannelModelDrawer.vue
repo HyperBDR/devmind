@@ -362,6 +362,7 @@
                         selectedProviderByModelKey[item.group.key] || ''
                       "
                       :options="item.options"
+                      class-name="batch-upstream-select"
                       :placeholder="
                         t('llmOps.channelModelDrawer.selectChannelUpstream')
                       "
@@ -383,6 +384,7 @@
                       v-if="item.sourceOfferingOptions?.length > 1"
                       :model-value="item.selectedSourceOfferingId || ''"
                       :options="item.sourceOfferingOptions"
+                      class-name="batch-region-select"
                       :placeholder="t('llmOps.channelModelDrawer.selectRegion')"
                       @change="
                         (value) => selectSourceOffering(item.group.key, value)

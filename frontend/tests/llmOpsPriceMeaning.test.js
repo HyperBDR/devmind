@@ -60,4 +60,10 @@ test('batch price previews wrap complete price details', () => {
   assert.match(previewRule, /whitespace-normal/)
   assert.match(previewRule, /break-words/)
   assert.doesNotMatch(previewRule, /truncate/)
+  assert.match(drawerSource, /class-name="batch-region-select"/)
+  assert.match(drawerSource, /class-name="batch-upstream-select"/)
+  assert.match(
+    drawerStyles,
+    /batch-selection-row[\s\S]*xl:grid-cols-\[minmax\(7\.5rem,0\.7fr\)/
+  )
 })
