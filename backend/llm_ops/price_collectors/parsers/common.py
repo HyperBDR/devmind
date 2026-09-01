@@ -158,41 +158,46 @@ def build_text_token_standard_catalog(
             continue
 
         aliases = normalize_aliases(item.get("aliases"), model_id)
-        raw_detail = {
-            "official_source_url": source_url,
-            "official_provider": provider_name,
-            "model_id": model_id,
-            "aliases": aliases,
-            "currency": currency,
-            "model_info": {
-                "provider": provider_name,
+        regional_rows = split_rows_by_region(price_rows)
+        for region, rows_for_region in regional_rows:
+            raw_detail = {
+                "official_source_url": source_url,
+                "official_provider": provider_name,
                 "model_id": model_id,
-            },
-        }
-        collected.append(
-            CollectedModelPricing(
-                model_source=provider_name,
-                model_type="文本模型",
-                source_model_type="Text",
-                name=str(item.get("display_name") or model_id),
-                model_id=model_id,
-                platform_id=model_id,
-                mode="official",
-                provider=provider_name,
-                billing_type="按量计费",
-                billing_unit=currency,
-                currency=currency,
-                unit=1000000,
-                billing_mode="pay_as_you_go",
-                price_rows=price_rows,
-                raw_price_info={
-                    "currency": currency,
-                    "unit": 1000000,
-                    "billing_mode": "pay_as_you_go",
+                "aliases": aliases,
+                "currency": currency,
+                "model_info": {
+                    "provider": provider_name,
+                    "model_id": model_id,
                 },
-                raw_detail=raw_detail,
+            }
+            if region:
+                raw_detail["sku_region"] = region
+                raw_detail["model_info"]["sku_region"] = region
+            collected.append(
+                CollectedModelPricing(
+                    model_source=provider_name,
+                    model_type="文本模型",
+                    source_model_type="Text",
+                    name=str(item.get("display_name") or model_id),
+                    model_id=model_id,
+                    platform_id=model_id,
+                    mode="official",
+                    provider=provider_name,
+                    billing_type="按量计费",
+                    billing_unit=currency,
+                    currency=currency,
+                    unit=1000000,
+                    billing_mode="pay_as_you_go",
+                    price_rows=rows_for_region,
+                    raw_price_info={
+                        "currency": currency,
+                        "unit": 1000000,
+                        "billing_mode": "pay_as_you_go",
+                    },
+                    raw_detail=raw_detail,
+                )
             )
-        )
 
     catalog = CollectedPricingCatalog(
         source_url=source_url,
@@ -208,6 +213,28 @@ def build_text_token_standard_catalog(
         notes=notes,
         raw_payload=raw_payload or {},
     )
+
+
+def split_rows_by_region(
+    rows: list[NormalizedPriceRow],
+) -> list[tuple[str, list[NormalizedPriceRow]]]:
+    """Split normalized rows into one collected model per pricing region."""
+    groups: dict[str, list[NormalizedPriceRow]] = {}
+    labels: dict[str, str] = {}
+    for row in rows:
+        values = row.values or {}
+        raw = row.raw or {}
+        region = str(
+            values.get("deployment_scope")
+            or values.get("region")
+            or raw.get("deployment_scope")
+            or raw.get("region")
+            or ""
+        ).strip()
+        key = region.casefold()
+        groups.setdefault(key, []).append(row)
+        labels.setdefault(key, region)
+    return [(labels[key], grouped) for key, grouped in groups.items()]
 
 
 def filter_models_by_codes(
