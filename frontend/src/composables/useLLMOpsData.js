@@ -29,6 +29,7 @@ export function useLLMOpsData() {
   const loading = ref(false)
   const pageError = ref('')
   const loadedSections = new Set()
+  const inFlightGroups = new Map()
   let resaleListingsRequestId = 0
   let priceHistoryRequestId = 0
   let summaryRequestId = 0
@@ -118,6 +119,25 @@ export function useLLMOpsData() {
   }
 
   async function loadDataGroup(group, section, options) {
+    const requestKey = [
+      group,
+      options?.modelId || '',
+      options?.platformId || ''
+    ].join(':')
+    const existingRequest = inFlightGroups.get(requestKey)
+    if (existingRequest) return existingRequest
+    const request = loadDataGroupInternal(group, section, options)
+    inFlightGroups.set(requestKey, request)
+    try {
+      return await request
+    } finally {
+      if (inFlightGroups.get(requestKey) === request) {
+        inFlightGroups.delete(requestKey)
+      }
+    }
+  }
+
+  async function loadDataGroupInternal(group, section, options) {
     if (group === 'sources') {
       sources.value = asArray(await fetchList(llmOpsApi.listCollectionSources))
       return
