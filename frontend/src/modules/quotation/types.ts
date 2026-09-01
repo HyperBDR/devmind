@@ -4,6 +4,7 @@
  */
 
 export type ItemType = 'Software' | 'Service' | 'Other';
+export type LineItemCurrency = 'CNY' | 'USD' | 'EUR' | 'MYR' | 'HKD';
 
 export type QuoteStatus = 'Draft' | 'Generated' | 'Uploaded' | 'Sent' | 'Accepted' | 'Rejected' | 'Expired' | 'Cancelled';
 export type QuoteProductLine = string;
@@ -20,6 +21,7 @@ export interface QuotationLineItem {
   itemId: string; // Legacy catalog reference. New quotes use manual line entry.
   name: string;
   description?: string;
+  currency?: LineItemCurrency;
   listPrice: number;
   discountPercent: number; // 0 - 100
   qty: number;
@@ -158,6 +160,7 @@ export interface Product {
   currency?: Quotation['currency'];
   category: string;
   description: string;
+  prices?: Partial<Record<LineItemCurrency, number>>;
   pricingNote?: string;
   sourceSheet?: string;
   sourceRow?: number;
@@ -171,6 +174,7 @@ export interface Service {
   currency?: Quotation['currency'];
   unit: string; // e.g., 人天, 项, 月
   description: string;
+  prices?: Partial<Record<LineItemCurrency, number>>;
   quantityRange?: string;
   quantityMin?: number;
   quantityMax?: number;

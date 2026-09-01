@@ -642,6 +642,7 @@ class QuotationItem(TimeStampedModel):
         max_length=20, choices=ItemType.choices, default=ItemType.SOFTWARE
     )
     item_id = models.CharField(max_length=120, blank=True, null=True)
+    currency = models.CharField(max_length=3, default="USD")
     name = models.CharField(max_length=255, blank=True, null=True)
     description = models.TextField(blank=True, null=True)
     qty = models.DecimalField(max_digits=18, decimal_places=2, default=0)

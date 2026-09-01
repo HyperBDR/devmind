@@ -7,6 +7,7 @@ interface ApiQuotationItem {
   line_no: number;
   type: string;
   item_id?: string | null;
+  currency?: string | null;
   name?: string | null;
   description?: string | null;
   qty: number | string;
@@ -235,6 +236,11 @@ function mapApiItem(item: ApiQuotationItem | Record<string, unknown>): Quotation
     itemId: String(row.item_id || row.itemId || ''),
     name: String(row.name || ''),
     description: String(row.description || ''),
+    currency: ['CNY', 'USD', 'EUR', 'MYR', 'HKD'].includes(
+      String(row.currency || '').toUpperCase(),
+    )
+      ? String(row.currency).toUpperCase() as QuotationLineItem['currency']
+      : undefined,
     listPrice: toNumber(row.list_price ?? row.listPrice),
     discountPercent: toNumber(row.discount_percent ?? row.discountPercent),
     qty: toNumber(row.qty),
@@ -292,8 +298,20 @@ function totalsFromItems(
 function mapApiVersion(version: ApiQuotationVersion): QuoteVersion {
   const snap = (version.snapshot || {}) as Record<string, unknown>;
   const rawItems = snap.items;
+  const snapshotCurrency = snapText(snap, 'currency', 'currency')
   const items = Array.isArray(rawItems)
-    ? rawItems.map((item) => mapApiItem(item as ApiQuotationItem))
+    ? rawItems.map((item) => {
+      const mapped = mapApiItem(item as ApiQuotationItem)
+      return {
+      ...mapped,
+      currency: mapped.currency
+        || (['CNY', 'USD', 'EUR', 'MYR', 'HKD'].includes(
+          snapshotCurrency.toUpperCase(),
+        )
+          ? snapshotCurrency.toUpperCase() as QuotationLineItem['currency']
+          : 'USD'),
+      }
+    })
     : [];
   const vatRate = snapNumber(snap, 'vat_rate', 'vatRate');
   const storedTotals = {
@@ -423,7 +441,18 @@ export function mapApiQuotation(api: ApiQuotation): Quotation {
     issuerContactTitle: api.issuer_contact_title,
     issuerSignature: api.issuer_signature ?? '',
     status: mapStatus(api.status),
-    items: (api.items || []).map(mapApiItem),
+    items: (api.items || []).map((item) => {
+      const mapped = mapApiItem(item)
+      return {
+      ...mapped,
+      currency: mapped.currency
+        || (['CNY', 'USD', 'EUR', 'MYR', 'HKD'].includes(
+          String(api.currency || '').toUpperCase(),
+        )
+          ? String(api.currency).toUpperCase() as QuotationLineItem['currency']
+          : 'USD'),
+      }
+    }),
     softwareSubtotal: toNumber(api.software_subtotal),
     othersSubtotal: toNumber(api.others_subtotal),
     subtotalBeforeVat: toNumber(api.subtotal_before_vat),
@@ -572,6 +601,7 @@ export function mapQuotationToCreatePayload(quote: Quotation) {
       line_no: index + 1,
       type: item.type,
       item_id: item.itemId || null,
+      currency: item.currency || quote.currency || 'USD',
       name: item.name || null,
       description: item.description || null,
       qty: item.qty,

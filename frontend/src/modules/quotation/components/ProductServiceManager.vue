@@ -12,9 +12,9 @@ import FormSelect from './FormSelect.vue'
 import PublicAttachmentManager from './PublicAttachmentManager.vue'
 import {
   ChevronDown,
-  FileText,
   FolderOpen,
   Pencil,
+  FileText,
   Percent,
   Plus,
   Search,
@@ -22,10 +22,19 @@ import {
   X,
 } from 'lucide-vue-next'
 
-type CatalogCurrency = 'CNY' | 'USD' | 'EUR'
+type CatalogCurrency = 'CNY' | 'USD' | 'EUR' | 'MYR' | 'HKD'
+const catalogCurrencies: CatalogCurrency[] = [
+  'CNY',
+  'USD',
+  'EUR',
+  'MYR',
+  'HKD',
+]
 
 function toCatalogCurrency(value?: string): CatalogCurrency {
-  return value === 'CNY' || value === 'EUR' ? value : 'USD'
+  return catalogCurrencies.includes(value as CatalogCurrency)
+    ? value as CatalogCurrency
+    : 'USD'
 }
 
 function buildAutoCode(prefix: string): string {
@@ -78,6 +87,7 @@ function openProductEditor(product: Product) {
   editingService.value = null
   pName.value = product.name
   pPrice.value = product.listPrice
+  pPrices.value = { ...(product.prices || {}) }
   pCurrency.value = toCatalogCurrency(product.currency)
   pCategory.value = product.category || ''
   pDesc.value = product.description || ''
@@ -89,6 +99,7 @@ function openServiceEditor(service: Service) {
   editingProduct.value = null
   sName.value = service.name
   sPrice.value = service.listPrice
+  sPrices.value = { ...(service.prices || {}) }
   sCurrency.value = toCatalogCurrency(service.currency)
   sDesc.value = service.description || ''
   isFormOpen.value = true
@@ -119,11 +130,13 @@ const pPrice = ref(0)
 const pCurrency = ref<CatalogCurrency>('USD')
 const pCategory = ref('')
 const pDesc = ref('')
+const pPrices = ref<Partial<Record<CatalogCurrency, number>>>({})
 
 const sName = ref('')
 const sPrice = ref(0)
 const sCurrency = ref<CatalogCurrency>('USD')
 const sDesc = ref('')
+const sPrices = ref<Partial<Record<CatalogCurrency, number>>>({})
 
 const dName = ref('')
 const dPercent = ref(0)
@@ -191,12 +204,18 @@ function handleCreateProduct(e: Event) {
     currency: pCurrency.value,
     category: pCategory.value,
     description: pDesc.value || t('quotation.pages.catalog.noDescription'),
+    prices: Object.fromEntries(
+      catalogCurrencies
+        .filter((code) => Number(pPrices.value[code]) > 0)
+        .map((code) => [code, Number(pPrices.value[code])]),
+    ),
   }
   if (editingProduct.value) emit('updateProduct', product)
   else emit('addProduct', product)
   pName.value = ''
   pPrice.value = 0
   pCurrency.value = 'USD'
+  pPrices.value = {}
   pDesc.value = ''
   closeForm()
 }
@@ -216,12 +235,18 @@ function handleCreateService(e: Event) {
     currency: sCurrency.value,
     unit: 'item',
     description: sDesc.value || t('quotation.pages.catalog.noServiceDetails'),
+    prices: Object.fromEntries(
+      catalogCurrencies
+        .filter((code) => Number(sPrices.value[code]) > 0)
+        .map((code) => [code, Number(sPrices.value[code])]),
+    ),
   }
   if (editingService.value) emit('updateService', service)
   else emit('addService', service)
   sName.value = ''
   sPrice.value = 0
   sCurrency.value = 'USD'
+  sPrices.value = {}
   sDesc.value = ''
   closeForm()
 }
@@ -265,6 +290,8 @@ const currencyOptions = [
   { value: 'USD', label: 'USD' },
   { value: 'CNY', label: 'CNY' },
   { value: 'EUR', label: 'EUR' },
+  { value: 'MYR', label: 'MYR' },
+  { value: 'HKD', label: 'HKD' },
 ]
 
 function formatCatalogItemPrice(
@@ -570,6 +597,12 @@ watch(
             <label class="block"><span class="mb-1 block font-semibold text-dm-text-tertiary">{{ t('quotation.pages.catalog.priceCurrency') }} *</span><FormSelect v-model="pCurrency" :options="currencyOptions" /></label>
             <label class="block"><span class="mb-1 block font-semibold text-dm-text-tertiary">{{ t('quotation.pages.catalog.productPrice') }} *</span><input v-model.number="pPrice" type="number" min="0.01" step="0.01" required class="catalog-input font-mono" /></label>
           </div>
+          <div class="grid grid-cols-3 gap-2">
+            <label v-for="code in catalogCurrencies" :key="code" class="block">
+              <span class="mb-1 block text-xs font-semibold text-dm-text-tertiary">{{ code }}</span>
+              <input v-model.number="pPrices[code]" type="number" min="0" step="0.01" class="catalog-input font-mono" />
+            </label>
+          </div>
           <label class="block"><span class="mb-1 block font-semibold text-dm-text-tertiary">{{ t('quotation.pages.catalog.productCategory') }}</span><FormSelect v-model="pCategory" :options="categoryOptions" /></label>
           <label class="block"><span class="mb-1 block font-semibold text-dm-text-tertiary">{{ t('quotation.pages.catalog.productDesc') }}</span><textarea v-model="pDesc" rows="3" :placeholder="t('quotation.pages.catalog.productDescPlaceholder')" class="catalog-input h-auto resize-y" /></label>
           <button type="submit" class="catalog-save-button">{{ t('quotation.actions.saveSoftware') }}</button>
@@ -579,6 +612,12 @@ watch(
           <div class="grid grid-cols-[120px_1fr] gap-3">
             <label class="block"><span class="mb-1 block font-semibold text-dm-text-tertiary">{{ t('quotation.pages.catalog.priceCurrency') }} *</span><FormSelect v-model="sCurrency" :options="currencyOptions" /></label>
             <label class="block"><span class="mb-1 block font-semibold text-dm-text-tertiary">{{ t('quotation.pages.catalog.servicePrice') }} *</span><input v-model.number="sPrice" type="number" min="0.01" step="0.01" required class="catalog-input font-mono" /></label>
+          </div>
+          <div class="grid grid-cols-3 gap-2">
+            <label v-for="code in catalogCurrencies" :key="code" class="block">
+              <span class="mb-1 block text-xs font-semibold text-dm-text-tertiary">{{ code }}</span>
+              <input v-model.number="sPrices[code]" type="number" min="0" step="0.01" class="catalog-input font-mono" />
+            </label>
           </div>
           <label class="block"><span class="mb-1 block font-semibold text-dm-text-tertiary">{{ t('quotation.pages.catalog.serviceDesc') }}</span><textarea v-model="sDesc" rows="3" :placeholder="t('quotation.pages.catalog.serviceDescPlaceholder')" class="catalog-input h-auto resize-y" /></label>
           <button type="submit" class="catalog-save-button">{{ t('quotation.actions.saveService') }}</button>
