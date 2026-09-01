@@ -188,7 +188,6 @@
               v-else-if="activeSection === 'channelMatrix'"
               :summary="summary"
               :channels="channels"
-              :channel-offerings="channelOfferings"
               @navigate-to-detail="openChannelListingDetail"
               @navigate-to-section="onNavigateToSection"
             />
