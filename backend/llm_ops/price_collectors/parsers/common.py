@@ -224,17 +224,24 @@ def split_rows_by_region(
     for row in rows:
         values = row.values or {}
         raw = row.raw or {}
-        region = str(
-            values.get("deployment_scope")
-            or values.get("region")
-            or raw.get("deployment_scope")
-            or raw.get("region")
-            or ""
-        ).strip()
+        region = price_row_region(values, raw)
         key = region.casefold()
         groups.setdefault(key, []).append(row)
         labels.setdefault(key, region)
     return [(labels[key], grouped) for key, grouped in groups.items()]
+
+
+def price_row_region(values: dict[str, Any], raw: dict[str, Any]) -> str:
+    """Return a geographic region without mistaking deployment scope for one."""
+    explicit = values.get("region") or raw.get("region")
+    if explicit:
+        return str(explicit).strip()
+    scope = str(
+        values.get("deployment_scope") or raw.get("deployment_scope") or ""
+    ).strip()
+    if scope.casefold() in {"siliconflow", "regional"}:
+        return ""
+    return scope
 
 
 def filter_models_by_codes(
