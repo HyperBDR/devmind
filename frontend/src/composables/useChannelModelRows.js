@@ -60,11 +60,23 @@ export function useChannelModelRows({
 
   function channelPriceItemsForModel(model, draft) {
     if (!props.channel || !draft?.id) return []
+    const sourceOfferingId = String(draft.source_offering || '')
+    const matchingOfferingIds = new Set(
+      (props.channelOfferings || [])
+        .filter(
+          (offering) =>
+            !sourceOfferingId ||
+            String(offering.source_offering || '') === sourceOfferingId
+        )
+        .map((offering) => String(offering.id))
+    )
     return sortPriceItems(
       (props.channelPriceItems || []).filter(
         (item) =>
           String(item.channel) === String(props.channel.id) &&
           String(item.model) === String(model.id) &&
+          (!matchingOfferingIds.size ||
+            matchingOfferingIds.has(String(item.offering || ''))) &&
           item.is_current !== false
       )
     )

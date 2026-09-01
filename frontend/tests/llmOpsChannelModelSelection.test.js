@@ -118,8 +118,10 @@ test('requires a regional offer when one source has multiple regions', () => {
 
   assert.equal(selection.canAddSelectedModels.value, false)
   assert.equal(
-    selection.selectedResolvedModels.value[0].sourceOfferingOptions[0].label,
-    'Global'
+    selection.selectedResolvedModels.value[0].sourceOfferingOptions.find(
+      (option) => String(option.value) === '20'
+    ).label,
+    '全球'
   )
   selection.selectSourceOffering('deepseek-v4-flash', 21)
   assert.equal(selection.canAddSelectedModels.value, true)

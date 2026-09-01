@@ -60,7 +60,6 @@
               <p class="mt-1 text-xs leading-5 text-slate-500">
                 {{ t('llmOps.channelModelDrawer.addDescription') }}
               </p>
-              <PriceMeaningGuide class="mt-3" />
             </div>
             <div class="flex flex-wrap gap-2 text-xs text-slate-500">
               <span class="summary-pill">
@@ -396,7 +395,8 @@
                           t('llmOps.channelModelDrawer.upstreamSummary', {
                             value: batchUpstreamPriceSummary(
                               item.model,
-                              item.selectedSourceOfferingId
+                              item.selectedSourceOfferingId,
+                              item.selectedSourceOfferingRegion
                             )
                           })
                         }}
@@ -407,7 +407,8 @@
                             value: batchPendingDraftPriceSummary(
                               newDraft,
                               item.model,
-                              item.selectedSourceOfferingId
+                              item.selectedSourceOfferingId,
+                              item.selectedSourceOfferingRegion
                             )
                           })
                         }}
@@ -1001,7 +1002,6 @@ import { asArray, errorMessage } from '@/utils/llmOpsPagination'
 
 import CompactSelect from './CompactSelect.vue'
 import OperationIconButton from './OperationIconButton.vue'
-import PriceMeaningGuide from './PriceMeaningGuide.vue'
 
 const props = defineProps({
   channel: {
@@ -1433,6 +1433,20 @@ function snapshotDrafts(source) {
 
 function priceTierComparisonRows(row) {
   const tiers = new Map()
+  const region = row?.draft?.source_sku_region || 'Global'
+  const normalizedRegion = normalizeRegion(region)
+  const boundSourceOfferingId =
+    row?.draft?.source_offering ||
+    (row?.priceItems || [])
+      .map((item) =>
+        (props.priceItems || []).find(
+          (candidate) =>
+            String(candidate.id || '') ===
+            String(item?.base_price_item || '')
+        )
+      )
+      .find((item) => item?.offering)?.offering ||
+    ''
   const append = (items, key) => {
     channelPriceTierRows(items).forEach((tier) => {
       const comparison = tiers.get(tier.rangeLabel) || {
@@ -1445,12 +1459,46 @@ function priceTierComparisonRows(row) {
     })
   }
 
-  append(row?.priceItems || [], 'costPrices')
   append(
-    providerPriceItemsForModel(row?.model, row?.draft?.source_offering),
+    (row?.priceItems || []).filter(
+      (item) =>
+        normalizedRegion ===
+        normalizeRegion(priceItemRegion(item, props.priceItems))
+    ),
+    'costPrices'
+  )
+  append(
+    providerPriceItemsForModel(
+      row?.model,
+      boundSourceOfferingId,
+      region
+    ),
     'upstreamPrices'
   )
   return Array.from(tiers.values())
+}
+
+function priceItemRegion(item, sourceItems = []) {
+  const sourceItem = (sourceItems || []).find(
+    (candidate) =>
+      String(candidate.id || '') === String(item?.base_price_item || '')
+  )
+  return (
+    item?.spec?.deployment_scope ||
+    item?.spec?.region ||
+    sourceItem?.spec?.deployment_scope ||
+    sourceItem?.spec?.region ||
+    item?.sku_region ||
+    item?.region ||
+    'Global'
+  )
+}
+
+function normalizeRegion(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^global$/, '全球')
 }
 
 function toggleModelDropdown() {

@@ -31,8 +31,8 @@ const enLocale = JSON.parse(
   fs.readFileSync(new URL('../src/locales/en.json', import.meta.url))
 )
 
-test('price meaning guide is available in channel configuration and workbench', () => {
-  assert.match(drawerSource, /PriceMeaningGuide/)
+test('price meaning guide is available in the workbench without using drawer space', () => {
+  assert.doesNotMatch(drawerSource, /PriceMeaningGuide/)
   assert.match(workbenchSource, /PriceMeaningGuide/)
   assert.match(guideSource, /priceMeaningGuide/)
 })
@@ -52,7 +52,7 @@ test('price meaning copy explains dimensions and calculation chain in both local
   }
 })
 
-test('batch price previews wrap complete price details', () => {
+test('batch price previews occupy a full row and wrap complete details', () => {
   const previewRule = drawerStyles.match(
     /\.channel-model-drawer \.batch-price-preview span,[\s\S]*?\n}\n/
   )?.[0]
@@ -65,5 +65,9 @@ test('batch price previews wrap complete price details', () => {
   assert.match(
     drawerStyles,
     /batch-selection-row[\s\S]*xl:grid-cols-\[minmax\(7\.5rem,0\.7fr\)/
+  )
+  assert.match(
+    drawerStyles,
+    /batch-price-preview[\s\S]*xl:col-span-3/
   )
 })
