@@ -276,6 +276,7 @@ class QuotationItemSerializer(serializers.ModelSerializer):
             "line_no",
             "type",
             "item_id",
+            "currency",
             "name",
             "description",
             "qty",
@@ -314,6 +315,10 @@ class QuotationItemWriteSerializer(serializers.Serializer):
         allow_null=True,
         allow_blank=True,
         max_length=QuotationItem._meta.get_field("item_id").max_length,
+    )
+    currency = serializers.ChoiceField(
+        choices=settings.QUOTATION_ALLOWED_CURRENCIES,
+        required=False,
     )
     name = serializers.CharField(
         required=False,

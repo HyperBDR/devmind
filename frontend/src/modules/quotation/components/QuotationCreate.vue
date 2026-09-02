@@ -16,6 +16,7 @@ import {
 } from 'lucide-vue-next'
 import type {
   ItemType,
+  LineItemCurrency,
   PaymentTermOption,
   Product,
   ProductLineOption,
@@ -33,6 +34,7 @@ import HistoryTextInput, { type NormalizedHistoryOption } from './HistoryTextInp
 import FormSelect from './FormSelect.vue'
 import {
   buildDescriptionHistoryOptions,
+  catalogPriceForCurrency,
   type LineItemDescriptionHistory,
 } from '../utils/descriptionCatalog'
 import {
@@ -230,6 +232,7 @@ const items = ref<QuotationLineItem[]>([
     itemId: '',
     name: '',
     description: '',
+    currency: 'USD',
     listPrice: 0,
     discountPercent: 0,
     qty: 1,
@@ -286,9 +289,11 @@ const paymentTerms = computed(() =>
 )
 
 const currencyOptions = computed(() => [
-  { value: 'CNY', label: t('quotation.pages.create.currencyCny') },
-  { value: 'USD', label: t('quotation.pages.create.currencyUsd') },
-  { value: 'EUR', label: t('quotation.pages.create.currencyEur') },
+  { value: 'CNY', label: 'CNY' },
+  { value: 'USD', label: 'USD' },
+  { value: 'EUR', label: 'EUR' },
+  { value: 'MYR', label: 'MYR' },
+  { value: 'HKD', label: 'HKD' },
 ])
 
 const paymentTermSelectOptions = PAYMENT_TERM_OPTIONS.map((option) => ({
@@ -592,8 +597,8 @@ function loadEditingQuoteIntoForm(editingQuote: Quotation) {
   region.value = editingQuote.region || ''
   industry.value = editingQuote.industry || ''
   salesperson.value = editingQuote.salesperson
-  currency.value = ['CNY', 'USD', 'EUR'].includes(editingQuote.currency)
-    ? editingQuote.currency as 'CNY' | 'USD' | 'EUR'
+  currency.value = ['CNY', 'USD', 'EUR', 'MYR', 'HKD'].includes(editingQuote.currency)
+    ? editingQuote.currency as LineItemCurrency
     : 'USD'
   const loadedPaymentTermOption =
     editingQuote.paymentTermOption || inferPaymentTermOption(editingQuote.paymentTerms || '')
@@ -631,6 +636,7 @@ function loadEditingQuoteIntoForm(editingQuote: Quotation) {
     type: item.type === 'Software' ? 'Software' : 'Other',
     name: '',
     description: item.description || item.name || '',
+    currency: currency.value as LineItemCurrency,
   }))
 }
 
@@ -732,6 +738,7 @@ function resetCreateForm() {
       itemId: '',
       name: '',
       description: '',
+      currency: 'USD',
       listPrice: 0,
       discountPercent: 0,
       qty: 1,
@@ -810,6 +817,10 @@ function applyCreateDraft(draft: CreateQuoteDraft) {
   items.value =
     Array.isArray(draft.items) && draft.items.length > 0
       ? JSON.parse(JSON.stringify(draft.items))
+          .map((item: QuotationLineItem) => ({
+            ...item,
+            currency: currency.value as LineItemCurrency,
+          }))
       : items.value
   if (quoteNoMode.value === 'auto') {
     quoteNo.value = getNextAutoQuoteNumber(
@@ -964,6 +975,7 @@ function handleAddLineItem() {
       itemId: '',
       name: '',
       description: '',
+      currency: currency.value as LineItemCurrency,
       listPrice: 0,
       discountPercent: 0,
       qty: 1,
@@ -971,6 +983,51 @@ function handleAddLineItem() {
       extendedPrice: 0,
     },
   ]
+}
+
+function catalogItemForLine(item: QuotationLineItem): Product | Service | undefined {
+  if (!item.itemId) return undefined
+  return item.type === 'Software'
+    ? props.products.find((product) => product.id === item.itemId)
+    : props.services.find((service) => service.id === item.itemId)
+}
+
+function listPriceForCurrency(item: QuotationLineItem, nextCurrency: LineItemCurrency) {
+  const catalogItem = catalogItemForLine(item)
+  if (!catalogItem) return undefined
+  return catalogPriceForCurrency(catalogItem, nextCurrency)
+}
+
+function hasMissingCatalogPrice(item: QuotationLineItem): boolean {
+  if (!item.itemId) return false
+  return listPriceForCurrency(
+    item,
+    (item.currency || currency.value) as LineItemCurrency,
+  ) === undefined
+}
+
+function syncQuoteCurrency(nextCurrency: LineItemCurrency) {
+  currency.value = nextCurrency
+  items.value = items.value.map((item) => {
+    const catalogPrice = listPriceForCurrency(item, nextCurrency)
+    const nextItem = {
+      ...item,
+      currency: nextCurrency,
+    }
+    if (catalogPrice !== undefined || item.itemId) {
+      nextItem.listPrice = catalogPrice ?? 0
+    }
+    const prices = calculateLineItemPrices(nextItem)
+    return {
+      ...nextItem,
+      netUnitPrice: prices.netUnitPrice,
+      extendedPrice: prices.extendedPrice,
+    }
+  })
+}
+
+function handleLineCurrencyChange(nextCurrency: LineItemCurrency) {
+  syncQuoteCurrency(nextCurrency)
 }
 
 function handleRemoveLineItem(id: string) {
@@ -1027,14 +1084,26 @@ function handleDescriptionSelect(
   const listPrice = Number(
     (option.meta as {
       listPrice?: number
-      currency?: 'CNY' | 'USD' | 'EUR'
+      currency?: LineItemCurrency
     } | undefined)?.listPrice,
   )
   const optionCurrency = (option.meta as {
-    currency?: 'CNY' | 'USD' | 'EUR'
+    currency?: LineItemCurrency
   } | undefined)?.currency
+  const optionItemId = (option.meta as { itemId?: string } | undefined)?.itemId
+  const optionSource = (option.meta as { source?: string } | undefined)?.source
   const patch: Partial<QuotationLineItem> = {
     description: option.value,
+  }
+  if (optionItemId) patch.itemId = optionItemId
+  if (optionSource === 'catalog' && optionItemId) {
+    const catalogItem = item.type === 'Software'
+      ? props.products.find((product) => product.id === optionItemId)
+      : props.services.find((service) => service.id === optionItemId)
+    const catalogPrice = catalogItem
+      ? catalogPriceForCurrency(catalogItem, currency.value as LineItemCurrency)
+      : undefined
+    patch.listPrice = catalogPrice ?? 0
   }
   if (
     Number.isFinite(listPrice)
@@ -1846,12 +1915,12 @@ const itemErrorEntries = computed(() =>
               <label class="mb-1 block font-semibold text-dm-text-tertiary">
                 {{ t('quotation.pages.create.currency') }}
               </label>
-              <FormSelect
-                test-id="currency-select"
-                :model-value="currency"
-                :options="currencyOptions"
-                @update:model-value="(value) => (currency = value as 'CNY' | 'USD' | 'EUR')"
-              />
+              <div
+                data-testid="currency-summary"
+                class="rounded-lg border border-dm-border bg-slate-100 p-2 font-mono text-dm-text"
+              >
+                {{ currency || 'USD' }}
+              </div>
             </div>
           </div>
 
@@ -1893,7 +1962,7 @@ const itemErrorEntries = computed(() =>
                   <Trash2 class="h-4 w-4" />
                 </button>
 
-                <div class="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2 2xl:grid-cols-4">
+                <div class="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2 2xl:grid-cols-5">
                   <div>
                     <label class="mb-1 block font-semibold text-dm-text-tertiary">
                       {{ t('quotation.pages.create.lineItemCategory') }}
@@ -1909,6 +1978,21 @@ const itemErrorEntries = computed(() =>
                         (nextType) => handleRowChange(item.id, { type: nextType as ItemType })
                       "
                     />
+                  </div>
+
+                  <div>
+                    <label class="mb-1 block font-semibold text-dm-text-tertiary">
+                      {{ t('quotation.pages.create.lineItemCurrency') }}
+                    </label>
+                    <FormSelect
+                      test-id="line-item-currency-select"
+                      :model-value="item.currency || currency"
+                      :options="currencyOptions"
+                      @update:model-value="handleLineCurrencyChange($event as LineItemCurrency)"
+                    />
+                    <p class="mt-1 text-xs text-dm-text-tertiary">
+                      {{ t('quotation.pages.create.lineItemCurrencyHint') }}
+                    </p>
                   </div>
 
                   <div>
@@ -1933,7 +2017,7 @@ const itemErrorEntries = computed(() =>
                     </p>
                   </div>
 
-                  <div class="sm:col-span-2">
+                  <div class="sm:col-span-2 2xl:col-span-3">
                     <label class="mb-1 block font-semibold text-dm-text-tertiary">
                       {{ t('quotation.pages.create.lineItemDescription') }}
                     </label>
@@ -1994,22 +2078,41 @@ const itemErrorEntries = computed(() =>
 
                   <div>
                     <label class="mb-1 block font-semibold text-dm-text-tertiary">
-                      {{ t('quotation.pages.create.lineItemListPrice') }}
+                      {{
+                        t('quotation.pages.create.lineItemListPriceCurrency', {
+                          currency: item.currency || currency,
+                        })
+                      }}
                     </label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      :value="item.listPrice || ''"
-                      placeholder="0"
-                      class="w-full rounded-lg border border-dm-border bg-white p-2 font-mono text-dm-text focus:border-blue-500 focus:outline-hidden"
-                      @input="
-                        (e) =>
-                          handleRowChange(item.id, {
-                            listPrice: parseFloat((e.target as HTMLInputElement).value) || 0,
-                          })
-                      "
-                    />
+                    <div class="relative">
+                      <span class="pointer-events-none absolute inset-y-0 left-3 flex items-center font-mono text-dm-text-tertiary">
+                        {{ getCurrencySymbol(item.currency || currency) }}
+                      </span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        :value="item.listPrice || ''"
+                        placeholder="0.00"
+                        class="w-full rounded-lg border border-dm-border bg-white py-2 pl-8 pr-2 font-mono text-dm-text focus:border-blue-500 focus:outline-hidden"
+                        @input="
+                          (e) =>
+                            handleRowChange(item.id, {
+                              listPrice: parseFloat((e.target as HTMLInputElement).value) || 0,
+                            })
+                        "
+                      />
+                    </div>
+                    <p
+                      v-if="hasMissingCatalogPrice(item)"
+                      class="mt-1 text-xs text-amber-600"
+                    >
+                      {{
+                        t('quotation.pages.create.lineItemMissingCatalogPrice', {
+                          currency: item.currency || currency,
+                        })
+                      }}
+                    </p>
                   </div>
 
                   <div>
@@ -2059,12 +2162,12 @@ const itemErrorEntries = computed(() =>
                       {{ t('quotation.pages.create.lineItemSubtotal') }}
                     </span>
                     <p class="pt-2 font-mono text-sm font-bold text-dm-text">
-                      {{ currencySymbol }}{{ item.extendedPrice.toLocaleString() }}
+                      {{ getCurrencySymbol(item.currency || currency) }}{{ item.extendedPrice.toLocaleString() }}
                     </p>
                     <p class="font-mono text-xs text-emerald-500">
                       {{
                         t('quotation.pages.create.lineItemNetUnit', {
-                          amount: `${currencySymbol}${item.netUnitPrice.toLocaleString()}`,
+                          amount: `${getCurrencySymbol(item.currency || currency)}${item.netUnitPrice.toLocaleString()}`,
                         })
                       }}
                     </p>
@@ -2120,9 +2223,9 @@ const itemErrorEntries = computed(() =>
                 </span>
               </div>
               <div
-                class="grid grid-cols-1 items-end gap-3 rounded-lg border border-dm-border-light bg-[#fafafa]/70 p-3 sm:grid-cols-[1fr_auto]"
+                class="grid grid-cols-1 items-end gap-3 rounded-lg border border-dm-border-light bg-[#fafafa]/70 p-3 2xl:grid-cols-[minmax(0,1fr)_220px]"
               >
-                <div class="space-y-3">
+                <div class="min-w-0 space-y-3">
                   <div>
                     <label class="mb-1 block font-semibold text-dm-text-tertiary">
                       {{ t('quotation.pages.create.taxLabel') }}
@@ -2162,8 +2265,8 @@ const itemErrorEntries = computed(() =>
                     </p>
                   </div>
                 </div>
-                <div class="text-right">
-                  <span class="block text-xs font-semibold text-dm-text-tertiary">
+                <div class="min-w-0 w-full text-right 2xl:w-[220px]">
+                  <span class="block truncate text-xs font-semibold text-dm-text-tertiary">
                     {{
                       t('quotation.pages.create.taxAmount', {
                         taxLabel: resolveTaxLabel(taxLabel),

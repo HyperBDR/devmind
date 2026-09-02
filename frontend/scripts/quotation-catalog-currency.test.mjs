@@ -30,13 +30,17 @@ const english = JSON.parse(
   ),
 )
 
-test('catalog prices store an explicit CNY, USD, or EUR currency', () => {
+test('catalog prices support the five selectable currencies', () => {
   assert.match(manager, /const pCurrency = ref<CatalogCurrency>\('USD'\)/)
   assert.match(manager, /const sCurrency = ref<CatalogCurrency>\('USD'\)/)
   assert.match(manager, /currency: pCurrency\.value/)
   assert.match(manager, /currency: sCurrency\.value/)
   assert.match(manager, /\{ value: 'CNY', label: 'CNY' \}/)
   assert.match(manager, /\{ value: 'EUR', label: 'EUR' \}/)
+  assert.match(manager, /\{ value: 'MYR', label: 'MYR' \}/)
+  assert.match(manager, /\{ value: 'HKD', label: 'HKD' \}/)
+  assert.match(quotationCreate, /\{ value: 'MYR', label: 'MYR' \}/)
+  assert.match(quotationCreate, /\{ value: 'HKD', label: 'HKD' \}/)
   assert.equal(english.quotation.pages.catalog.productPrice, 'List price')
   assert.equal(english.quotation.pages.catalog.priceCurrency, 'Currency')
 })

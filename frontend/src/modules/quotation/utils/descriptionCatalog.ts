@@ -1,5 +1,6 @@
 import type {
   ItemType,
+  LineItemCurrency,
   Product,
   Quotation,
   QuotationLineItem,
@@ -11,10 +12,24 @@ export interface DescriptionHistoryOption {
   label?: string
   key: string
   meta?: {
+    itemId?: string
+    itemName?: string
     listPrice?: number
+    prices?: Partial<Record<LineItemCurrency, number>>
     currency?: Quotation['currency']
     source: 'catalog' | 'quote'
   }
+}
+
+export function catalogPriceForCurrency(
+  item: Pick<Product | Service, 'listPrice' | 'currency' | 'prices'>,
+  currency: LineItemCurrency,
+): number | undefined {
+  const prices = item.prices as Record<string, number> | undefined
+  const value = prices?.[currency] ?? prices?.[currency.toLowerCase()]
+  if (value !== undefined) return Number(value)
+  if ((item.currency || 'USD') === currency) return Number(item.listPrice)
+  return undefined
 }
 
 export interface LineItemDescriptionHistory {
@@ -73,30 +88,36 @@ export function buildDescriptionHistoryOptions(
 
   if (isSoftwareType(itemType)) {
     products.forEach((product) => {
-      if ((product.currency || 'USD') !== currency) return
       const text = descriptionText(product)
       if (!text) return
-      const itemCurrency = product.currency || 'USD'
+      const itemCurrency = (currency || product.currency || 'USD') as LineItemCurrency
+      const listPrice = catalogPriceForCurrency(product, itemCurrency)
       pushOption(text, {
-        listPrice: product.listPrice,
+        itemId: product.id,
+        itemName: product.name,
+        listPrice,
+        prices: product.prices,
         currency: itemCurrency,
         source: 'catalog',
-      }, product.listPrice
-        ? `${itemCurrency} ${product.listPrice.toLocaleString('en-US')}`
+      }, listPrice
+        ? `${itemCurrency} ${listPrice.toLocaleString('en-US')}`
         : product.pricingNote)
     })
   } else {
     services.forEach((service) => {
-      if ((service.currency || 'USD') !== currency) return
       const text = descriptionText(service)
       if (!text) return
-      const itemCurrency = service.currency || 'USD'
+      const itemCurrency = (currency || service.currency || 'USD') as LineItemCurrency
+      const listPrice = catalogPriceForCurrency(service, itemCurrency)
       pushOption(text, {
-        listPrice: service.listPrice,
+        itemId: service.id,
+        itemName: service.name,
+        listPrice,
+        prices: service.prices,
         currency: itemCurrency,
         source: 'catalog',
-      }, service.listPrice
-        ? `${itemCurrency} ${service.listPrice.toLocaleString('en-US')}`
+      }, listPrice
+        ? `${itemCurrency} ${listPrice.toLocaleString('en-US')}`
         : service.pricingNote)
     })
   }
@@ -203,6 +224,7 @@ export function upsertDescriptionsToCatalog(
         code: buildAutoCode('SW'),
         listPrice: Number(item.listPrice) || 0,
         currency,
+        prices: { [currency as LineItemCurrency]: Number(item.listPrice) || 0 },
         category,
         description: text,
       })
@@ -218,6 +240,7 @@ export function upsertDescriptionsToCatalog(
       code: buildAutoCode('OT'),
       listPrice: Number(item.listPrice) || 0,
       currency,
+      prices: { [currency as LineItemCurrency]: Number(item.listPrice) || 0 },
       unit: 'item',
       description: text,
     })
