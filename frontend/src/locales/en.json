@@ -2974,20 +2974,20 @@
       }
     },
     "channelManagement": {
-      "title": "Forwarding Channel Configuration",
-      "description": "Maintain channel details, then manage upstream providers, cost rules, and forwarding capacity from model management.",
       "searchPlaceholder": "Search channel name, code, or URL",
       "createChannel": "New channel",
-      "apiConfigured": "API configured",
-      "apiNotConfigured": "API not configured",
-      "currency": "Currency {currency}",
-      "discount": "Discount {ratio}",
+      "apiStatus": "API",
+      "apiConfigured": "Connected",
+      "apiNotConfigured": "Not connected",
+      "settlementCurrency": "Settlement currency",
+      "defaultDiscount": "Default discount",
+      "contractExchange": "Contract FX",
       "enabled": "Enabled",
       "configured": "Configured",
       "empty": "No channel configurations match the current filters.",
       "table": {
         "channel": "Channel",
-        "defaultConfig": "Default config",
+        "settlementConfig": "Connection & settlement",
         "modelManagement": "Model management",
         "status": "Status",
         "actions": "Actions"

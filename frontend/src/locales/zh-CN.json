@@ -2982,20 +2982,20 @@
       }
     },
     "channelManagement": {
-      "title": "转发渠道配置",
-      "description": "维护渠道基础信息，并进入模型管理配置渠道上游、成本规则和转发能力。",
       "searchPlaceholder": "搜索渠道名称、标识或地址",
       "createChannel": "新建渠道",
-      "apiConfigured": "已配置 API",
-      "apiNotConfigured": "API 未配置",
-      "currency": "币种 {currency}",
-      "discount": "折扣 {ratio}",
+      "apiStatus": "接口",
+      "apiConfigured": "已接入",
+      "apiNotConfigured": "未接入",
+      "settlementCurrency": "结算币种",
+      "defaultDiscount": "默认折扣",
+      "contractExchange": "合同汇率",
       "enabled": "启用",
       "configured": "配置",
       "empty": "暂无符合条件的渠道配置。",
       "table": {
         "channel": "渠道",
-        "defaultConfig": "默认配置",
+        "settlementConfig": "接入与结算",
         "modelManagement": "模型管理",
         "status": "状态",
         "actions": "操作"
