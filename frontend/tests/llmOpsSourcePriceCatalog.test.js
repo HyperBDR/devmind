@@ -153,12 +153,46 @@ test('loads LLM Ops panels and publishing workspaces on demand', () => {
   }
 })
 
-test('waits for deferred channel model data before opening its drawer', () => {
+test('keeps the channel toolbar compact and groups default settings', () => {
+  assert.doesNotMatch(
+    channelManagementSource,
+    /llmOps\.channelManagement\.title/
+  )
+  assert.doesNotMatch(
+    channelManagementSource,
+    /llmOps\.channelManagement\.description/
+  )
+  assert.match(channelManagementSource, /channel-config-summary/)
+  assert.match(channelManagementSource, /apiStatus/)
+  assert.match(channelManagementSource, /settlementCurrency/)
+  assert.match(channelManagementSource, /defaultDiscount/)
+})
+
+test('uses one compact visual language across the channel table', () => {
+  assert.match(channelManagementSource, /class="channel-code"/)
+  assert.match(channelManagementSource, /class="channel-actions"/)
+  assert.match(
+    channelManagementSource,
+    /\.channel-table \{[\s\S]*border-separate/
+  )
+  assert.match(channelManagementSource, /\.channel-code \{[\s\S]*rounded-md/)
+  assert.match(channelManagementSource, /\.channel-actions \{[\s\S]*rounded-lg/)
+})
+
+test('opens the channel model drawer before deferred data finishes loading', () => {
   assert.match(channelManagementSource, /prepareModelManagement/)
   assert.match(
     channelManagementSource,
     /await props\.prepareModelManagement\(channel\.id\)/
   )
+  const drawerOpenIndex = channelManagementSource.indexOf(
+    'selectedChannelForModels.value = channel'
+  )
+  const prepareIndex = channelManagementSource.indexOf(
+    'await props.prepareModelManagement(channel.id)'
+  )
+  assert.ok(drawerOpenIndex >= 0)
+  assert.ok(drawerOpenIndex < prepareIndex)
   assert.match(
     dataComposableSource,
     /refreshChannelPricingData\(options\.channelId\)/

@@ -2,15 +2,7 @@
   <section class="space-y-5">
     <div class="panel overflow-hidden p-0">
       <div class="table-toolbar">
-        <div>
-          <h3 class="panel-title">
-            {{ t('llmOps.channelManagement.title') }}
-          </h3>
-          <p class="mt-1 text-xs text-slate-500">
-            {{ t('llmOps.channelManagement.description') }}
-          </p>
-        </div>
-        <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div class="ml-auto flex flex-col gap-2 sm:flex-row sm:items-center">
           <CompactSelect
             v-model="statusFilter"
             :options="statusFilterOptions"
@@ -58,7 +50,7 @@
                 {{ t('llmOps.channelManagement.table.channel') }}
               </th>
               <th class="table-head">
-                {{ t('llmOps.channelManagement.table.defaultConfig') }}
+                {{ t('llmOps.channelManagement.table.settlementConfig') }}
               </th>
               <th class="table-head">
                 {{ t('llmOps.channelManagement.table.modelManagement') }}
@@ -78,47 +70,58 @@
                   <p class="font-medium text-slate-900">
                     {{ channel.name }}
                   </p>
-                  <p class="mt-1 font-mono text-xs text-slate-400">
+                  <p class="channel-code">
                     {{ channel.code }}
                   </p>
                 </div>
               </td>
               <td class="table-cell max-w-sm">
-                <div class="channel-config-cell">
-                  <a
-                    v-if="channel.api_endpoint"
-                    class="link-url"
-                    :href="channel.api_endpoint"
-                    rel="noopener noreferrer"
-                    target="_blank"
-                    :title="channel.api_endpoint"
-                  >
-                    {{ t('llmOps.channelManagement.apiConfigured') }}
-                  </a>
-                  <span v-else class="config-status-muted">
-                    {{ t('llmOps.channelManagement.apiNotConfigured') }}
-                  </span>
-                  <div class="channel-config-chips">
-                    <span class="config-chip">
-                      {{
-                        t('llmOps.channelManagement.currency', {
-                          currency: channel.currency || 'USD'
-                        })
-                      }}
+                <div class="channel-config-summary">
+                  <div class="config-summary-row">
+                    <span
+                      class="config-summary-item"
+                      :class="
+                        channel.api_endpoint
+                          ? 'config-summary-ready'
+                          : 'config-summary-muted'
+                      "
+                    >
+                      <span class="config-summary-label">
+                        {{ t('llmOps.channelManagement.apiStatus') }}
+                      </span>
+                      <strong>
+                        {{
+                          channel.api_endpoint
+                            ? t('llmOps.channelManagement.apiConfigured')
+                            : t('llmOps.channelManagement.apiNotConfigured')
+                        }}
+                      </strong>
                     </span>
-                    <span class="config-chip">
-                      {{
-                        t('llmOps.channelManagement.discount', {
-                          ratio: ratioLabel(channel.settlement_ratio)
-                        })
-                      }}
+                    <span class="config-summary-item">
+                      <span class="config-summary-label">
+                        {{ t('llmOps.channelManagement.settlementCurrency') }}
+                      </span>
+                      <strong>{{ channel.currency || 'USD' }}</strong>
+                    </span>
+                  </div>
+                  <div class="config-summary-row">
+                    <span class="config-summary-item">
+                      <span class="config-summary-label">
+                        {{ t('llmOps.channelManagement.defaultDiscount') }}
+                      </span>
+                      <strong>
+                        {{ ratioLabel(channel.settlement_ratio) }}
+                      </strong>
                     </span>
                     <span
                       v-if="channel.contract_exchange_rate"
-                      class="config-chip"
+                      class="config-summary-item"
                       :title="contractRateTitle(channel)"
                     >
-                      {{ contractRateLabel(channel) }}
+                      <span class="config-summary-label">
+                        {{ t('llmOps.channelManagement.contractExchange') }}
+                      </span>
+                      <strong>{{ contractRateLabel(channel) }}</strong>
                     </span>
                   </div>
                 </div>
@@ -145,7 +148,7 @@
                 </span>
               </td>
               <td class="table-cell">
-                <div class="inline-flex items-center justify-center gap-2">
+                <div class="channel-actions">
                   <OperationIconButton
                     :disabled="Boolean(openingChannelId)"
                     icon="config"
@@ -387,11 +390,11 @@ function handleChannelModelsSaved() {
 async function openChannelModelManagement(channel) {
   if (openingChannelId.value) return
   openingChannelId.value = channel.id
+  selectedChannelForModels.value = channel
   try {
     if (props.prepareModelManagement) {
       await props.prepareModelManagement(channel.id)
     }
-    selectedChannelForModels.value = channel
   } catch (error) {
     showError(errorMessage(error, t('llmOps.dataErrors.refreshChannels')))
   } finally {
@@ -467,24 +470,32 @@ function errorMessage(error, fallback) {
 }
 
 .data-table {
-  @apply min-w-full divide-y divide-slate-200;
+  @apply min-w-full;
   table-layout: fixed;
 }
 
 .data-table tbody {
-  @apply divide-y divide-slate-100 bg-white;
+  @apply bg-white;
 }
 
-.data-table tr {
-  @apply hover:bg-slate-50;
+.channel-table {
+  @apply border-separate border-spacing-0;
+}
+
+.channel-table tbody tr {
+  @apply transition-colors hover:bg-slate-50/70;
+}
+
+.channel-table tbody td {
+  @apply border-t border-slate-100;
 }
 
 .table-head {
-  @apply whitespace-nowrap bg-slate-50 px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-500;
+  @apply whitespace-nowrap border-b border-slate-200 bg-slate-50/80 px-4 py-3 text-center text-xs font-semibold tracking-wide text-slate-500;
 }
 
 .table-cell {
-  @apply min-w-0 px-4 py-3 text-sm text-slate-600;
+  @apply min-w-0 px-4 py-4 text-sm text-slate-600;
 }
 
 .channel-table .table-head,
@@ -496,25 +507,46 @@ function errorMessage(error, fallback) {
   @apply mx-auto;
 }
 
-.channel-table .link-url {
-  @apply mx-auto text-center;
+.channel-code {
+  @apply mx-auto mt-1 w-fit rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] text-slate-500;
 }
 
-.channel-config-cell {
-  @apply mx-auto flex max-w-[16rem] flex-col items-center gap-2;
+.channel-config-summary {
+  @apply mx-auto flex max-w-[18rem] flex-col items-center gap-1.5;
 }
 
-.channel-config-chips,
+.config-summary-row,
 .channel-model-metrics {
   @apply flex flex-wrap items-center justify-center gap-1.5;
 }
 
-.config-status-muted {
-  @apply text-xs font-medium text-slate-400;
+.config-summary-item {
+  @apply inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600;
+}
+
+.config-summary-label {
+  @apply text-slate-400;
+}
+
+.config-summary-item strong {
+  @apply font-medium text-slate-700;
+}
+
+.config-summary-ready {
+  @apply border-emerald-100 bg-emerald-50;
+}
+
+.config-summary-ready .config-summary-label,
+.config-summary-ready strong {
+  @apply text-emerald-700;
+}
+
+.config-summary-muted {
+  @apply border-slate-200 bg-slate-50;
 }
 
 .model-metric-pill {
-  @apply inline-flex min-w-[3.75rem] items-center justify-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 text-xs text-slate-500;
+  @apply inline-flex min-w-[4rem] items-center justify-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-500;
 }
 
 .model-metric-pill strong {
@@ -526,7 +558,7 @@ function errorMessage(error, fallback) {
 }
 
 .channel-config-col {
-  width: 34%;
+  width: 32%;
 }
 
 .channel-model-col {
@@ -539,6 +571,10 @@ function errorMessage(error, fallback) {
 
 .channel-action-col {
   width: 16%;
+}
+
+.channel-actions {
+  @apply inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1;
 }
 
 .control-field {
