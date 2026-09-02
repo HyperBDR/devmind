@@ -13,6 +13,7 @@ import type { Quotation } from '../types'
 import type { PreviewUser } from '../utils/quotationPreviewModel'
 import { useQuotationI18n } from '../composables/useQuotationI18n'
 import QuotationDetails from './QuotationDetails.vue'
+import QuotationNotesPopover from './QuotationNotesPopover.vue'
 
 const props = defineProps<{
   quoteId: string | null
@@ -168,6 +169,12 @@ onBeforeUnmount(() => {
                 class="pointer-events-auto flex h-full w-screen max-w-[1120px] flex-col bg-slate-50 shadow-2xl"
                 data-quotation-detail-drawer
               >
+                <QuotationNotesPopover
+                  v-if="quote"
+                  :quotation="quote"
+                  display-mode="panel"
+                />
+
                 <header
                   class="flex shrink-0 items-center justify-between gap-4 border-b border-dm-border bg-white px-4 py-3 sm:px-5"
                 >

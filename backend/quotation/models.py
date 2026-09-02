@@ -642,6 +642,7 @@ class QuotationItem(TimeStampedModel):
         max_length=20, choices=ItemType.choices, default=ItemType.SOFTWARE
     )
     item_id = models.CharField(max_length=120, blank=True, null=True)
+    currency = models.CharField(max_length=3, default="USD")
     name = models.CharField(max_length=255, blank=True, null=True)
     description = models.TextField(blank=True, null=True)
     qty = models.DecimalField(max_digits=18, decimal_places=2, default=0)
@@ -662,6 +663,41 @@ class QuotationItem(TimeStampedModel):
         db_table = "quotation_items"
         unique_together = [("quotation", "line_no")]
         ordering = ["line_no"]
+
+
+class QuotationNote(TimeStampedModel):
+    """Internal collaboration note attached to one quotation."""
+
+    id = models.CharField(
+        primary_key=True,
+        max_length=36,
+        default=_uuid,
+        editable=False,
+    )
+    quotation = models.ForeignKey(
+        Quotation,
+        on_delete=models.CASCADE,
+        related_name="notes",
+    )
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="quotation_notes",
+    )
+    author_name = models.CharField(max_length=255)
+    author_email = models.CharField(max_length=255, db_index=True)
+    content = models.TextField(max_length=4000)
+
+    class Meta:
+        db_table = "quotation_notes"
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(
+                fields=["quotation", "created_at"],
+                name="quote_note_quote_created",
+            ),
+        ]
 
 
 class QuotationVersion(models.Model):

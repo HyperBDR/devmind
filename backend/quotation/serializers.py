@@ -17,6 +17,7 @@ from quotation.models import (
     ItemType,
     Quotation,
     QuotationItem,
+    QuotationNote,
     QuotationVersion,
     ReplicaSyncStatus,
     UserQuotationCatalog,
@@ -29,6 +30,39 @@ from quotation.permissions import (
 from quotation.services.storage_control import remote_document_reference
 
 MAX_QUOTATION_AMOUNT = Decimal("9999999999999999.99")
+
+
+class QuotationNoteSerializer(serializers.ModelSerializer):
+    """Expose quotation notes without leaking unrelated user data."""
+
+    can_edit = serializers.SerializerMethodField()
+
+    class Meta:
+        model = QuotationNote
+        fields = [
+            "id",
+            "author_name",
+            "author_email",
+            "content",
+            "created_at",
+            "updated_at",
+            "can_edit",
+        ]
+
+    def get_can_edit(self, note: QuotationNote) -> bool:
+        request = self.context.get("request")
+        if request is None:
+            return False
+        return note.author_id == request.user.id
+
+
+class QuotationNoteWriteSerializer(serializers.Serializer):
+    """Validate note creation and updates."""
+
+    content = serializers.CharField(
+        max_length=4000,
+        trim_whitespace=True,
+    )
 
 
 def _validate_total_amounts(attrs, quotation: Quotation | None = None) -> None:
@@ -276,6 +310,7 @@ class QuotationItemSerializer(serializers.ModelSerializer):
             "line_no",
             "type",
             "item_id",
+            "currency",
             "name",
             "description",
             "qty",
@@ -314,6 +349,10 @@ class QuotationItemWriteSerializer(serializers.Serializer):
         allow_null=True,
         allow_blank=True,
         max_length=QuotationItem._meta.get_field("item_id").max_length,
+    )
+    currency = serializers.ChoiceField(
+        choices=settings.QUOTATION_ALLOWED_CURRENCIES,
+        required=False,
     )
     name = serializers.CharField(
         required=False,
