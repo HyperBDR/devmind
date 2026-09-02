@@ -12,6 +12,7 @@ from quotation.models import (
     QuotationAccessRequest,
     QuotationItem,
     QuotationMembership,
+    QuotationNote,
     QuotationTemplate,
     QuotationUploadPermission,
     QuotationVersion,
@@ -33,6 +34,7 @@ admin.site.register(Quotation)
 admin.site.register(QuotationAccessRequest)
 admin.site.register(QuotationItem)
 admin.site.register(QuotationMembership)
+admin.site.register(QuotationNote)
 admin.site.register(QuotationUploadPermission)
 admin.site.register(QuotationViewPermission)
 admin.site.register(QuotationVersion)

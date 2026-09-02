@@ -665,6 +665,41 @@ class QuotationItem(TimeStampedModel):
         ordering = ["line_no"]
 
 
+class QuotationNote(TimeStampedModel):
+    """Internal collaboration note attached to one quotation."""
+
+    id = models.CharField(
+        primary_key=True,
+        max_length=36,
+        default=_uuid,
+        editable=False,
+    )
+    quotation = models.ForeignKey(
+        Quotation,
+        on_delete=models.CASCADE,
+        related_name="notes",
+    )
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="quotation_notes",
+    )
+    author_name = models.CharField(max_length=255)
+    author_email = models.CharField(max_length=255, db_index=True)
+    content = models.TextField(max_length=4000)
+
+    class Meta:
+        db_table = "quotation_notes"
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(
+                fields=["quotation", "created_at"],
+                name="quote_note_quote_created",
+            ),
+        ]
+
+
 class QuotationVersion(models.Model):
     id = models.CharField(
         primary_key=True, max_length=36, default=_uuid, editable=False

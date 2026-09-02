@@ -28,6 +28,7 @@ import type {
 } from '../types'
 import { MOCK_SALESPERSONS } from '../data'
 import QuotationPreview from './QuotationPreview.vue'
+import QuotationNotesPopover from './QuotationNotesPopover.vue'
 import SignaturePicker from './SignaturePicker.vue'
 import BaseDatePicker from '@/components/ui/BaseDatePicker.vue'
 import HistoryTextInput, { type NormalizedHistoryOption } from './HistoryTextInput.vue'
@@ -1368,6 +1369,12 @@ const itemErrorEntries = computed(() =>
         </p>
       </div>
       <div class="text-right">
+        <div class="mb-2 flex justify-end">
+          <QuotationNotesPopover
+            :quotation="editingQuote"
+            :guide-user-key="currentUser?.email || currentUser?.name"
+          />
+        </div>
         <span class="block text-xs font-medium text-dm-text-tertiary">
           {{ t('quotation.pages.create.currentQuoteNo') }}
         </span>

@@ -57,6 +57,10 @@ from quotation.views.memberships import (
     QuotationMembershipDetailView,
     QuotationMembershipView,
 )
+from quotation.views.notes import (
+    QuotationNoteDetailView,
+    QuotationNoteListCreateView,
+)
 from quotation.views.quotations import (
     QuotationDetailView,
     QuotationFormContextView,
@@ -122,6 +126,14 @@ urlpatterns = [
         QuotationDetailView.as_view(),
     ),
     path("quotations/<str:quotation_id>", QuotationDetailView.as_view()),
+    path(
+        "quotations/<str:quotation_id>/notes",
+        QuotationNoteListCreateView.as_view(),
+    ),
+    path(
+        "quotations/<str:quotation_id>/notes/<str:note_id>",
+        QuotationNoteDetailView.as_view(),
+    ),
     path(
         "quotations/<str:quotation_id>/generate",
         QuotationGenerateView.as_view(),
