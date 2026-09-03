@@ -128,6 +128,31 @@ class QuotationTemplateRendererTests(TestCase):
         self.assertIn("A35:G35", merged_ranges)
         self.assertEqual(sheet.print_area, "'Quotation'!$A$1:$G$46")
 
+    def test_default_template_preserves_four_decimal_discount(self):
+        template = ensure_default_template()
+        snapshot = {
+            "currency": "MYR",
+            "items": [
+                {
+                    "type": "Software",
+                    "line_no": 1,
+                    "description": "Yearly license",
+                    "qty": "14.00",
+                    "list_price": "1574.07",
+                    "discount_percent": "71.7647",
+                    "net_unit_price": "444.44",
+                    "extended_price": "6222.16",
+                }
+            ],
+        }
+
+        content = render_quotation_xlsx(template, snapshot)
+
+        workbook = load_workbook(io.BytesIO(content), data_only=False)
+        sheet = workbook["Quotation"]
+        self.assertAlmostEqual(sheet["E23"].value, 71.7647)
+        self.assertEqual(sheet["E23"].number_format, '0.0000"%"')
+
     def test_estimates_wrapped_lines_for_long_notes(self):
         notes = "This is a long paragraph that must wrap across the merged notes area."
 

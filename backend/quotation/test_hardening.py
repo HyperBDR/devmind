@@ -87,6 +87,36 @@ class QuotationBoundaryTests(TestCase):
         assert Decimal(response.data["vat_amount"]) == Decimal("18.00")
         assert Decimal(response.data["grand_total"]) == Decimal("198.00")
 
+    def test_preserves_four_decimal_discount_percentage(self):
+        payload = quote_payload("QA-HARDEN-PRECISE-DISCOUNT")
+        payload["items"][0].update(
+            {
+                "qty": "14",
+                "list_price": "1574.07",
+                "discount_percent": "71.7647",
+            }
+        )
+
+        response = self.api.post(
+            "/api/v1/quotation/quotations",
+            payload,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        item = response.data["items"][0]
+        self.assertEqual(
+            Decimal(item["discount_percent"]),
+            Decimal("71.7647"),
+        )
+        self.assertEqual(Decimal(item["net_unit_price"]), Decimal("444.44"))
+        self.assertEqual(
+            Decimal(item["extended_price"]),
+            Decimal("6222.16"),
+        )
+        stored = Quotation.objects.get(pk=response.data["id"]).items.get()
+        self.assertEqual(stored.discount_percent, Decimal("71.7647"))
+
     def test_auto_numbering_is_deferred_until_formal_generation(self):
         first_payload = quote_payload("ignored-by-auto-numbering")
         first_payload["numbering_mode"] = "auto"

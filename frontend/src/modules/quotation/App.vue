@@ -65,6 +65,7 @@ import {
 import { useAuthStore } from './stores/auth'
 import { useQuotationI18n } from './composables/useQuotationI18n'
 import { saveContactTitle } from './utils/contactTitleStorage'
+import { clearCurrentUserSignature } from './utils/signatureStorage'
 
 const auth = useAuthStore()
 const { t, quoteStatusLabel } = useQuotationI18n()
@@ -685,10 +686,6 @@ async function handleSaveQuotation(newQuote: Quotation) {
         })
       : await createQuotationApi(ownedQuote)
 
-    if (wasCreate) {
-      clearCreateQuoteDraft(auth.currentUser.email)
-    }
-
     saveContactTitle(auth.currentUser.email, ownedQuote.issuerContactTitle)
 
     if (willGenerate) {
@@ -700,6 +697,14 @@ async function handleSaveQuotation(newQuote: Quotation) {
           draftQuoteNo: ownedQuote.quoteNo,
         },
       )
+    }
+
+    if (wasCreate) {
+      clearCreateQuoteDraft(auth.currentUser.email)
+    }
+    clearCurrentUserSignature(auth.currentUser.email)
+
+    if (willGenerate) {
       activeQuote.value = saved
       triggerToast(t('quotation.app.quoteGenerated', { quoteNo: saved.quoteNo }), 'success')
       selectedQuotationId.value = saved.id

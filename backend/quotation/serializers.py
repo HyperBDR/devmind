@@ -379,8 +379,8 @@ class QuotationItemWriteSerializer(serializers.Serializer):
         default=Decimal("0"),
     )
     discount_percent = serializers.DecimalField(
-        max_digits=5,
-        decimal_places=2,
+        max_digits=7,
+        decimal_places=4,
         min_value=Decimal("0"),
         max_value=Decimal("100"),
         default=Decimal("0"),

@@ -650,7 +650,7 @@ class QuotationItem(TimeStampedModel):
         max_digits=18, decimal_places=2, default=0
     )
     discount_percent = models.DecimalField(
-        max_digits=5, decimal_places=2, default=0
+        max_digits=7, decimal_places=4, default=0
     )
     net_unit_price = models.DecimalField(
         max_digits=18, decimal_places=2, default=0
