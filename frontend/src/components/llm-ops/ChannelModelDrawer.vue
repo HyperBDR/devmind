@@ -1441,8 +1441,7 @@ function priceTierComparisonRows(row) {
       .map((item) =>
         (props.priceItems || []).find(
           (candidate) =>
-            String(candidate.id || '') ===
-            String(item?.base_price_item || '')
+            String(candidate.id || '') === String(item?.base_price_item || '')
         )
       )
       .find((item) => item?.offering)?.offering ||
@@ -1468,11 +1467,7 @@ function priceTierComparisonRows(row) {
     'costPrices'
   )
   append(
-    providerPriceItemsForModel(
-      row?.model,
-      boundSourceOfferingId,
-      region
-    ),
+    providerPriceItemsForModel(row?.model, boundSourceOfferingId, region),
     'upstreamPrices'
   )
   return Array.from(tiers.values())
@@ -1484,10 +1479,13 @@ function priceItemRegion(item, sourceItems = []) {
       String(candidate.id || '') === String(item?.base_price_item || '')
   )
   return (
+    item?.spec?.access_region ||
     item?.spec?.deployment_scope ||
     item?.spec?.region ||
+    sourceItem?.spec?.access_region ||
     sourceItem?.spec?.deployment_scope ||
     sourceItem?.spec?.region ||
+    item?.sku_access_region ||
     item?.sku_region ||
     item?.region ||
     'Global'

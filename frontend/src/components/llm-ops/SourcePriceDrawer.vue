@@ -379,7 +379,11 @@ function queueSearch(value) {
 function schedules(priceItems) {
   return buildSourcePriceSchedules(priceItems, {
     defaultScope: t('llmOps.sourcePriceDrawer.defaultScope'),
-    flat: t('llmOps.sourcePriceDrawer.allUsage')
+    flat: t('llmOps.sourcePriceDrawer.allUsage'),
+    peak: t('llmOps.sourcePriceDrawer.conditions.peak'),
+    offPeak: t('llmOps.sourcePriceDrawer.conditions.offPeak'),
+    beijing: t('llmOps.sourcePriceDrawer.locations.beijing'),
+    chinaMainland: t('llmOps.sourcePriceDrawer.locations.chinaMainland')
   })
 }
 

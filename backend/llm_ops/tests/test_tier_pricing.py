@@ -456,6 +456,66 @@ class TieredPricingKernelTests(SimpleTestCase):
 
         self.assertEqual(prices.input_per_million, Decimal("5"))
 
+    def test_named_provider_condition_selects_requested_price(self):
+        schedule = PriceSchedule(
+            tiers=(
+                self._flat_tier(
+                    "3",
+                    {
+                        "pricing_condition": {
+                            "type": "provider_schedule",
+                            "code": "peak",
+                        }
+                    },
+                ),
+                self._flat_tier(
+                    "1.5",
+                    {
+                        "pricing_condition": {
+                            "type": "provider_schedule",
+                            "code": "off_peak",
+                        }
+                    },
+                ),
+            )
+        )
+
+        prices = resolve_usage_unit_prices(
+            schedule,
+            UsageContext(pricing_condition_code="off_peak"),
+        )
+
+        self.assertEqual(prices.input_per_million, Decimal("1.5"))
+
+    def test_named_provider_condition_defaults_to_highest_price(self):
+        schedule = PriceSchedule(
+            tiers=(
+                self._flat_tier(
+                    "3",
+                    {
+                        "pricing_condition": {
+                            "type": "provider_schedule",
+                            "code": "peak",
+                        }
+                    },
+                ),
+                self._flat_tier(
+                    "1.5",
+                    {
+                        "pricing_condition": {
+                            "type": "provider_schedule",
+                            "code": "off_peak",
+                        }
+                    },
+                ),
+            )
+        )
+
+        with self.assertLogs("llm_ops.tier_pricing", level="WARNING"):
+            prices = resolve_usage_unit_prices(schedule, UsageContext())
+
+        self.assertEqual(prices.input_per_million, Decimal("3"))
+
     def test_overlapping_time_rules_warn_and_choose_highest_price(self):
         window = {
             "time_windows": [

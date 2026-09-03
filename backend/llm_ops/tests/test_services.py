@@ -688,6 +688,88 @@ class LLMOpsPricingServiceTests(TestCase):
         self.assertEqual(items[0].unit_price, Decimal("1.500000"))
         self.assertEqual(cost, Decimal("1.500000"))
 
+    def test_channel_preserves_conditional_prices_and_uses_safe_default(self):
+        source = PriceCollectionSource.objects.create(
+            name="Aliyun Official",
+            slug="aliyun-conditional-official",
+            provider=self.provider,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            currency="CNY",
+        )
+        price = ChannelModelPrice.objects.create(
+            channel=self.channel,
+            model=self.model,
+            price_source=source,
+            currency="CNY",
+            settlement_ratio=Decimal("1"),
+        )
+        source_items = []
+        dimensions = (
+            ModelPriceItem.DIMENSION_TEXT_INPUT,
+            ModelPriceItem.DIMENSION_TEXT_OUTPUT,
+            ModelPriceItem.DIMENSION_CACHE_INPUT,
+        )
+        for code, values in (
+            ("peak", ("3", "9", "0.3")),
+            ("off_peak", ("1.5", "4.5", "0.15")),
+        ):
+            for dimension, value in zip(dimensions, values, strict=True):
+                source_items.append(
+                    ModelPriceItem.objects.create(
+                        provider=self.provider,
+                        model=self.model,
+                        meta_model=self.model.meta_model,
+                        source=source,
+                        dimension=dimension,
+                        billing_unit=(
+                            ModelPriceItem.UNIT_PER_1M_TOKENS
+                        ),
+                        currency="CNY",
+                        unit_price=Decimal(value),
+                        spec={
+                            "access_region": "cn-beijing",
+                            "deployment_scope": "china_mainland",
+                        },
+                        pricing_condition={
+                            "type": "provider_schedule",
+                            "code": code,
+                            "timezone": "Asia/Shanghai",
+                        },
+                        price_fingerprint=f"{code}-{dimension}",
+                        is_current=True,
+                    )
+                )
+
+        schedule = resolve_channel_price_schedule(
+            self.channel,
+            self.model,
+            override=price,
+            source_items=source_items,
+        )
+        unit_prices = resolve_channel_model_price(
+            self.channel,
+            self.model,
+            override=price,
+            source_items=source_items,
+        )
+
+        self.assertEqual(len(schedule.tiers), 6)
+        self.assertEqual(
+            {
+                tier.spec["pricing_condition"]["code"]
+                for tier in schedule.tiers
+            },
+            {"peak", "off_peak"},
+        )
+        self.assertEqual(unit_prices.input_per_million, Decimal("3"))
+        self.assertEqual(unit_prices.output_per_million, Decimal("9"))
+        self.assertEqual(
+            unit_prices.cache_input_per_million,
+            Decimal("0.3"),
+        )
+
     def test_sync_does_not_mix_regions_for_selected_source_offering(self):
         source = PriceCollectionSource.objects.create(
             name="Regional supplier",
@@ -1182,7 +1264,6 @@ class LLMOpsPricingServiceTests(TestCase):
             ),
             original_ids,
         )
-
 
     def test_marks_channel_item_comparison_unknown_for_currency_mismatch(self):
         ModelPriceItem.objects.create(

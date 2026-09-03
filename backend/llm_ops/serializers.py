@@ -737,6 +737,16 @@ class LLMModelSerializer(serializers.ModelSerializer):
         read_only=True,
         allow_null=True,
     )
+    sku_access_region = serializers.CharField(
+        source="sku.access_region",
+        read_only=True,
+        allow_null=True,
+    )
+    sku_deployment_scope = serializers.CharField(
+        source="sku.deployment_scope",
+        read_only=True,
+        allow_null=True,
+    )
     sku_display_name = serializers.CharField(
         source="sku.display_name",
         read_only=True,
@@ -868,6 +878,16 @@ class ModelPriceItemSerializer(serializers.ModelSerializer):
         read_only=True,
         allow_null=True,
     )
+    sku_access_region = serializers.CharField(
+        source="sku.access_region",
+        read_only=True,
+        allow_null=True,
+    )
+    sku_deployment_scope = serializers.CharField(
+        source="sku.deployment_scope",
+        read_only=True,
+        allow_null=True,
+    )
     offering_exposed_model_name = serializers.CharField(
         source="offering.exposed_model_name",
         read_only=True,
@@ -935,6 +955,18 @@ class ModelPriceItemSerializer(serializers.ModelSerializer):
     def validate_unit_price(self, value):
         if value < Decimal("0"):
             raise serializers.ValidationError("unit_price must be >= 0.")
+        return value
+
+    def validate_pricing_condition(self, value):
+        if not isinstance(value, dict):
+            raise serializers.ValidationError(
+                "pricing_condition must be an object."
+            )
+        for key in ("type", "code", "timezone", "label"):
+            if key in value and not isinstance(value[key], str):
+                raise serializers.ValidationError(
+                    f"pricing_condition.{key} must be a string."
+                )
         return value
 
     def validate(self, attrs):

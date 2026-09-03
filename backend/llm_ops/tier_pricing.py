@@ -91,6 +91,7 @@ class UsageContext:
     video_output_seconds: Decimal | int | str = ZERO
     occurred_at: datetime | None = None
     timezone: str = "UTC"
+    pricing_condition_code: str = ""
 
 
 @dataclass(frozen=True)
@@ -215,7 +216,11 @@ def resolve_usage_price_tier(
     conditional_tiers = tuple(
         tier
         for tier in tiers
-        if tier.spec.get("usage_conditions") or tier.spec.get("time_windows")
+        if (
+            tier.spec.get("usage_conditions")
+            or tier.spec.get("time_windows")
+            or tier.spec.get("pricing_condition")
+        )
     )
     if conditional_tiers:
         conditional_matches = tuple(
@@ -288,6 +293,12 @@ def _usage_matches_conditions(
 
 def _usage_matches_tier(usage: UsageContext, tier: PriceTier) -> bool:
     """Match all quantity and local-time conditions on a price rule."""
+    pricing_condition = tier.spec.get("pricing_condition")
+    if pricing_condition and not _usage_matches_pricing_condition(
+        usage,
+        pricing_condition,
+    ):
+        return False
     conditions = tier.spec.get("usage_conditions")
     if conditions and not _usage_matches_conditions(usage, conditions):
         return False
@@ -299,6 +310,21 @@ def _usage_matches_tier(usage: UsageContext, tier: PriceTier) -> bool:
     ):
         return False
     return True
+
+
+def _usage_matches_pricing_condition(
+    usage: UsageContext,
+    condition: object,
+) -> bool:
+    """Match a named provider condition selected by the channel caller."""
+    if not isinstance(condition, dict):
+        return False
+    code = str(condition.get("code") or "").strip()
+    condition_type = str(condition.get("type") or "").strip()
+    if condition_type == "always" or code == "all_time":
+        return True
+    selected_code = str(usage.pricing_condition_code or "").strip()
+    return bool(selected_code and selected_code == code)
 
 
 def _usage_matches_time_windows(

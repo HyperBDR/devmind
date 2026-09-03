@@ -650,6 +650,78 @@ class PriceCollectionSkuPersistenceTests(TestCase):
         self.assertEqual(input_item.model.sku, sku)
         self.assertEqual(input_item.unit_price, Decimal("1.000000"))
 
+    def test_persists_location_and_conditional_price_rows(self):
+        conditions = (
+            ("peak", "3", "9", "0.3"),
+            ("off_peak", "1.5", "4.5", "0.15"),
+        )
+        rows = [
+            NormalizedPriceRow(
+                kind="text_token",
+                values={
+                    "input_price": input_price,
+                    "output_price": output_price,
+                    "cache_hit_input_price": cache_price,
+                    "currency": "CNY",
+                    "access_region": "cn-beijing",
+                    "deployment_scope": "china_mainland",
+                    "region": "cn-beijing",
+                    "pricing_condition": {
+                        "type": "provider_schedule",
+                        "code": code,
+                        "timezone": "Asia/Shanghai",
+                    },
+                },
+                raw={"currency": "CNY"},
+            )
+            for code, input_price, output_price, cache_price in conditions
+        ]
+        base = self.collected_item()
+        item = CollectedModelPricing(
+            **{
+                **base.__dict__,
+                "price_rows": rows,
+                "raw_detail": {
+                    **base.raw_detail,
+                    "sku_region": "cn-beijing",
+                },
+            }
+        )
+
+        offering, _ = upsert_collected_offering(
+            item,
+            source=self.source,
+            source_url=self.source.endpoint_url,
+            meta_model=self.meta_model,
+        )
+        price_items = sync_model_price_items(
+            item,
+            source=self.source,
+            offering=offering,
+            source_url=self.source.endpoint_url,
+        )
+
+        self.assertEqual(len(price_items), 6)
+        self.assertEqual(offering.sku.access_region, "cn-beijing")
+        self.assertEqual(
+            offering.sku.deployment_scope,
+            "china_mainland",
+        )
+        self.assertEqual(
+            {
+                price_item.pricing_condition["code"]
+                for price_item in price_items
+            },
+            {"peak", "off_peak"},
+        )
+        self.assertEqual(
+            {
+                price_item.spec["access_region"]
+                for price_item in price_items
+            },
+            {"cn-beijing"},
+        )
+
     def test_auto_source_sync_refreshes_dependent_channel_price_items(self):
         first = self.collected_item()
         catalog = mock.Mock(

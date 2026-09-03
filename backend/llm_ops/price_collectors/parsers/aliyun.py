@@ -18,6 +18,19 @@ from .common import (
 PRICING_URL = "https://help.aliyun.com/zh/model-studio/model-pricing"
 DEFAULT_CURRENCY = "CNY"
 IGNORED_SUPPLIER_PREFIXES = {"siliconflow", "vanchin"}
+DOMESTIC_ACCESS_REGION = "cn-beijing"
+DOMESTIC_DEPLOYMENT_SCOPE = "china_mainland"
+PRICING_TIMEZONE = "Asia/Shanghai"
+REGIONAL_SECTION_NAMES = (
+    "华北2",
+    "北京",
+    "新加坡",
+    "德国",
+    "弗吉尼亚",
+    "美国",
+    "日本",
+    "东京",
+)
 
 
 class AliyunPriceCatalogCollector:
@@ -81,13 +94,15 @@ def fetch_text(url: str) -> str:
 
 def extract_models(page_html: str) -> list[dict[str, Any]]:
     """Extract Aliyun text model price rows from HTML tables."""
-    tables = re.findall(
-        r"<table.*?>.*?</table>",
-        page_html,
-        flags=re.DOTALL | re.IGNORECASE,
-    )
     models: dict[str, dict[str, Any]] = {}
-    for table in tables:
+    tables = pricing_tables_with_regions(page_html)
+    has_regional_sections = any(
+        is_regional_section(section_name)
+        for section_name, _ in tables
+    )
+    for section_name, table in tables:
+        if has_regional_sections and not is_beijing_section(section_name):
+            continue
         header_map: dict[str, int] = {}
         for row in expand_rows(table):
             if len(row) < 4:
@@ -105,20 +120,35 @@ def extract_models(page_html: str) -> list[dict[str, Any]]:
                 continue
             input_cell = row[header_map["input_price"]]
             output_cell = row[header_map["output_price"]]
-            input_price = parse_price(input_cell)
-            output_price = parse_price(output_cell)
-            if input_price is None or output_price is None:
+            condition_prices = parse_condition_prices(
+                input_cell,
+                output_cell,
+            )
+            if not condition_prices:
                 continue
             token_range = normalize_token_range(
                 value_at(row, header_map.get("input_range")),
             )
             scope = value_at(row, header_map.get("scope"))
+            if scope and not is_domestic_deployment_scope(scope):
+                continue
             currency = detect_currency(
                 input_cell,
                 output_cell,
                 scope,
                 model_id,
             )
+            price_rows = [
+                price_row(
+                    input_price=prices["input_price"],
+                    output_price=prices["output_price"],
+                    token_range=token_range,
+                    currency=currency,
+                    condition=pricing_condition(code),
+                )
+                for code, prices in condition_prices
+            ]
+            primary = condition_prices[0][1]
             upsert_model(
                 models,
                 {
@@ -126,21 +156,14 @@ def extract_models(page_html: str) -> list[dict[str, Any]]:
                     "model_name": model_id,
                     "display_name": display_name(model_id),
                     "aliases": [model_id],
-                    "input_price_per_million": input_price,
-                    "output_price_per_million": output_price,
-                    "price_rows": [
-                        price_row(
-                            input_price=input_price,
-                            output_price=output_price,
-                            token_range=token_range,
-                            currency=currency,
-                            deployment_scope=scope,
-                        )
-                    ],
+                    "input_price_per_million": primary["input_price"],
+                    "output_price_per_million": primary["output_price"],
+                    "price_rows": price_rows,
                     "currency": currency,
                     "notes": (
                         "Extracted from Aliyun Bailian official pricing "
-                        f"table; deployment_scope={scope or '-'}."
+                        "table; access_region=cn-beijing; "
+                        "deployment_scope=china_mainland."
                     ),
                 },
             )
@@ -152,6 +175,46 @@ def extract_models(page_html: str) -> list[dict[str, Any]]:
             key=lambda candidate: candidate["model_name"].lower(),
         )
     ]
+
+
+def pricing_tables_with_regions(
+    page_html: str,
+) -> list[tuple[str, str]]:
+    """Return pricing tables paired with their nearest preceding h4."""
+    pattern = re.compile(
+        r"<h4\b[^>]*>.*?</h4>|<table\b[^>]*>.*?</table>",
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    section_name = ""
+    tables = []
+    for match in pattern.finditer(page_html):
+        fragment = match.group(0)
+        if fragment.lower().startswith("<h4"):
+            section_name = clean_cell_text(fragment)
+            continue
+        tables.append((section_name, fragment))
+    return tables
+
+
+def is_regional_section(value: str) -> bool:
+    """Return whether a heading identifies an Aliyun access region."""
+    normalized = re.sub(r"\s+", "", str(value or ""))
+    return any(name in normalized for name in REGIONAL_SECTION_NAMES)
+
+
+def is_beijing_section(value: str) -> bool:
+    """Return whether a heading is Aliyun's Beijing access region."""
+    normalized = re.sub(r"\s+", "", str(value or ""))
+    return "华北2" in normalized and "北京" in normalized
+
+
+def is_domestic_deployment_scope(value: str) -> bool:
+    """Return whether a row is explicitly deployed in mainland China."""
+    normalized = re.sub(r"[\s_-]+", "", str(value or "")).casefold()
+    return any(
+        marker in normalized
+        for marker in ("中国内地", "中国大陆", "国内", "chinamainland")
+    )
 
 
 def _merge_model_rows(item: dict[str, Any]) -> dict[str, Any]:
@@ -371,24 +434,95 @@ def parse_price(text: str) -> str | None:
     return match.group(1) if match else None
 
 
+def parse_condition_prices(
+    input_cell: str,
+    output_cell: str,
+) -> list[tuple[str, dict[str, str]]]:
+    """Parse fixed or peak/off-peak token prices from two cells."""
+    input_prices = labeled_prices(input_cell)
+    output_prices = labeled_prices(output_cell)
+    if input_prices or output_prices:
+        rows = []
+        for code in ("peak", "off_peak"):
+            input_price = input_prices.get(code)
+            output_price = output_prices.get(code)
+            if input_price is not None and output_price is not None:
+                rows.append(
+                    (
+                        code,
+                        {
+                            "input_price": input_price,
+                            "output_price": output_price,
+                        },
+                    )
+                )
+        return rows
+
+    input_price = parse_price(input_cell)
+    output_price = parse_price(output_cell)
+    if input_price is None or output_price is None:
+        return []
+    return [
+        (
+            "all_time",
+            {
+                "input_price": input_price,
+                "output_price": output_price,
+            },
+        )
+    ]
+
+
+def labeled_prices(text: str) -> dict[str, str]:
+    """Return Aliyun peak/off-peak labels mapped to numeric prices."""
+    labels = {
+        "peak": "忙时",
+        "off_peak": "闲时",
+    }
+    prices = {}
+    cleaned = str(text or "").replace(",", "")
+    for code, label in labels.items():
+        match = re.search(
+            rf"{label}\s*([0-9]+(?:\.[0-9]+)?)",
+            cleaned,
+        )
+        if match:
+            prices[code] = match.group(1)
+    return prices
+
+
+def pricing_condition(code: str) -> dict[str, str]:
+    """Return the normalized pricing condition for one Aliyun row."""
+    if code == "all_time":
+        return {"type": "always", "code": "all_time"}
+    labels = {"peak": "忙时", "off_peak": "闲时"}
+    return {
+        "type": "provider_schedule",
+        "code": code,
+        "label": labels[code],
+        "timezone": PRICING_TIMEZONE,
+    }
+
+
 def price_row(
     *,
     input_price: str,
     output_price: str,
     token_range: str,
     currency: str,
-    deployment_scope: str,
-) -> dict[str, str]:
+    condition: dict[str, str],
+) -> dict[str, Any]:
     """Build a parsed text-token price row."""
     row = {
         "input_price_per_million": input_price,
         "output_price_per_million": output_price,
         "cache_hit_price_per_million": cache_hit_price(input_price),
         "currency": currency,
+        "access_region": DOMESTIC_ACCESS_REGION,
+        "deployment_scope": DOMESTIC_DEPLOYMENT_SCOPE,
+        "region": DOMESTIC_ACCESS_REGION,
+        "pricing_condition": condition,
     }
-    if deployment_scope:
-        row["deployment_scope"] = deployment_scope
-        row["region"] = deployment_scope
     if token_range:
         row["input_token_range"] = token_range
         row["output_token_range"] = token_range
@@ -492,11 +626,11 @@ def upsert_model(
         append_price_row(existing, row)
 
 
-def append_price_row(item: dict[str, Any], row: dict[str, str]) -> None:
+def append_price_row(item: dict[str, Any], row: dict[str, Any]) -> None:
     """Append a unique tiered price row to an existing item."""
     rows = item.setdefault("price_rows", [])
-    fingerprint = tuple(sorted(row.items()))
-    existing_fingerprints = {tuple(sorted(value.items())) for value in rows}
+    fingerprint = repr(sorted(row.items()))
+    existing_fingerprints = {repr(sorted(value.items())) for value in rows}
     if fingerprint not in existing_fingerprints:
         rows.append(row)
 

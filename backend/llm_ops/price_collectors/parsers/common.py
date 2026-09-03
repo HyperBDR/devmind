@@ -293,7 +293,7 @@ def text_token_price_rows(item: dict[str, Any]):
     return [build_text_token_row(item, values)]
 
 
-def normalize_text_token_values(row: dict[str, Any]) -> dict[str, str]:
+def normalize_text_token_values(row: dict[str, Any]) -> dict[str, Any]:
     """Normalize provider token price keys to platform price dimensions."""
     values = {}
     for source_key, target_key in (
@@ -310,6 +310,7 @@ def normalize_text_token_values(row: dict[str, Any]) -> dict[str, str]:
             values[key] = value
     for key in (
         "currency",
+        "access_region",
         "deployment_scope",
         "region",
         "market",
@@ -319,12 +320,15 @@ def normalize_text_token_values(row: dict[str, Any]) -> dict[str, str]:
         value = str(row.get(key) or "").strip()
         if value:
             values[key] = value
+    condition = row.get("pricing_condition")
+    if isinstance(condition, dict) and condition:
+        values["pricing_condition"] = dict(condition)
     return values
 
 
 def build_text_token_row(
     item: dict[str, Any],
-    values: dict[str, str],
+    values: dict[str, Any],
 ) -> NormalizedPriceRow:
     """Build a normalized price row for text-token pricing."""
     model_id = str(
