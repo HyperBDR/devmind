@@ -41,10 +41,14 @@ test('draft payloads keep predicted numbers outside formal quote_no', () => {
   assert.match(app, /draftQuoteNo: ownedQuote\.quoteNo/)
 })
 
-test('draft previews do not participate in frontend formal-number checks', () => {
+test('draft previews participate in frontend draft-number allocation', () => {
   assert.match(
     normalizedCreate,
-    /filter\(\(quote\) => quote\.status !== 'Draft'\)/,
+    /props\.existingQuoteNumbers\.length > 0 .* props\.quotations \.map\(\(quote\) => quote\.quoteNo\)/,
+  )
+  assert.match(
+    normalizedCreate,
+    /if \(draftLifecycleForm\.value && quoteNoMode\.value === 'auto'\) \{ preferDraftQuoteNo\.value = true quoteNo\.value = editingQuote\.quoteNo/,
   )
   assert.match(normalizedCreate, /draftLifecycleForm\.value \|\| quoteNoMode\.value === 'auto'/)
   assert.match(create, /quoteNumberHintDraft/)

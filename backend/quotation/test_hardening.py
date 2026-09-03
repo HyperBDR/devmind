@@ -145,7 +145,7 @@ class QuotationBoundaryTests(TestCase):
         )
         self.assertEqual(second.status_code, 201, second.data)
         self.assertIsNone(second.data["quote_no"])
-        self.assertEqual(second.data["display_quote_no"], "BDR150726")
+        self.assertEqual(second.data["display_quote_no"], "BDR150726.1")
 
         generate = self.api.post(
             f"/api/v1/quotation/quotations/{first.data['id']}/generate",
@@ -162,6 +162,82 @@ class QuotationBoundaryTests(TestCase):
         )
         self.assertEqual(generate_other.status_code, 200, generate_other.data)
         self.assertEqual(generate_other.data["quote_no"], "BDR150726.1")
+
+    def test_editing_auto_draft_preserves_number_until_scope_changes(self):
+        payload = quote_payload("ignored-by-auto-numbering")
+        payload["numbering_mode"] = "auto"
+        first = self.api.post(
+            "/api/v1/quotation/quotations",
+            payload,
+            format="json",
+        )
+        second = self.api.post(
+            "/api/v1/quotation/quotations",
+            payload,
+            format="json",
+        )
+        self.assertEqual(first.data["display_quote_no"], "BDR150726")
+        self.assertEqual(second.data["display_quote_no"], "BDR150726.1")
+
+        edited = self.api.put(
+            f"/api/v1/quotation/quotations/{second.data['id']}",
+            {"project_name": "Edited draft"},
+            format="json",
+        )
+        self.assertEqual(edited.status_code, 200, edited.data)
+        self.assertEqual(edited.data["display_quote_no"], "BDR150726.1")
+
+        moved = self.api.put(
+            f"/api/v1/quotation/quotations/{second.data['id']}",
+            {
+                "quote_date": "2026-07-16",
+                "expire_date": "2026-08-16",
+            },
+            format="json",
+        )
+        self.assertEqual(moved.status_code, 200, moved.data)
+        self.assertEqual(moved.data["display_quote_no"], "BDR160726")
+
+        moved_product = self.api.put(
+            f"/api/v1/quotation/quotations/{second.data['id']}",
+            {"product_line": "CloudX"},
+            format="json",
+        )
+        self.assertEqual(moved_product.status_code, 200, moved_product.data)
+        self.assertEqual(
+            moved_product.data["display_quote_no"],
+            "CloudX160726",
+        )
+
+    def test_formal_numbers_remain_independent_from_draft_order(self):
+        payload = quote_payload("ignored-by-auto-numbering")
+        payload["numbering_mode"] = "auto"
+        first = self.api.post(
+            "/api/v1/quotation/quotations",
+            payload,
+            format="json",
+        )
+        second = self.api.post(
+            "/api/v1/quotation/quotations",
+            payload,
+            format="json",
+        )
+
+        generated_second = self.api.post(
+            f"/api/v1/quotation/quotations/{second.data['id']}/generate",
+            {"numbering_mode": "auto"},
+            format="json",
+        )
+        generated_first = self.api.post(
+            f"/api/v1/quotation/quotations/{first.data['id']}/generate",
+            {"numbering_mode": "auto"},
+            format="json",
+        )
+
+        self.assertEqual(generated_second.status_code, 200)
+        self.assertEqual(generated_second.data["quote_no"], "BDR150726")
+        self.assertEqual(generated_first.status_code, 200)
+        self.assertEqual(generated_first.data["quote_no"], "BDR150726.1")
 
     def test_auto_numbering_reserves_roots_from_formal_revision_history(self):
         payload = quote_payload("ignored-by-auto-numbering")
@@ -778,6 +854,44 @@ class QuotationRollbackTests(TestCase):
 
 class QuotationConcurrencyTests(TransactionTestCase):
     reset_sequences = True
+
+    @skipUnless(
+        connection.vendor == "postgresql",
+        "draft allocation locking requires PostgreSQL",
+    )
+    def test_concurrent_auto_drafts_receive_distinct_numbers(self):
+        users = [
+            User.objects.create_user(
+                username=f"draft-user-{index}",
+                email=f"draft-{index}@example.com",
+                password="password",
+            )
+            for index in range(2)
+        ]
+
+        def create_draft(user):
+            close_old_connections()
+            try:
+                api = APIClient()
+                api.force_authenticate(user=user)
+                payload = quote_payload("ignored-by-auto-numbering")
+                payload["numbering_mode"] = "auto"
+                response = api.post(
+                    "/api/v1/quotation/quotations",
+                    payload,
+                    format="json",
+                )
+                return response.status_code, response.data["display_quote_no"]
+            finally:
+                close_old_connections()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(create_draft, users))
+
+        assert sorted(results) == [
+            (201, "BDR150726"),
+            (201, "BDR150726.1"),
+        ]
 
     @skipUnless(
         connection.vendor == "postgresql",

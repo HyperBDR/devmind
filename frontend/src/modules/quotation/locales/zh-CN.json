@@ -282,6 +282,7 @@
         "quoteDateFromLabel": "从",
         "quoteDateToLabel": "至",
         "tableQuoteNo": "报价单号",
+        "draftSuffix": "（草稿）",
         "tableProjectName": "项目名称",
         "tableCustomer": "客户信息",
         "tableContact": "客户联系人",

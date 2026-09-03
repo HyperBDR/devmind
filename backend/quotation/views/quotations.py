@@ -51,6 +51,7 @@ from quotation.services.quotation_service import (
     build_quotation,
     copy_quotation,
     formalize_quotation,
+    get_next_auto_draft_quote_number,
     get_next_auto_quote_number,
     update_quotation,
 )
@@ -268,17 +269,26 @@ class QuotationListCreateView(APIView):
             draft_quote_no = data.pop("quote_no", "")
         else:
             data.pop("quote_no", None)
-        if numbering_mode == "auto":
-            draft_quote_no = get_next_auto_quote_number(
-                data["product_line"],
-                data["quote_date"],
-            )
         data["quote_no"] = None
-        data["draft_quote_no"] = draft_quote_no or ""
         data["numbering_mode"] = numbering_mode
         items = data.pop("items", [])
-        with transaction.atomic():
-            quotation = build_quotation(data=data, items_data=items)
+        for attempt in range(3):
+            try:
+                with transaction.atomic():
+                    if numbering_mode == "auto":
+                        draft_quote_no = get_next_auto_draft_quote_number(
+                            data["product_line"],
+                            data["quote_date"],
+                        )
+                    data["draft_quote_no"] = draft_quote_no or ""
+                    quotation = build_quotation(data=data, items_data=items)
+                break
+            except IntegrityError:
+                if attempt == 2:
+                    return Response(
+                        {"detail": "could not allocate a quotation draft"},
+                        status=status.HTTP_409_CONFLICT,
+                    )
         quotation = Quotation.objects.prefetch_related(
             "items", "documents__replicas", "versions"
         ).get(pk=quotation.pk)
@@ -325,6 +335,18 @@ class QuotationFormContextView(APIView):
             .exclude(quote_no="")
             .values_list("quote_no", flat=True)
         )
+        draft_quote_numbers = list(
+            filter_accessible_quotations(
+                request.user,
+                Quotation.objects.filter(
+                    status=QuoteStatus.DRAFT,
+                    numbering_mode="auto",
+                ),
+            )
+            .exclude(draft_quote_no="")
+            .values_list("draft_quote_no", flat=True)
+        )
+        quote_numbers.extend(draft_quote_numbers)
         return Response(
             {
                 "items": items,

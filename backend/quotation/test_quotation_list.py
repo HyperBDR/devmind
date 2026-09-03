@@ -249,6 +249,44 @@ class QuotationListAPITests(TestCase):
             pk=imported.pk,
         ).count() == 1
 
+    def test_repeated_copy_uses_distinct_draft_numbers_without_revision(self):
+        copied_date = timezone.localdate()
+        base = (
+            f"BDR{copied_date.day:02d}{copied_date.month:02d}"
+            f"{copied_date.year % 100:02d}"
+        )
+        source = self._quote(4, status=QuoteStatus.ACCEPTED)
+        source.quote_no = f"{base}_R1"
+        source.save(update_fields=["quote_no"])
+
+        first = self.api.post(f"{self.url}/{source.pk}/copy")
+        second = self.api.post(f"{self.url}/{source.pk}/copy")
+
+        assert first.status_code == 201
+        assert second.status_code == 201
+        assert first.data["display_quote_no"] == f"{base}.1"
+        assert second.data["display_quote_no"] == f"{base}.2"
+        assert "_R1" not in first.data["display_quote_no"]
+        assert "_R1" not in second.data["display_quote_no"]
+
+    def test_form_context_includes_automatic_draft_numbers(self):
+        draft = self._quote(5)
+        draft.quote_no = None
+        draft.draft_quote_no = "BDR010726.1"
+        draft.numbering_mode = "auto"
+        draft.save(
+            update_fields=[
+                "quote_no",
+                "draft_quote_no",
+                "numbering_mode",
+            ]
+        )
+
+        response = self.api.get(self.form_context_url)
+
+        assert response.status_code == 200
+        assert response.data["quote_numbers"] == ["BDR010726.1"]
+
     def test_invalid_page_and_page_size(self):
         for query in (
             "page=0",

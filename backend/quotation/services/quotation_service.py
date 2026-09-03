@@ -385,8 +385,13 @@ def build_quotation(
     return quotation
 
 
-def get_next_auto_quote_number(product_line: str, quote_date) -> str:
-    """Return the next globally unique number for a product line and date."""
+def _get_next_auto_quote_number(
+    product_line: str,
+    quote_date,
+    *,
+    include_drafts: bool,
+) -> str:
+    """Return the next number in one product-line and date sequence."""
     base = (
         f"{str(product_line or 'BDR').strip()}"
         f"{quote_date.day:02d}{quote_date.month:02d}"
@@ -402,12 +407,25 @@ def get_next_auto_quote_number(product_line: str, quote_date) -> str:
         quote_no__isnull=False,
         quote_no__gt="",
     ).exclude(status=QuoteStatus.DRAFT).values_list("quote_no", flat=True)
+    draft_numbers = []
+    if include_drafts:
+        draft_numbers = Quotation.objects.filter(
+            status=QuoteStatus.DRAFT,
+            numbering_mode=QuotationNumberingMode.AUTO,
+        ).exclude(draft_quote_no="").values_list(
+            "draft_quote_no",
+            flat=True,
+        )
     historical_snapshots = QuotationVersion.objects.values_list(
         "snapshot_json",
         flat=True,
     )
     for quote_no in current_numbers:
         match = number_pattern.match(str(quote_no))
+        if match:
+            used_sequences.add(int(match.group(1) or 0))
+    for draft_quote_no in draft_numbers:
+        match = number_pattern.match(str(draft_quote_no))
         if match:
             used_sequences.add(int(match.group(1) or 0))
     for snapshot in historical_snapshots:
@@ -423,6 +441,24 @@ def get_next_auto_quote_number(product_line: str, quote_date) -> str:
     while suffix in used_sequences:
         suffix += 1
     return f"{base}.{suffix}"
+
+
+def get_next_auto_quote_number(product_line: str, quote_date) -> str:
+    """Return the next formal number for a product line and date."""
+    return _get_next_auto_quote_number(
+        product_line,
+        quote_date,
+        include_drafts=False,
+    )
+
+
+def get_next_auto_draft_quote_number(product_line: str, quote_date) -> str:
+    """Return the next preview number, including existing auto drafts."""
+    return _get_next_auto_quote_number(
+        product_line,
+        quote_date,
+        include_drafts=True,
+    )
 
 
 def formalize_quotation(
@@ -495,7 +531,7 @@ def copy_quotation(
 ) -> Quotation:
     """Create an editable draft copy without historical artifacts."""
     copy_date = timezone.localdate()
-    quote_no = get_next_auto_quote_number(
+    quote_no = get_next_auto_draft_quote_number(
         quotation.product_line,
         copy_date,
     )
@@ -619,6 +655,17 @@ def update_quotation(
         if numbering_mode not in QuotationNumberingMode.values:
             raise ValueError("invalid numbering mode")
 
+        draft_scope_changed = (
+            data.get("product_line", locked.product_line)
+            != locked.product_line
+            or data.get("quote_date", locked.quote_date)
+            != locked.quote_date
+        )
+        switched_to_auto = (
+            numbering_mode == QuotationNumberingMode.AUTO
+            and locked.numbering_mode != QuotationNumberingMode.AUTO
+        )
+
         for field in QUOTATION_BUSINESS_FIELDS:
             if field in data:
                 setattr(locked, field, data[field])
@@ -632,8 +679,12 @@ def update_quotation(
         draft_candidate = str(draft_candidate or "").strip()
 
         if target_status == QuoteStatus.DRAFT:
-            if numbering_mode == QuotationNumberingMode.AUTO:
-                draft_candidate = get_next_auto_quote_number(
+            if numbering_mode == QuotationNumberingMode.AUTO and (
+                not locked.draft_quote_no
+                or draft_scope_changed
+                or switched_to_auto
+            ):
+                draft_candidate = get_next_auto_draft_quote_number(
                     data.get("product_line", locked.product_line),
                     data.get("quote_date", locked.quote_date),
                 )

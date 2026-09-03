@@ -282,6 +282,7 @@
         "quoteDateFromLabel": "From",
         "quoteDateToLabel": "To",
         "tableQuoteNo": "Quote number",
+        "draftSuffix": " (Draft)",
         "tableProjectName": "Project",
         "tableCustomer": "Customer",
         "tableContact": "Contact",
