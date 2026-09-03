@@ -2691,6 +2691,14 @@
       "searchPlaceholder": "搜索元模型、厂商或 code",
       "allUsage": "全部用量",
       "defaultScope": "中国内地 / 默认",
+      "conditions": {
+        "peak": "忙时",
+        "offPeak": "闲时"
+      },
+      "locations": {
+        "beijing": "华北 2（北京）",
+        "chinaMainland": "中国内地"
+      },
       "priceItemCount": "{count} 条当前价格项",
       "tierCount": "{count} 个阶梯",
       "actions": {

@@ -378,7 +378,7 @@ class ModelPriceSkillRunnerTests(SimpleTestCase):
         )
         self.assertEqual(payload["models"][0]["model_id"], "qwen-new-2026")
 
-    def test_aliyun_provider_adapter_preserves_multi_market_prices(self):
+    def test_aliyun_provider_adapter_keeps_only_domestic_prices(self):
         payload = collect_vendor_price_catalog(
             "aliyun",
             {
@@ -392,12 +392,13 @@ class ModelPriceSkillRunnerTests(SimpleTestCase):
         model = payload["models"][0]
         self.assertEqual(model["model_id"], "qwen-plus")
         rows = model["price_rows"]
-        self.assertEqual(len(rows), 2)
+        self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["values"]["currency"], "CNY")
-        self.assertEqual(rows[0]["values"]["deployment_scope"], "中国内地")
-        self.assertEqual(rows[1]["values"]["currency"], "USD")
-        self.assertEqual(rows[1]["values"]["deployment_scope"], "国际")
-        self.assertEqual(rows[1]["values"]["input_price"], "0.12")
+        self.assertEqual(
+            rows[0]["values"]["deployment_scope"],
+            "china_mainland",
+        )
+        self.assertEqual(rows[0]["values"]["access_region"], "cn-beijing")
 
     def test_aliyun_vendor_skill_returns_standard_catalog_json(self):
         payload = run_vendor_pricing_skill(

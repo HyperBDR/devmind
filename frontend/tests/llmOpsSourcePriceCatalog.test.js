@@ -281,6 +281,60 @@ test('labels flat and usage-range prices explicitly', () => {
   )
 })
 
+test('groups peak prices under one Beijing schedule with clear labels', () => {
+  const items = [
+    ['peak', 'text_input', '3'],
+    ['peak', 'text_output', '9'],
+    ['peak', 'cache_input', '0.3'],
+    ['off_peak', 'text_input', '1.5'],
+    ['off_peak', 'text_output', '4.5'],
+    ['off_peak', 'cache_input', '0.15']
+  ].map(([code, dimension, unit_price]) => ({
+    sku_code: 'deepseek-v4-flash-0731',
+    sku_access_region: 'cn-beijing',
+    sku_deployment_scope: 'china_mainland',
+    dimension,
+    billing_unit: 'per_1m_tokens',
+    currency: 'CNY',
+    unit_price,
+    tier_type: 'flat',
+    pricing_condition: {
+      type: 'provider_schedule',
+      code,
+      timezone: 'Asia/Shanghai'
+    },
+    spec: {
+      access_region: 'cn-beijing',
+      deployment_scope: 'china_mainland'
+    }
+  }))
+
+  const schedules = buildSourcePriceSchedules(items, {
+    flat: '全部用量',
+    peak: '忙时',
+    offPeak: '闲时',
+    beijing: '华北 2（北京）',
+    chinaMainland: '中国内地'
+  })
+
+  assert.equal(schedules.length, 1)
+  assert.match(schedules[0].scope_label, /华北 2（北京）/)
+  assert.match(schedules[0].scope_label, /中国内地/)
+  assert.deepEqual(
+    schedules[0].tiers.map((tier) => tier.range_label),
+    ['忙时', '闲时']
+  )
+  assert.deepEqual(
+    schedules[0].tiers.map((tier) =>
+      tier.prices.map((price) => price.dimension)
+    ),
+    [
+      ['text_input', 'text_output', 'cache_input'],
+      ['text_input', 'text_output', 'cache_input']
+    ]
+  )
+})
+
 test('keeps every channel price tier when summarizing one dimension', () => {
   const items = [
     ['text_input', '3', '0', '32000'],
@@ -349,6 +403,38 @@ test('groups channel prices by usage tier for side-by-side display', () => {
       rangeLabel: '[32,000, ∞)'
     }
   ])
+})
+
+test('keeps peak and off-peak channel prices in separate rows', () => {
+  const items = [
+    ['peak', '忙时', 'text_input', '3'],
+    ['peak', '忙时', 'text_output', '9'],
+    ['off_peak', '闲时', 'text_input', '1.5'],
+    ['off_peak', '闲时', 'text_output', '4.5']
+  ].map(([code, label, dimension, unit_price]) => ({
+    dimension,
+    unit_price,
+    currency: 'CNY',
+    tier_type: 'flat',
+    spec: {
+      access_region: 'cn-beijing',
+      deployment_scope: 'china_mainland',
+      pricing_condition: {
+        type: 'provider_schedule',
+        code,
+        label,
+        timezone: 'Asia/Shanghai'
+      }
+    }
+  }))
+
+  const rows = channelPriceTierRows(items)
+
+  assert.equal(rows.length, 2)
+  assert.deepEqual(
+    rows.map((row) => row.rangeLabel),
+    ['忙时 · cn-beijing · china_mainland', '闲时 · cn-beijing · china_mainland']
+  )
 })
 
 test('renders configured channel prices as grouped tier comparisons', () => {

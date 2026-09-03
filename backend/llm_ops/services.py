@@ -1265,7 +1265,10 @@ def _schedule_from_source_items(
 
     tiers = []
     for item in source_items:
-        spec = item.spec or {}
+        spec = dict(item.spec or {})
+        condition = normalized_pricing_condition(item)
+        if condition:
+            spec["pricing_condition"] = condition
         if item.tier_type == ModelPriceItem.TIER_USAGE_RANGE:
             spec = with_usage_range_spec(spec)
         item_currency = currency
@@ -1696,8 +1699,26 @@ def selected_price_item_for_channel_model(
         item for item in items if item.tier_type == ModelPriceItem.TIER_FLAT
     ]
     if flat_items:
-        return sorted(flat_items, key=lambda item: item.id)[0]
+        unconditional = [
+            item
+            for item in flat_items
+            if normalized_pricing_condition(item).get("code") == "all_time"
+        ]
+        candidates = unconditional or flat_items
+        return sorted(
+            candidates,
+            key=lambda item: (item.unit_price, -item.id),
+            reverse=True,
+        )[0]
     return None
+
+
+def normalized_pricing_condition(item: ModelPriceItem) -> dict:
+    """Return a safe pricing-condition object from persisted JSON."""
+    condition = item.pricing_condition or {}
+    if not isinstance(condition, dict):
+        return {}
+    return dict(condition)
 
 
 def calculate_usage_cost(
@@ -2484,7 +2505,10 @@ def channel_price_payload_from_base_item(
         currency,
         base_item,
     )
-    spec = base_item.spec or {}
+    spec = dict(base_item.spec or {})
+    condition = normalized_pricing_condition(base_item)
+    if condition:
+        spec["pricing_condition"] = condition
     if base_item.tier_type == ModelPriceItem.TIER_USAGE_RANGE:
         spec = with_usage_range_spec(spec)
     return {

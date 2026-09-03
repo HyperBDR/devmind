@@ -343,10 +343,13 @@ export function useChannelModelPricing({
         String(candidate.id || '') === String(item.base_price_item || '')
     )
     return (
+      item?.spec?.access_region ||
       item?.spec?.deployment_scope ||
       item?.spec?.region ||
+      sourceItem?.spec?.access_region ||
       sourceItem?.spec?.deployment_scope ||
       sourceItem?.spec?.region ||
+      item?.sku_access_region ||
       item?.sku_region ||
       item?.region ||
       'Global'
@@ -355,7 +358,9 @@ export function useChannelModelPricing({
 
   function normalizePriceRegion(value) {
     return (
-      String(value || 'Global').trim().toLowerCase() || 'global'
+      String(value || 'Global')
+        .trim()
+        .toLowerCase() || 'global'
     )
   }
 
@@ -371,10 +376,13 @@ export function useChannelModelPricing({
         String(candidate.id || '') === String(item.base_price_item || '')
     )
     const itemRegion =
+      item.spec?.access_region ||
       item.spec?.deployment_scope ||
       item.spec?.region ||
+      sourceItem?.spec?.access_region ||
       sourceItem?.spec?.deployment_scope ||
       sourceItem?.spec?.region ||
+      item.sku_access_region ||
       item.sku_region ||
       item.region ||
       'Global'

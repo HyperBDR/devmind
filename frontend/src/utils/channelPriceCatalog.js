@@ -23,7 +23,8 @@ export function channelPriceTierRows(priceItems = []) {
         item.tier_type || 'flat',
         item.tier_start || '',
         item.tier_end || '',
-        specLabel
+        specLabel,
+        pricingConditionCode(item)
       ].join(':')
       const tier = tiers.get(key) || {
         prices: [],
@@ -48,6 +49,7 @@ export function channelPriceTierRows(priceItems = []) {
 export function priceSpecLabel(spec = {}) {
   if (!spec || typeof spec !== 'object') return ''
   const values = [
+    spec.access_region,
     spec.region,
     spec.deployment_scope,
     spec.scope,
@@ -63,10 +65,19 @@ export function priceSpecLabel(spec = {}) {
 
 export function channelPriceItemLabel(item = {}) {
   const label = priceDimensionLabel(item.dimension)
+  const hasCondition = !['', 'all_time'].includes(pricingConditionCode(item))
   const tierLabel =
-    item.tier_type === 'usage_range' ? `${tierRangeLabel(item)} ` : ''
+    item.tier_type === 'usage_range' || hasCondition
+      ? `${tierRangeLabel(item)} `
+      : ''
   const specLabel = priceSpecLabel(item.spec)
   return [tierLabel + label, specLabel].filter(Boolean).join(' · ')
+}
+
+function pricingConditionCode(item = {}) {
+  return String(
+    item.pricing_condition?.code || item.spec?.pricing_condition?.code || ''
+  )
 }
 
 function channelPriceItemSort(left, right) {

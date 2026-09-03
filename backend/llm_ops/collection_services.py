@@ -2253,6 +2253,8 @@ def upsert_collected_sku(
             "meta_model": meta_model,
             "upstream_model_name": upstream_name,
             "display_name": display_name,
+            "access_region": sku_access_region(item),
+            "deployment_scope": sku_deployment_scope(item),
             "variant_type": sku_variant_type(source),
             "capabilities": {},
             "evidence": sku_evidence(source=source, source_url=source_url),
@@ -2273,6 +2275,14 @@ def upsert_collected_sku(
         if not sku.upstream_model_name and upstream_name:
             sku.upstream_model_name = upstream_name
             changed_fields.append("upstream_model_name")
+        access_region = sku_access_region(item)
+        if access_region and sku.access_region != access_region:
+            sku.access_region = access_region
+            changed_fields.append("access_region")
+        deployment_scope = sku_deployment_scope(item)
+        if deployment_scope and sku.deployment_scope != deployment_scope:
+            sku.deployment_scope = deployment_scope
+            changed_fields.append("deployment_scope")
     variant_type = sku_variant_type(source)
     if (
         not routing_locked
@@ -2354,6 +2364,26 @@ def sku_region(item: CollectedModelPricing) -> str:
         or model_info.get("deployment_region")
     )
     return str(value or "").strip()
+
+
+def sku_access_region(item: CollectedModelPricing) -> str:
+    """Return the normalized API access region for one collected SKU."""
+    for row in item.price_rows:
+        values = row.values or {}
+        value = values.get("access_region")
+        if value:
+            return str(value).strip()
+    return sku_region(item)
+
+
+def sku_deployment_scope(item: CollectedModelPricing) -> str:
+    """Return the normalized inference deployment scope for one SKU."""
+    for row in item.price_rows:
+        values = row.values or {}
+        value = values.get("deployment_scope")
+        if value:
+            return str(value).strip()
+    return ""
 
 
 def sku_mode(item: CollectedModelPricing) -> str:
@@ -2493,6 +2523,8 @@ def ensure_model_sku_for_model(
             "meta_model": model.meta_model,
             "upstream_model_name": upstream_name,
             "display_name": display_name,
+            "access_region": sku_access_region(item),
+            "deployment_scope": sku_deployment_scope(item),
             "variant_type": sku_variant_type(source),
             "capabilities": {},
             "evidence": sku_evidence(source=source, source_url=source_url),
@@ -2513,6 +2545,14 @@ def ensure_model_sku_for_model(
         if not sku.upstream_model_name and upstream_name:
             sku.upstream_model_name = upstream_name
             changed_fields.append("upstream_model_name")
+        access_region = sku_access_region(item)
+        if access_region and sku.access_region != access_region:
+            sku.access_region = access_region
+            changed_fields.append("access_region")
+        deployment_scope = sku_deployment_scope(item)
+        if deployment_scope and sku.deployment_scope != deployment_scope:
+            sku.deployment_scope = deployment_scope
+            changed_fields.append("deployment_scope")
     variant_type = sku_variant_type(source)
     if (
         not routing_locked
@@ -3334,6 +3374,7 @@ def price_item_payloads_from_row(
             values,
             common,
             spec=row_price_spec(row),
+            pricing_condition=row_pricing_condition(row),
         )
     if row.kind == "image_token":
         return image_token_price_item_payloads(item, values, common)
@@ -3384,6 +3425,7 @@ def token_price_item_payloads(
     common: dict,
     *,
     spec: dict | None = None,
+    pricing_condition: dict | None = None,
 ) -> list[dict]:
     """Build token input/output price item payloads."""
     payloads = []
@@ -3408,6 +3450,7 @@ def token_price_item_payloads(
                 billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
                 unit_price=price_per_million(input_price, item.unit),
                 spec=spec,
+                pricing_condition=pricing_condition,
                 tier_start=primary_range[0],
                 tier_end=primary_range[1],
             )
@@ -3420,6 +3463,7 @@ def token_price_item_payloads(
                 billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
                 unit_price=price_per_million(output_price, item.unit),
                 spec=spec,
+                pricing_condition=pricing_condition,
                 tier_start=primary_range[0],
                 tier_end=primary_range[1],
             )
@@ -3432,6 +3476,7 @@ def token_price_item_payloads(
                 billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
                 unit_price=price_per_million(cache_price, item.unit),
                 spec=spec,
+                pricing_condition=pricing_condition,
                 tier_start=primary_range[0],
                 tier_end=primary_range[1],
             )
@@ -3463,6 +3508,7 @@ def row_price_spec(row) -> dict:
     spec = {}
     for key in (
         "currency",
+        "access_region",
         "deployment_scope",
         "region",
         "market",
@@ -3490,6 +3536,18 @@ def row_price_spec(row) -> dict:
         if usage_conditions:
             spec["usage_conditions"] = usage_conditions
     return spec
+
+
+def row_pricing_condition(row) -> dict:
+    """Return the normalized condition controlling one collected price."""
+    values = row.values or {}
+    raw = row.raw or {}
+    condition = values.get("pricing_condition")
+    if not isinstance(condition, dict):
+        condition = raw.get("pricing_condition")
+    if isinstance(condition, dict) and condition:
+        return dict(condition)
+    return {"type": "always", "code": "all_time"}
 
 
 def image_token_price_item_payloads(
@@ -3642,6 +3700,7 @@ def price_item_payload(
     billing_unit: str,
     unit_price: Decimal | None,
     spec: dict | None = None,
+    pricing_condition: dict | None = None,
     tier_start: Decimal | None = None,
     tier_end: Decimal | None = None,
 ) -> dict:
@@ -3659,6 +3718,7 @@ def price_item_payload(
         "tier_start": tier_start,
         "tier_end": tier_end,
         "spec": spec or {},
+        "pricing_condition": pricing_condition or {},
         "is_current": True,
     }
 
@@ -3693,6 +3753,7 @@ def model_price_item_fingerprint(payload: dict) -> str:
         "tier_start": str(payload["tier_start"] or ""),
         "tier_end": str(payload["tier_end"] or ""),
         "spec": payload.get("spec") or {},
+        "pricing_condition": payload.get("pricing_condition") or {},
     }
     encoded = json.dumps(
         price_payload,

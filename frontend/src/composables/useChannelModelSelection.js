@@ -204,8 +204,10 @@ export function useChannelModelSelection({
     const regionalRows = rows.map((item) => ({
       item,
       region:
+        item.spec?.access_region ||
         item.spec?.deployment_scope ||
         item.spec?.region ||
+        item.sku_access_region ||
         item.sku_region ||
         item.region ||
         'Global'

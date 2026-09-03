@@ -2683,6 +2683,14 @@
       "searchPlaceholder": "Search meta model, provider, or code",
       "allUsage": "All usage",
       "defaultScope": "Mainland China / default",
+      "conditions": {
+        "peak": "Peak",
+        "offPeak": "Off-peak"
+      },
+      "locations": {
+        "beijing": "China North 2 (Beijing)",
+        "chinaMainland": "Mainland China"
+      },
       "priceItemCount": "{count} current price items",
       "tierCount": "{count} tiers",
       "actions": {

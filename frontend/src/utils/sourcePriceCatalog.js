@@ -19,7 +19,7 @@ const DIMENSION_ORDER = [
 export function buildSourcePriceSchedules(priceItems = [], labels = {}) {
   const variants = new Map()
   priceItems.forEach((item) => {
-    const identity = variantIdentity(item)
+    const identity = variantIdentity(item, labels)
     if (!variants.has(identity.key)) {
       variants.set(identity.key, {
         key: identity.key,
@@ -34,7 +34,8 @@ export function buildSourcePriceSchedules(priceItems = [], labels = {}) {
       item.tier_type,
       item.tier_start ?? '',
       item.tier_end ?? '',
-      stableJson(priceSpec(item.spec))
+      stableJson(priceSpec(item.spec)),
+      stableJson(pricingCondition(item))
     ].join('|')
     let tier = variant.tiers.find((candidate) => candidate.key === tierKey)
     if (!tier) {
@@ -42,6 +43,7 @@ export function buildSourcePriceSchedules(priceItems = [], labels = {}) {
         key: tierKey,
         billing_unit: item.billing_unit,
         range_label: tierRangeLabel(item, labels),
+        pricing_condition: pricingCondition(item),
         prices: []
       }
       variant.tiers.push(tier)
@@ -67,19 +69,27 @@ export function buildSourcePriceSchedules(priceItems = [], labels = {}) {
 }
 
 export function tierRangeLabel(item, labels = {}) {
+  const condition = pricingCondition(item)
+  const conditionLabel = pricingConditionLabel(condition, labels)
   if (item.tier_type !== 'usage_range') {
-    return labels.flat || 'All usage'
+    return conditionLabel || labels.flat || 'All usage'
   }
   const start = compactNumber(item.tier_start ?? 0)
   const end = item.tier_end === null ? '∞' : compactNumber(item.tier_end)
-  return `[${start}, ${end})`
+  return [conditionLabel, `[${start}, ${end})`].filter(Boolean).join(' · ')
 }
 
-function variantIdentity(item) {
+function variantIdentity(item, labels = {}) {
   const spec = priceSpec(item.spec)
   const scopeParts = [
-    item.spec?.deployment_scope,
-    item.spec?.region,
+    locationLabel(
+      item.sku_access_region || item.spec?.access_region || item.sku_region,
+      labels
+    ),
+    locationLabel(
+      item.sku_deployment_scope || item.spec?.deployment_scope,
+      labels
+    ),
     ...Object.entries(spec).map(([key, value]) => `${key}: ${value}`)
   ].filter(Boolean)
   const uniqueParts = Array.from(new Set(scopeParts.map(String)))
@@ -96,7 +106,13 @@ function priceSpec(spec = {}) {
       .filter(([key, value]) => {
         return (
           !TIER_SPEC_KEYS.has(key) &&
-          !['currency', 'deployment_scope', 'region'].includes(key) &&
+          ![
+            'currency',
+            'access_region',
+            'deployment_scope',
+            'pricing_condition',
+            'region'
+          ].includes(key) &&
           value !== '' &&
           value !== null &&
           value !== undefined
@@ -104,6 +120,30 @@ function priceSpec(spec = {}) {
       })
       .sort(([left], [right]) => left.localeCompare(right))
   )
+}
+
+function pricingCondition(item = {}) {
+  const condition = item.pricing_condition || item.spec?.pricing_condition
+  return condition && typeof condition === 'object' ? condition : {}
+}
+
+function pricingConditionLabel(condition = {}, labels = {}) {
+  const code = condition.code || ''
+  if (!code || code === 'all_time') return ''
+  const conditionLabels = {
+    peak: labels.peak || condition.label || 'Peak',
+    off_peak: labels.offPeak || condition.label || 'Off-peak'
+  }
+  return conditionLabels[code] || condition.label || code
+}
+
+function locationLabel(value, labels = {}) {
+  const normalized = String(value || '').trim()
+  const locationLabels = {
+    'cn-beijing': labels.beijing || 'cn-beijing',
+    china_mainland: labels.chinaMainland || 'china_mainland'
+  }
+  return locationLabels[normalized] || normalized
 }
 
 function compactNumber(value) {

@@ -443,6 +443,12 @@ class ModelSku(models.Model):
         default=VARIANT_UNKNOWN,
     )
     region = models.CharField(max_length=80, blank=True, default="")
+    access_region = models.CharField(max_length=80, blank=True, default="")
+    deployment_scope = models.CharField(
+        max_length=80,
+        blank=True,
+        default="",
+    )
     mode = models.CharField(max_length=80, blank=True, default="")
     api_type = models.CharField(max_length=80, blank=True, default="")
     capabilities = models.JSONField(blank=True, default=dict)
@@ -854,6 +860,7 @@ class ModelPriceItem(models.Model):
         null=True,
     )
     spec = models.JSONField(blank=True, default=dict)
+    pricing_condition = models.JSONField(blank=True, default=dict)
     source_url = models.URLField(max_length=1000, blank=True, default="")
     raw_payload = models.JSONField(blank=True, default=dict)
     price_fingerprint = models.CharField(max_length=64, db_index=True)
