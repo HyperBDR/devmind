@@ -76,7 +76,7 @@ def deduplicate_auto_draft_numbers(apps, schema_editor):
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("quotation", "0032_quotationnote"),
+        ("quotation", "0033_alter_quotationitem_discount_percent"),
     ]
 
     operations = [
