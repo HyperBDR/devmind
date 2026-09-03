@@ -609,6 +609,17 @@ class Quotation(TimeStampedModel):
                 name="quote_list_product_name",
             ),
         ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["draft_quote_no"],
+                condition=(
+                    models.Q(status=QuoteStatus.DRAFT)
+                    & models.Q(numbering_mode=QuotationNumberingMode.AUTO)
+                    & ~models.Q(draft_quote_no="")
+                ),
+                name="quote_draft_auto_no_uniq",
+            ),
+        ]
 
     def delete(self, using=None, keep_parents=False):
         """Lock this quotation before Django collects related artifacts."""

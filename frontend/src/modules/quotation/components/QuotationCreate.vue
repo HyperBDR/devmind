@@ -306,7 +306,6 @@ const existingQuoteNumbers = computed(() =>
   props.existingQuoteNumbers.length > 0
     ? props.existingQuoteNumbers
     : props.quotations
-        .filter((quote) => quote.status !== 'Draft')
         .map((quote) => quote.quoteNo),
 )
 const draftLifecycleForm = computed(
@@ -617,11 +616,8 @@ function loadEditingQuoteIntoForm(editingQuote: Quotation) {
       || getDefaultExpireDate(dateFromInput(quoteDate.value))
     : getDefaultExpireDate(dateFromInput(todayInput))
   if (draftLifecycleForm.value && quoteNoMode.value === 'auto') {
-    quoteNo.value = getNextAutoQuoteNumber(
-      productLine.value,
-      dateFromInput(quoteDate.value),
-      existingQuoteNumbers.value,
-    )
+    preferDraftQuoteNo.value = true
+    quoteNo.value = editingQuote.quoteNo
   } else {
     quoteNo.value = editingQuote.quoteNo
   }

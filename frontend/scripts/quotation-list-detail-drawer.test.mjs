@@ -173,3 +173,15 @@ test('English quotation labels use concise CRM terminology', () => {
   assert.doesNotMatch(enLocale, /"tableSalesperson": "Sales rep"/)
   assert.doesNotMatch(enLocale, /"tableQuoteDate": "Date created"/)
 })
+
+test('draft quote numbers carry a localized suffix while formal numbers do not', async () => {
+  const zhLocale = await readFile(
+    new URL('../src/modules/quotation/locales/zh-CN.json', import.meta.url),
+    'utf8'
+  )
+
+  assert.match(list, /quote\.status === 'Draft'/)
+  assert.match(list, /quotation\.pages\.list\.draftSuffix/)
+  assert.match(enLocale, /"draftSuffix": " \(Draft\)"/)
+  assert.match(zhLocale, /"draftSuffix": "（草稿）"/)
+})

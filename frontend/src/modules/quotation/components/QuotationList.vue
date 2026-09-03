@@ -1273,7 +1273,13 @@ function displayQuoteDate(quote: Quotation): string {
                   class="block truncate whitespace-nowrap font-mono font-semibold text-slate-700 transition group-hover:text-blue-700"
                   :title="quote.quoteNo"
                 >
-                  {{ quote.quoteNo }}
+                  <span>{{ quote.quoteNo }}</span>
+                  <span
+                    v-if="quote.status === 'Draft'"
+                    class="ml-1 font-sans text-xs font-medium text-dm-text-secondary"
+                  >
+                    {{ t('quotation.pages.list.draftSuffix') }}
+                  </span>
                 </p>
                 <p
                   v-if="exportProgressByQuote[quote.id]"
