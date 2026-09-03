@@ -812,20 +812,26 @@ def render_quotation_xlsx(
             return ""
         return format(Decimal(str(value_)).normalize(), "f")
 
-    def numeric_value(value_):
+    def numeric_value(value_, *, decimal_places=2):
         if value_ in (None, ""):
             return None
         rounded = Decimal(str(value_)).quantize(
-            Decimal("0.01"),
+            Decimal(1).scaleb(-decimal_places),
             rounding=ROUND_HALF_UP,
         )
         if rounded == rounded.to_integral():
             return int(rounded)
         return float(rounded)
 
-    def numeric_format(value_, *, grouped=False, suffix=""):
+    def numeric_format(
+        value_,
+        *,
+        decimal_places=2,
+        grouped=False,
+        suffix="",
+    ):
         rounded = Decimal(str(value_ or 0)).quantize(
-            Decimal("0.01"),
+            Decimal(1).scaleb(-decimal_places),
             rounding=ROUND_HALF_UP,
         )
         places = max(-rounded.normalize().as_tuple().exponent, 0)
@@ -1074,7 +1080,10 @@ def render_quotation_xlsx(
                 numeric_value(item.get("qty")) if description else None,
                 money(item.get("list_price")) if description else None,
                 (
-                    numeric_value(item.get("discount_percent") or 0)
+                    numeric_value(
+                        item.get("discount_percent") or 0,
+                        decimal_places=4,
+                    )
                     if description
                     else None
                 ),
@@ -1098,6 +1107,7 @@ def render_quotation_xlsx(
             )
             sheet.cell(row, 5).number_format = numeric_format(
                 item.get("discount_percent"),
+                decimal_places=4,
                 suffix="%",
             )
             for column in (4, 6, 7):

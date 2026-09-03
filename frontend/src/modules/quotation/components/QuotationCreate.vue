@@ -87,7 +87,7 @@ import {
   getBillingContactOptions,
   getBillingEmailOptions,
 } from '../utils/customerHistory'
-import { clearCurrentUserSignature, rememberUserSignature } from '../utils/signatureStorage'
+import { rememberUserSignature } from '../utils/signatureStorage'
 import { getSavedContactTitle } from '../utils/contactTitleStorage'
 import {
   loadCreateQuoteDraft,
@@ -1327,10 +1327,6 @@ function handleSubmit(status: 'Draft' | 'Generated') {
   }
 
   emit('saveQuote', newQuote)
-  issuerSignature.value = ''
-  if (props.currentUser?.email) {
-    clearCurrentUserSignature(props.currentUser.email)
-  }
 }
 
 function autoItemNumber(index: number, type: ItemType) {
@@ -2130,7 +2126,7 @@ const itemErrorEntries = computed(() =>
                       type="number"
                       min="0"
                       max="100"
-                      step="0.01"
+                      step="0.0001"
                       :value="item.discountPercent || ''"
                       placeholder="0"
                       class="w-full rounded-lg border border-dm-border bg-white p-2 font-mono text-dm-text focus:border-blue-500 focus:outline-hidden"

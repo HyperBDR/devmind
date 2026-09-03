@@ -48,6 +48,21 @@ test('saving and generating a quote does not download a file', () => {
   assert.doesNotMatch(chinese.quotation.app.quoteGenerated, /下载/)
 })
 
+test('precise discounts and signatures survive until saving succeeds', () => {
+  const saveStart = app.indexOf('async function handleSaveQuotation')
+  const saveEnd = app.indexOf('async function handleFeishuUploadDone')
+  const saveFlow = app.slice(saveStart, saveEnd)
+  const generateIndex = saveFlow.indexOf('await generateQuotationApi')
+  const clearSignatureIndex = saveFlow.indexOf(
+    'clearCurrentUserSignature(auth.currentUser.email)',
+  )
+
+  assert.match(create, /step="0\.0001"/)
+  assert.doesNotMatch(create, /clearCurrentUserSignature/)
+  assert.ok(generateIndex >= 0)
+  assert.ok(clearSignatureIndex > generateIndex)
+})
+
 test(
   'saving a quote refreshes the numbering context for the next quote',
   () => {
