@@ -287,7 +287,7 @@ function saveContact() {
         <div class="rounded-dm bg-dm-page p-3"><p class="text-dm-text-tertiary">{{ t('quotation.customerCenter.columns.quotes') }}</p><p class="mt-1 text-lg font-semibold">{{ selectedCustomer.quoteCount }}</p></div>
       </div>
       <div class="flex items-center justify-between px-5 pb-2 pt-5">
-        <h4 class="font-semibold text-dm-text">{{ t('quotation.customerCenter.contacts') }}</h4>
+        <h4 class="font-semibold text-dm-text">{{ t('quotation.customerCenter.columns.contacts') }}</h4>
         <button type="button" class="text-sm font-medium text-dm-primary" @click="showContactForm = true">
           ＋ {{ t('quotation.customerCenter.addContact') }}
         </button>

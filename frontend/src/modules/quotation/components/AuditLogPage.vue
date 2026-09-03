@@ -205,6 +205,26 @@ function actionLabel(value: string, module = '') {
   )
 }
 
+function eventNameLabel(eventName: string) {
+  const normalized = String(eventName || '').trim()
+  if (!normalized) return t('quotation.pages.audit.notAvailable')
+  const [module = '', ...parts] = normalized.split('.')
+  const rawAction = parts[parts.length - 1] || module
+  const actionAliases: Record<string, string> = {
+    created: 'create',
+    updated: 'update',
+    deleted: 'delete',
+    generated: 'generate',
+    uploaded: 'upload',
+    downloaded: 'download',
+    imported: 'import',
+    exported: 'export',
+    archived: 'archive',
+    restored: 'restore',
+  }
+  return actionLabel(actionAliases[rawAction] || rawAction, module)
+}
+
 function targetTypeLabel(event: AuditEvent) {
   if (normalizedModule(event.module) !== 'catalog' || !event.target_type) return ''
   return translatedLabel(
@@ -220,8 +240,11 @@ const fieldLabelKeys: Record<string, string> = {
   client_company: 'clientCompany',
   contact_person: 'contactPerson',
   currency: 'currency',
+  archive_to_feishu: 'archiveToFeishu',
+  attachment_selection: 'attachmentSelection',
   email: 'email',
   expire_date: 'expireDate',
+  formats: 'formats',
   issuer_company_name: 'issuerCompanyName',
   issuer_contact_email: 'issuerContactEmail',
   issuer_contact_name: 'issuerContactName',
@@ -241,7 +264,11 @@ const fieldLabelKeys: Record<string, string> = {
 }
 
 function fieldLabel(value: string) {
-  const key = fieldLabelKeys[value]
+  const normalized = String(value || '')
+    .replace(/([a-z])([A-Z])/g, '$1_$2')
+    .replace(/[\s-]+/g, '_')
+    .toLowerCase()
+  const key = fieldLabelKeys[value] || fieldLabelKeys[normalized]
   return key
     ? t(`quotation.pages.audit.fields.${key}`)
     : fallbackLabel(value)
@@ -432,7 +459,7 @@ onMounted(() => void loadEvents())
           <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.itemType') }}</dt><dd>{{ targetTypeLabel(selected) }}</dd>
         </template>
         <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.result') }}</dt><dd>{{ t(`quotation.pages.audit.${selected.result}`) }}</dd>
-        <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.eventName') }}</dt><dd class="break-all font-mono text-xs">{{ selected.event_name }}</dd>
+        <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.eventName') }}</dt><dd class="break-all text-xs">{{ eventNameLabel(selected.event_name) }}</dd>
         <template v-if="selected.reason_code">
           <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.reasonCode') }}</dt><dd class="break-all font-mono text-xs">{{ selected.reason_code }}</dd>
         </template>
