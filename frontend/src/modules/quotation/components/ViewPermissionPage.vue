@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import {
   CheckCircle2,
   Clock3,
@@ -79,6 +79,7 @@ const message = ref('')
 
 const uploadUserId = ref('')
 const uploadFolderToken = ref('')
+const uploadSelectionError = ref('')
 const uploadExpiresAt = ref('')
 const uploadExpiryDrafts = ref<Record<number, string>>({})
 const decisionExpiryDrafts = ref<Record<number, string>>({})
@@ -238,9 +239,14 @@ function showSelectionError() {
 
 async function grantUpload() {
   if (!uploadUserId.value || !uploadFolderToken.value) {
-    error.value = t('quotation.pages.permissions.uploadSelectRequired')
+    const selectionMessage = t(
+      'quotation.pages.permissions.uploadSelectRequired',
+    )
+    error.value = selectionMessage
+    uploadSelectionError.value = selectionMessage
     return
   }
+  uploadSelectionError.value = ''
   saving.value = true
   resetFeedback()
   try {
@@ -340,6 +346,12 @@ function statusClass(status: AccessRequestRecord['status']): string {
 
 onMounted(() => {
   void load()
+})
+
+watch([uploadUserId, uploadFolderToken], () => {
+  if (uploadUserId.value && uploadFolderToken.value) {
+    uploadSelectionError.value = ''
+  }
 })
 </script>
 
@@ -540,6 +552,13 @@ onMounted(() => {
               :aria-label="t('quotation.pages.permissions.expiryLabel')"
             >
           </div>
+          <p
+            v-if="uploadSelectionError"
+            role="alert"
+            class="mt-2 text-sm text-red-700"
+          >
+            {{ uploadSelectionError }}
+          </p>
           <button
             type="button"
             class="dm-btn-primary mt-4 px-4 py-2 text-sm disabled:opacity-50"

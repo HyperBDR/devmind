@@ -72,6 +72,15 @@ const searchQuery = ref('')
 const isFormOpen = ref(false)
 const editingProduct = ref<Product | null>(null)
 const editingService = ref<Service | null>(null)
+const formTitle = computed(() => {
+  if (subTab.value === 'products' && editingProduct.value) {
+    return t('quotation.pages.catalog.productsEdit')
+  }
+  if (subTab.value === 'services' && editingService.value) {
+    return t('quotation.pages.catalog.servicesEdit')
+  }
+  return t(`quotation.pages.catalog.${subTab.value}Add`)
+})
 const quoteDescriptionsExpanded = ref(true)
 const discountSettingsExpanded = ref(true)
 
@@ -588,7 +597,7 @@ watch(
     <div v-if="isFormOpen" data-catalog-form-modal class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/35 p-4" @click.self="closeForm">
       <div class="w-full max-w-md overflow-hidden rounded-lg bg-white shadow-xl">
         <div class="flex items-center justify-between border-b border-dm-border-light px-5 py-4">
-          <h3 class="text-sm font-bold text-dm-text">{{ t(`quotation.pages.catalog.${subTab}Add`) }}</h3>
+          <h3 class="text-sm font-bold text-dm-text">{{ formTitle }}</h3>
           <button type="button" class="rounded-md p-1 text-dm-text-tertiary hover:bg-slate-100 hover:text-dm-text" :aria-label="t('quotation.common.close')" @click="closeForm"><X class="h-4 w-4" /></button>
         </div>
         <form v-if="subTab === 'products'" class="space-y-4 p-5 text-sm" @submit="handleCreateProduct">

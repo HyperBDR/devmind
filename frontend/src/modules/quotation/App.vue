@@ -84,6 +84,7 @@ const TAB_ROUTES: Record<string, string> = {
 type ListDateFilters = {
   createdFrom?: string
   createdTo?: string
+  currency?: string
 }
 
 function listDateFiltersFromRoute(
@@ -93,13 +94,16 @@ function listDateFiltersFromRoute(
     typeof query.created_from === 'string' ? query.created_from : undefined
   const createdTo =
     typeof query.created_to === 'string' ? query.created_to : undefined
-  return { createdFrom, createdTo }
+  const currency =
+    typeof query.currency === 'string' ? query.currency : undefined
+  return { createdFrom, createdTo, currency }
 }
 
 function listRouteLocation(listFilters?: ListDateFilters, page = 1) {
   const createdFrom = listFilters?.createdFrom
   const createdTo = listFilters?.createdTo
-  if (!createdFrom && !createdTo && page <= 1) {
+  const currency = listFilters?.currency
+  if (!createdFrom && !createdTo && !currency && page <= 1) {
     return { path: TAB_ROUTES.list }
   }
   return {
@@ -107,6 +111,7 @@ function listRouteLocation(listFilters?: ListDateFilters, page = 1) {
     query: {
       ...(createdFrom ? { created_from: createdFrom } : {}),
       ...(createdTo ? { created_to: createdTo } : {}),
+      ...(currency ? { currency } : {}),
       ...(page > 1 ? { page: String(page) } : {}),
     },
   }
@@ -120,6 +125,7 @@ function applyListDateFilters(listFilters?: ListDateFilters) {
     pageSize: quotationListQuery.value.pageSize || 10,
     createdFrom: listFilters?.createdFrom,
     createdTo: listFilters?.createdTo,
+    currency: listFilters?.currency,
   }
 }
 
@@ -130,6 +136,7 @@ async function handleQuotationListQueryChange(query: QuotationListParams) {
         {
           createdFrom: query.createdFrom,
           createdTo: query.createdTo,
+          currency: query.currency,
         },
         query.page || 1,
       ),
@@ -956,7 +963,12 @@ function handleBackToList() {
 function handleNavigateToTab(
   payload:
     | string
-    | { tab: string; createdFrom?: string; createdTo?: string },
+    | {
+      tab: string
+      createdFrom?: string
+      createdTo?: string
+      currency?: string
+    },
 ) {
   if (typeof payload === 'string') {
     goTab(payload)
@@ -965,6 +977,7 @@ function handleNavigateToTab(
   goTab(payload.tab, {
     createdFrom: payload.createdFrom,
     createdTo: payload.createdTo,
+    currency: payload.currency,
   })
 }
 
@@ -1198,6 +1211,7 @@ function reloadPage() {
             :total-pages="quotationListTotalPages"
             :initial-created-from="quotationListQuery.createdFrom"
             :initial-created-to="quotationListQuery.createdTo"
+            :initial-currency="quotationListQuery.currency"
             :current-user="auth.currentUser"
             @view-quote="handleViewQuoteDetails"
             @open-detail-drawer="handleOpenDetailDrawer"

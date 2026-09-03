@@ -1932,7 +1932,7 @@ const itemErrorEntries = computed(() =>
           </div>
 
           <!-- Step 4 -->
-          <div class="space-y-4 dm-card p-5 shadow-xs">
+          <div class="quotation-line-items-section space-y-4 dm-card p-5 shadow-xs">
             <div class="flex items-center justify-between border-b border-slate-50 pb-2">
               <div class="flex items-center gap-2">
                 <Layers class="h-4 w-4 text-dm-text-tertiary" />
@@ -1969,7 +1969,7 @@ const itemErrorEntries = computed(() =>
                   <Trash2 class="h-4 w-4" />
                 </button>
 
-                <div class="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2 2xl:grid-cols-5">
+                <div class="quotation-line-item-grid text-sm">
                   <div>
                     <label class="mb-1 block font-semibold text-dm-text-tertiary">
                       {{ t('quotation.pages.create.lineItemCategory') }}
@@ -2024,7 +2024,7 @@ const itemErrorEntries = computed(() =>
                     </p>
                   </div>
 
-                  <div class="sm:col-span-2 2xl:col-span-3">
+                  <div class="quotation-line-item-description">
                     <label class="mb-1 block font-semibold text-dm-text-tertiary">
                       {{ t('quotation.pages.create.lineItemDescription') }}
                     </label>
@@ -2451,3 +2451,40 @@ const itemErrorEntries = computed(() =>
     </div>
   </div>
 </template>
+
+<style>
+.quotation-line-items-section {
+  container: quotation-line-items / inline-size;
+}
+
+.quotation-line-item-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+}
+
+.quotation-line-item-description {
+  grid-column: span 1;
+  min-width: 0;
+}
+
+@container quotation-line-items (min-width: 400px) {
+  .quotation-line-item-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .quotation-line-item-description {
+    grid-column: span 2;
+  }
+}
+
+@container quotation-line-items (min-width: 560px) {
+  .quotation-line-item-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .quotation-line-item-description {
+    grid-column: span 3;
+  }
+}
+</style>

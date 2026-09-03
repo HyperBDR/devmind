@@ -63,6 +63,7 @@ const props = defineProps<{
   totalPages: number
   initialCreatedFrom?: string
   initialCreatedTo?: string
+  initialCurrency?: string
   currentUser?: {
     name: string
     title: string
@@ -258,7 +259,7 @@ let activeColumnResize: {
 const searchText = ref('')
 const selectedProductLine = ref('ALL')
 const selectedSource = ref('ALL')
-const selectedCurrency = ref('ALL')
+const selectedCurrency = ref(props.initialCurrency || 'ALL')
 const createdFrom = ref(props.initialCreatedFrom || '')
 const createdTo = ref(props.initialCreatedTo || '')
 const uploadAccessLoading = ref(false)
@@ -298,19 +299,26 @@ let searchTimer: number | undefined
 let suppressFilterWatch = false
 
 watch(
-  () => [props.initialCreatedFrom, props.initialCreatedTo] as const,
-  async ([nextFrom, nextTo]) => {
+  () => [
+    props.initialCreatedFrom,
+    props.initialCreatedTo,
+    props.initialCurrency,
+  ] as const,
+  async ([nextFrom, nextTo, nextCurrency]) => {
     const createdFromValue = nextFrom || ''
     const createdToValue = nextTo || ''
+    const currencyValue = nextCurrency || 'ALL'
     if (
       createdFrom.value === createdFromValue
       && createdTo.value === createdToValue
+      && selectedCurrency.value === currencyValue
     ) {
       return
     }
     suppressFilterWatch = true
     createdFrom.value = createdFromValue
     createdTo.value = createdToValue
+    selectedCurrency.value = currencyValue
     await nextTick()
     suppressFilterWatch = false
   },

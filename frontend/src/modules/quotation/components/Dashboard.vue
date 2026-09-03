@@ -62,6 +62,7 @@ const emit = defineEmits<{
       tab: string
       createdFrom?: string
       createdTo?: string
+      currency?: string
     },
   ]
 }>()
@@ -567,6 +568,7 @@ function openSelectedRangeQuotes() {
   emit('navigateToTab', {
     tab: 'list',
     ...selectedDateRange(),
+    currency: selectedDashboardCurrency.value,
   })
 }
 
