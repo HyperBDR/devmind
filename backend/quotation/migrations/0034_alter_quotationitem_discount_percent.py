@@ -3,7 +3,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("quotation", "0032_quotationnote"),
+        ("quotation", "0033_unique_auto_draft_quote_number"),
     ]
 
     operations = [
