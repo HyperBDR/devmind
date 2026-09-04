@@ -43,6 +43,13 @@ class ItemType(models.TextChoices):
     OTHER = "Other", "Other"
 
 
+class TaxCalculation(models.TextChoices):
+    """Direction used when applying tax to the quotation subtotal."""
+
+    ADD = "add", "Add to total"
+    SUBTRACT = "subtract", "Deduct from total"
+
+
 class DocumentType(models.TextChoices):
     EXCEL = "excel", "excel"
     PDF = "pdf", "pdf"
@@ -530,6 +537,11 @@ class Quotation(TimeStampedModel):
     quote_date = models.DateField()
     expire_date = models.DateField()
     tax_label = models.CharField(max_length=40, default="VAT")
+    tax_calculation = models.CharField(
+        max_length=8,
+        choices=TaxCalculation.choices,
+        default=TaxCalculation.ADD,
+    )
     vat_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     vat_amount = models.DecimalField(
         max_digits=18, decimal_places=2, default=0
@@ -545,6 +557,19 @@ class Quotation(TimeStampedModel):
     )
     grand_total = models.DecimalField(
         max_digits=18, decimal_places=2, default=0
+    )
+    additional_grand_total_label = models.CharField(
+        max_length=80,
+        default="Grand Total",
+    )
+    additional_grand_total_currency = models.CharField(
+        max_length=10,
+        default="USD",
+    )
+    additional_grand_total_amount = models.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        default=0,
     )
     remarks_disclaimer = models.TextField(blank=True, default="")
 

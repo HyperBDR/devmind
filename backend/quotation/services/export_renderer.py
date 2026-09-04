@@ -47,7 +47,7 @@ from quotation.services.storage import (
 LEGACY_DEFAULT_TEMPLATE_NAME = "DevMind standard quotation"
 DEFAULT_TEMPLATE_NAME = "DevMind managed standard quotation"
 DEFAULT_TEMPLATE_VERSION = 2
-CURRENT_RENDERER_VERSION = "quotation-preview-xlsx-v7"
+CURRENT_RENDERER_VERSION = "quotation-preview-xlsx-v8"
 DEFAULT_WORKSHEET = "Quotation"
 
 
@@ -1152,7 +1152,14 @@ def render_quotation_xlsx(
         sheet.row_dimensions[row].height = 15
         row += 1
 
-    totals = (
+    vat_amount = snapshot.get("vat_amount")
+    if (
+        snapshot.get("tax_calculation") == "subtract"
+        and vat_amount not in (None, "")
+    ):
+        vat_amount = -Decimal(str(vat_amount))
+
+    totals = [
         (
             f"Subtotal before {value('tax_label')}:",
             snapshot.get("subtotal_before_vat"),
@@ -1160,12 +1167,39 @@ def render_quotation_xlsx(
         (
             f"{value('tax_label')} Amount "
             f"({number_text(value('vat_rate', 0))}%):",
-            snapshot.get("vat_amount"),
+            vat_amount,
         ),
-        ("Grand Total:", snapshot.get("grand_total")),
-    )
+    ]
+    if any(
+        key in snapshot
+        for key in (
+            "additional_grand_total_label",
+            "additional_grand_total_currency",
+            "additional_grand_total_amount",
+        )
+    ):
+        additional_label = value(
+            "additional_grand_total_label",
+            "Grand Total",
+        )
+        additional_currency = value(
+            "additional_grand_total_currency",
+            "USD",
+        )
+        totals.append(
+            (
+                f"{additional_label} ({additional_currency}):",
+                snapshot.get("additional_grand_total_amount"),
+            )
+        )
+    totals.append(("Grand Total:", snapshot.get("grand_total")))
     for label, amount in totals:
-        sheet.merge_cells(start_row=row, start_column=5, end_row=row, end_column=6)
+        sheet.merge_cells(
+            start_row=row,
+            start_column=5,
+            end_row=row,
+            end_column=6,
+        )
         sheet.cell(row, 5, label)
         sheet.cell(row, 7, money(amount))
         sheet.cell(row, 7).number_format = numeric_format(

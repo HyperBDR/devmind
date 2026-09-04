@@ -1,4 +1,4 @@
-import type { QuotationLineItem } from '../types';
+import type { QuotationLineItem, TaxCalculation } from '../types';
 
 export interface LinePriceInput {
   listPrice: number;
@@ -56,7 +56,11 @@ export function calculateLineItemPrices(input: LinePriceInput): CalculatedLinePr
   };
 }
 
-export function calculateQuotationTotals(items: QuotationLineItem[], vatRateValue: number): QuotationTotals {
+export function calculateQuotationTotals(
+  items: QuotationLineItem[],
+  vatRateValue: number,
+  taxCalculation: TaxCalculation = 'add',
+): QuotationTotals {
   const softwareSubtotal = roundMoney(
     items
       .filter(item => item.type === 'Software')
@@ -70,6 +74,9 @@ export function calculateQuotationTotals(items: QuotationLineItem[], vatRateValu
   const subtotalBeforeVat = roundMoney(softwareSubtotal + othersSubtotal);
   const vatRate = normalizeVatRate(vatRateValue);
   const vatAmount = roundMoney(subtotalBeforeVat * vatRate / 100);
+  const vatAdjustment = taxCalculation === 'subtract'
+    ? -vatAmount
+    : vatAmount;
 
   return {
     softwareSubtotal,
@@ -77,6 +84,6 @@ export function calculateQuotationTotals(items: QuotationLineItem[], vatRateValu
     subtotalBeforeVat,
     vatRate,
     vatAmount,
-    grandTotal: roundMoney(subtotalBeforeVat + vatAmount),
+    grandTotal: roundMoney(subtotalBeforeVat + vatAdjustment),
   };
 }

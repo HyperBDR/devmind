@@ -116,6 +116,13 @@ const displayVersion = computed(() => {
     issuerContactTitle: ver.issuerContactTitle || q.issuerContactTitle,
     issuerSignature: ver.issuerSignature || q.issuerSignature,
     taxLabel: ver.taxLabel || q.taxLabel,
+    taxCalculation: ver.taxCalculation || q.taxCalculation,
+    additionalGrandTotalLabel:
+      ver.additionalGrandTotalLabel || q.additionalGrandTotalLabel,
+    additionalGrandTotalCurrency:
+      ver.additionalGrandTotalCurrency || q.additionalGrandTotalCurrency,
+    additionalGrandTotalAmount:
+      ver.additionalGrandTotalAmount ?? q.additionalGrandTotalAmount,
     quoteDate: ver.quoteDate || q.quoteDate,
     expireDate: ver.expireDate || q.expireDate,
   }
@@ -165,6 +172,12 @@ const snapshotQuote = computed((): Quotation | null => {
     taxLabel: ver.taxLabel || props.quote.taxLabel,
     vatRate: ver.vatRate,
     vatAmount: ver.vatAmount,
+    taxCalculation: ver.taxCalculation || 'add',
+    additionalGrandTotalLabel:
+      ver.additionalGrandTotalLabel || 'Grand Total',
+    additionalGrandTotalCurrency:
+      ver.additionalGrandTotalCurrency || 'USD',
+    additionalGrandTotalAmount: ver.additionalGrandTotalAmount ?? 0,
     grandTotal: ver.grandTotal,
     versions: undefined,
   }

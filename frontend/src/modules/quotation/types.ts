@@ -9,6 +9,7 @@ export type LineItemCurrency = 'CNY' | 'USD' | 'EUR' | 'MYR' | 'HKD';
 export type QuoteStatus = 'Draft' | 'Generated' | 'Uploaded' | 'Sent' | 'Accepted' | 'Rejected' | 'Expired' | 'Cancelled';
 export type QuoteProductLine = string;
 export type PaymentTermOption = 'CIA' | 'NET 30' | 'NET 45' | 'NET 60' | 'Mixed' | 'Others';
+export type TaxCalculation = 'add' | 'subtract';
 
 export interface ProductLineOption {
   value: QuoteProductLine;
@@ -68,6 +69,10 @@ export interface QuoteVersion {
   taxLabel?: string;
   vatRate: number;
   vatAmount: number;
+  taxCalculation?: TaxCalculation;
+  additionalGrandTotalCurrency?: string;
+  additionalGrandTotalLabel?: string;
+  additionalGrandTotalAmount?: number;
   excelGeneratedAt?: string;
   excelFileName?: string;
 }
@@ -123,7 +128,11 @@ export interface Quotation {
   taxLabel?: string;
   vatRate: number;
   vatAmount: number;
+  taxCalculation?: TaxCalculation;
   grandTotal: number;
+  additionalGrandTotalCurrency?: string;
+  additionalGrandTotalLabel?: string;
+  additionalGrandTotalAmount?: number;
   createdAt: string;
   updatedAt?: string;
 

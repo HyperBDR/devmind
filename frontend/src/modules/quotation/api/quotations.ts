@@ -47,12 +47,16 @@ interface ApiQuotation {
   quote_date: string;
   expire_date: string;
   tax_label: string;
+  tax_calculation: 'add' | 'subtract';
   vat_rate: number | string;
   vat_amount: number | string;
   software_subtotal: number | string;
   others_subtotal: number | string;
   subtotal_before_vat: number | string;
   grand_total: number | string;
+  additional_grand_total_label: string;
+  additional_grand_total_currency: string;
+  additional_grand_total_amount: number | string;
   remarks_disclaimer?: string | null;
   issuer_company_name: string;
   issuer_contact_name: string;
@@ -270,6 +274,7 @@ function snapNumber(
 function totalsFromItems(
   items: QuotationLineItem[],
   vatRate: number,
+  taxCalculation: 'add' | 'subtract' = 'add',
 ): Pick<
   QuoteVersion,
   | 'softwareSubtotal'
@@ -286,12 +291,15 @@ function totalsFromItems(
     .reduce((sum, item) => sum + item.extendedPrice, 0);
   const subtotalBeforeVat = softwareSubtotal + othersSubtotal;
   const vatAmount = (subtotalBeforeVat * vatRate) / 100;
+  const vatAdjustment = taxCalculation === 'subtract'
+    ? -vatAmount
+    : vatAmount;
   return {
     softwareSubtotal,
     othersSubtotal,
     subtotalBeforeVat,
     vatAmount,
-    grandTotal: subtotalBeforeVat + vatAmount,
+    grandTotal: subtotalBeforeVat + vatAdjustment,
   };
 }
 
@@ -314,6 +322,11 @@ function mapApiVersion(version: ApiQuotationVersion): QuoteVersion {
     })
     : [];
   const vatRate = snapNumber(snap, 'vat_rate', 'vatRate');
+  const taxCalculation = snapText(
+    snap,
+    'tax_calculation',
+    'taxCalculation',
+  ) === 'subtract' ? 'subtract' : 'add';
   const storedTotals = {
     softwareSubtotal: snapNumber(snap, 'software_subtotal', 'softwareSubtotal'),
     othersSubtotal: snapNumber(snap, 'others_subtotal', 'othersSubtotal'),
@@ -325,7 +338,7 @@ function mapApiVersion(version: ApiQuotationVersion): QuoteVersion {
     vatAmount: snapNumber(snap, 'vat_amount', 'vatAmount'),
     grandTotal: snapNumber(snap, 'grand_total', 'grandTotal'),
   };
-  const derivedTotals = totalsFromItems(items, vatRate);
+  const derivedTotals = totalsFromItems(items, vatRate, taxCalculation);
   const useDerived =
     items.length > 0 &&
     storedTotals.grandTotal === 0 &&
@@ -398,7 +411,25 @@ function mapApiVersion(version: ApiQuotationVersion): QuoteVersion {
     ),
     issuerSignature: snapText(snap, 'issuer_signature', 'issuerSignature'),
     taxLabel: snapText(snap, 'tax_label', 'taxLabel'),
+    taxCalculation,
     vatRate,
+    additionalGrandTotalLabel:
+      snapText(
+        snap,
+        'additional_grand_total_label',
+        'additionalGrandTotalLabel',
+      ) || 'Grand Total',
+    additionalGrandTotalCurrency:
+      snapText(
+        snap,
+        'additional_grand_total_currency',
+        'additionalGrandTotalCurrency',
+      ) || 'USD',
+    additionalGrandTotalAmount: snapNumber(
+      snap,
+      'additional_grand_total_amount',
+      'additionalGrandTotalAmount',
+    ),
     ...totals,
   };
 }
@@ -457,9 +488,17 @@ export function mapApiQuotation(api: ApiQuotation): Quotation {
     othersSubtotal: toNumber(api.others_subtotal),
     subtotalBeforeVat: toNumber(api.subtotal_before_vat),
     taxLabel: api.tax_label,
+    taxCalculation: api.tax_calculation || 'add',
     vatRate: toNumber(api.vat_rate),
     vatAmount: toNumber(api.vat_amount),
     grandTotal: toNumber(api.grand_total),
+    additionalGrandTotalLabel:
+      api.additional_grand_total_label || 'Grand Total',
+    additionalGrandTotalCurrency:
+      api.additional_grand_total_currency || 'USD',
+    additionalGrandTotalAmount: toNumber(
+      api.additional_grand_total_amount,
+    ),
     createdAt: api.created_at,
     updatedAt: api.updated_at,
     feishuFileToken: api.feishu_file_token || undefined,
@@ -582,7 +621,14 @@ export function mapQuotationToCreatePayload(quote: Quotation) {
     quote_date: quote.quoteDate,
     expire_date: quote.expireDate,
     tax_label: quote.taxLabel || 'VAT',
+    tax_calculation: quote.taxCalculation || 'add',
     vat_rate: quote.vatRate ?? 0,
+    additional_grand_total_label:
+      quote.additionalGrandTotalLabel || 'Grand Total',
+    additional_grand_total_currency:
+      quote.additionalGrandTotalCurrency || 'USD',
+    additional_grand_total_amount:
+      quote.additionalGrandTotalAmount ?? 0,
     remarks_disclaimer: quote.remarksDisclaimer || '',
     issuer_company_name: quote.issuerCompanyName || 'OnePro Cloud Limited',
     issuer_contact_name: quote.issuerContactName || quote.salesperson,

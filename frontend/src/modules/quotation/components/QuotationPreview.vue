@@ -63,8 +63,21 @@ function money(value: number): string {
   )}`
 }
 
+function currencyMoney(value: number, currency: string): string {
+  if (!value) return ''
+  return `${getCurrencySymbol(currency)}${Number(value).toLocaleString(
+    undefined,
+    { maximumFractionDigits: 2 },
+  )}`
+}
+
 function percent(value: number): string {
   return value ? `${value}%` : '0%'
+}
+
+function taxMoney(value: number): string {
+  const prefix = model.value.taxCalculation === 'subtract' ? '-' : ''
+  return value ? `${prefix}${money(value)}` : ''
 }
 
 function rowHasContent(item: PreviewLineItem) {
@@ -469,7 +482,22 @@ const headerCellClass =
             {{ model.taxLabel }} Amount ({{ model.vatRate }}%):
           </td>
           <td :class="moneyTotalCellClass">
-            {{ money(model.vatAmount) }}
+            {{ taxMoney(model.vatAmount) }}
+          </td>
+        </tr>
+        <tr>
+          <td colspan="4" class="px-1.5 py-1 align-middle" />
+          <td
+            colspan="2"
+            class="whitespace-nowrap border border-slate-300 px-1.5 py-1 text-right font-semibold align-middle"
+          >
+            {{ model.additionalGrandTotalLabel }} ({{ model.additionalGrandTotalCurrency }}):
+          </td>
+          <td :class="moneyTotalCellClass">
+            {{ currencyMoney(
+              model.additionalGrandTotalAmount,
+              model.additionalGrandTotalCurrency,
+            ) }}
           </td>
         </tr>
         <tr>

@@ -29,6 +29,10 @@ export interface CreateQuoteDraft {
   paymentTermsCustom: string;
   vatRateInput: string;
   taxLabel: string;
+  taxCalculation?: 'add' | 'subtract';
+  additionalGrandTotalCurrency?: string;
+  additionalGrandTotalLabel?: string;
+  additionalGrandTotalAmountInput?: string;
   quoteDate: string;
   expireDate: string;
   remarksDisclaimer: string;
@@ -58,7 +62,17 @@ export function isCreateQuoteDraftMeaningful(
     draft.billingEmail?.trim() ||
     draft.remarksDisclaimer?.trim() ||
     draft.paymentTermsCustom?.trim() ||
-    draft.vatRateInput?.trim()
+    draft.vatRateInput?.trim() ||
+    draft.additionalGrandTotalAmountInput?.trim() ||
+    (
+      draft.additionalGrandTotalLabel?.trim()
+      && draft.additionalGrandTotalLabel.trim() !== 'Grand Total'
+    ) ||
+    (
+      draft.additionalGrandTotalCurrency
+      && draft.additionalGrandTotalCurrency !== 'USD'
+    ) ||
+    draft.taxCalculation === 'subtract'
   ) {
     return true;
   }

@@ -763,12 +763,16 @@ class QuotationSerializer(serializers.ModelSerializer):
             "quote_date",
             "expire_date",
             "tax_label",
+            "tax_calculation",
             "vat_rate",
             "vat_amount",
             "software_subtotal",
             "others_subtotal",
             "subtotal_before_vat",
             "grand_total",
+            "additional_grand_total_label",
+            "additional_grand_total_currency",
+            "additional_grand_total_amount",
             "remarks_disclaimer",
             "issuer_company_name",
             "issuer_contact_name",
@@ -857,11 +861,36 @@ class QuotationCreateSerializer(serializers.Serializer):
         default="VAT",
         max_length=Quotation._meta.get_field("tax_label").max_length,
     )
+    tax_calculation = serializers.ChoiceField(
+        choices=("add", "subtract"),
+        required=False,
+        default="add",
+    )
     vat_rate = serializers.DecimalField(
         max_digits=5,
         decimal_places=2,
         min_value=Decimal("0"),
         max_value=Decimal("100"),
+        required=False,
+        default=Decimal("0"),
+    )
+    additional_grand_total_label = serializers.CharField(
+        required=False,
+        default="Grand Total",
+        max_length=Quotation._meta.get_field(
+            "additional_grand_total_label"
+        ).max_length,
+    )
+    additional_grand_total_currency = serializers.ChoiceField(
+        choices=settings.QUOTATION_ALLOWED_CURRENCIES,
+        required=False,
+        default="USD",
+    )
+    additional_grand_total_amount = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        min_value=Decimal("0"),
+        max_value=MAX_QUOTATION_AMOUNT,
         required=False,
         default=Decimal("0"),
     )
@@ -1009,11 +1038,32 @@ class QuotationUpdateSerializer(serializers.Serializer):
         required=False,
         max_length=Quotation._meta.get_field("tax_label").max_length,
     )
+    tax_calculation = serializers.ChoiceField(
+        choices=("add", "subtract"),
+        required=False,
+    )
     vat_rate = serializers.DecimalField(
         max_digits=5,
         decimal_places=2,
         min_value=Decimal("0"),
         max_value=Decimal("100"),
+        required=False,
+    )
+    additional_grand_total_label = serializers.CharField(
+        required=False,
+        max_length=Quotation._meta.get_field(
+            "additional_grand_total_label"
+        ).max_length,
+    )
+    additional_grand_total_currency = serializers.ChoiceField(
+        choices=settings.QUOTATION_ALLOWED_CURRENCIES,
+        required=False,
+    )
+    additional_grand_total_amount = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        min_value=Decimal("0"),
+        max_value=MAX_QUOTATION_AMOUNT,
         required=False,
     )
     remarks_disclaimer = serializers.CharField(

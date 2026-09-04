@@ -47,6 +47,10 @@ export interface QuotationPreviewModel {
   taxLabel: string;
   vatRate: number;
   vatAmount: number;
+  taxCalculation: 'add' | 'subtract';
+  additionalGrandTotalCurrency: string;
+  additionalGrandTotalLabel: string;
+  additionalGrandTotalAmount: number;
   grandTotal: number;
   remarksDisclaimer: string;
   issuerSignature: string;
@@ -183,6 +187,11 @@ export function buildQuotationPreviewModel(quote: Quotation, options: BuildOptio
     taxLabel: resolveTaxLabel(quote.taxLabel),
     vatRate: quote.vatRate ?? 0,
     vatAmount: quote.vatAmount ?? 0,
+    taxCalculation: quote.taxCalculation || 'add',
+    additionalGrandTotalCurrency:
+      quote.additionalGrandTotalCurrency || 'USD',
+    additionalGrandTotalLabel: quote.additionalGrandTotalLabel || 'Grand Total',
+    additionalGrandTotalAmount: quote.additionalGrandTotalAmount ?? 0,
     grandTotal: quote.grandTotal,
     remarksDisclaimer: quote.remarksDisclaimer ?? '',
     issuerSignature: quote.issuerSignature ?? '',

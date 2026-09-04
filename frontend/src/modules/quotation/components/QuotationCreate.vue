@@ -24,6 +24,7 @@ import type {
   QuotationLineItem,
   QuoteProductLine,
   Service,
+  TaxCalculation,
   DiscountOption,
 } from '../types'
 import { MOCK_SALESPERSONS } from '../data'
@@ -181,6 +182,10 @@ const paymentTermOption = ref<PaymentTermOption>(DEFAULT_PAYMENT_TERM_OPTION)
 const paymentTermsCustom = ref('')
 const vatRateInput = ref('')
 const taxLabel = ref(DEFAULT_TAX_LABEL)
+const taxCalculation = ref<TaxCalculation>('add')
+const additionalGrandTotalLabel = ref('Grand Total')
+const additionalGrandTotalCurrency = ref('USD')
+const additionalGrandTotalAmountInput = ref('')
 const historySourceQuotations = computed(() => props.historyQuotations ?? props.quotations)
 const taxLabelHistory = ref<string[]>(
   getMergedTaxLabelHistory(props.currentUser?.email, historySourceQuotations.value),
@@ -224,6 +229,24 @@ function handleVatRateInput(event: Event) {
   const sanitized = sanitizeVatRateInput(input.value)
   input.value = sanitized
   vatRateInput.value = sanitized
+}
+
+function sanitizeMoneyInput(value: string): string {
+  const numeric = value.replace(/[^\d.]/g, '')
+  const [integer = '', ...decimalParts] = numeric.split('.')
+  const decimal = decimalParts.join('').slice(0, 2)
+  return numeric.includes('.') ? `${integer}.${decimal}` : integer
+}
+
+function handleAdditionalGrandTotalInput(event: Event) {
+  const input = event.target as HTMLInputElement
+  const sanitized = sanitizeMoneyInput(input.value)
+  input.value = sanitized
+  additionalGrandTotalAmountInput.value = sanitized
+}
+
+function formatMoneyInput(value?: number): string {
+  return value ? String(value) : ''
 }
 
 const items = ref<QuotationLineItem[]>([
@@ -295,6 +318,14 @@ const currencyOptions = computed(() => [
   { value: 'EUR', label: 'EUR' },
   { value: 'MYR', label: 'MYR' },
   { value: 'HKD', label: 'HKD' },
+])
+
+const additionalCurrencyOptions = computed(() => [
+  { value: 'CNY', label: 'CNY' },
+  { value: 'USD', label: 'USD' },
+  { value: 'EUR', label: 'EUR' },
+  { value: 'MYR', label: 'MYR (RM)' },
+  { value: 'HKD', label: 'HKD (HK$)' },
 ])
 
 const paymentTermSelectOptions = PAYMENT_TERM_OPTIONS.map((option) => ({
@@ -607,6 +638,14 @@ function loadEditingQuoteIntoForm(editingQuote: Quotation) {
     loadedPaymentTermOption === 'Others' ? editingQuote.paymentTerms || '' : ''
   vatRateInput.value = formatVatRateForInput(editingQuote.vatRate)
   taxLabel.value = resolveTaxLabel(editingQuote.taxLabel)
+  taxCalculation.value = editingQuote.taxCalculation || 'add'
+  additionalGrandTotalLabel.value =
+    editingQuote.additionalGrandTotalLabel || 'Grand Total'
+  additionalGrandTotalCurrency.value =
+    editingQuote.additionalGrandTotalCurrency || 'USD'
+  additionalGrandTotalAmountInput.value = formatMoneyInput(
+    editingQuote.additionalGrandTotalAmount,
+  )
   const todayInput = formatDateInput(new Date())
   quoteDate.value = draftLifecycleForm.value
     ? editingQuote.quoteDate || todayInput
@@ -664,6 +703,14 @@ function loadCopiedQuoteIntoForm(sourceQuote: Quotation) {
     loadedPaymentTermOption === 'Others' ? sourceQuote.paymentTerms || '' : ''
   vatRateInput.value = formatVatRateForInput(sourceQuote.vatRate)
   taxLabel.value = resolveTaxLabel(sourceQuote.taxLabel)
+  taxCalculation.value = sourceQuote.taxCalculation || 'add'
+  additionalGrandTotalLabel.value =
+    sourceQuote.additionalGrandTotalLabel || 'Grand Total'
+  additionalGrandTotalCurrency.value =
+    sourceQuote.additionalGrandTotalCurrency || 'USD'
+  additionalGrandTotalAmountInput.value = formatMoneyInput(
+    sourceQuote.additionalGrandTotalAmount,
+  )
   const todayInput = formatDateInput(new Date())
   quoteDate.value = todayInput
   expireDate.value = getDefaultExpireDate(dateFromInput(todayInput))
@@ -720,6 +767,10 @@ function resetCreateForm() {
   paymentTermsCustom.value = ''
   vatRateInput.value = ''
   taxLabel.value = DEFAULT_TAX_LABEL
+  taxCalculation.value = 'add'
+  additionalGrandTotalLabel.value = 'Grand Total'
+  additionalGrandTotalCurrency.value = 'USD'
+  additionalGrandTotalAmountInput.value = ''
   quoteDate.value = todayInput
   expireDate.value = getDefaultExpireDate(dateFromInput(todayInput))
   remarksDisclaimer.value = ''
@@ -765,6 +816,11 @@ function buildCreateDraftPayload(): Omit<CreateQuoteDraft, 'version' | 'savedAt'
     paymentTermsCustom: paymentTermsCustom.value,
     vatRateInput: vatRateInput.value,
     taxLabel: taxLabel.value,
+    taxCalculation: taxCalculation.value,
+    additionalGrandTotalLabel: additionalGrandTotalLabel.value,
+    additionalGrandTotalCurrency: additionalGrandTotalCurrency.value,
+    additionalGrandTotalAmountInput:
+      additionalGrandTotalAmountInput.value,
     quoteDate: quoteDate.value,
     expireDate: expireDate.value,
     remarksDisclaimer: remarksDisclaimer.value,
@@ -799,6 +855,13 @@ function applyCreateDraft(draft: CreateQuoteDraft) {
   paymentTermsCustom.value = draft.paymentTermsCustom || ''
   vatRateInput.value = draft.vatRateInput || ''
   taxLabel.value = draft.taxLabel || DEFAULT_TAX_LABEL
+  taxCalculation.value = draft.taxCalculation || 'add'
+  additionalGrandTotalLabel.value =
+    draft.additionalGrandTotalLabel || 'Grand Total'
+  additionalGrandTotalCurrency.value =
+    draft.additionalGrandTotalCurrency || 'USD'
+  additionalGrandTotalAmountInput.value =
+    draft.additionalGrandTotalAmountInput || ''
   quoteDate.value = draft.quoteDate || formatDateInput(new Date())
   expireDate.value = draft.expireDate || getDefaultExpireDate()
   remarksDisclaimer.value = draft.remarksDisclaimer || ''
@@ -947,6 +1010,10 @@ watch(
     paymentTermsCustom,
     vatRateInput,
     taxLabel,
+    taxCalculation,
+    additionalGrandTotalLabel,
+    additionalGrandTotalCurrency,
+    additionalGrandTotalAmountInput,
     quoteDate,
     expireDate,
     remarksDisclaimer,
@@ -1114,12 +1181,20 @@ function handleDescriptionSelect(
 }
 
 const parsedVatRate = computed(() => parseVatRateInput(vatRateInput.value))
-const quotationTotals = computed(() => calculateQuotationTotals(items.value, parsedVatRate.value))
+const quotationTotals = computed(() => calculateQuotationTotals(
+  items.value,
+  parsedVatRate.value,
+  taxCalculation.value,
+))
 const softwareSubtotal = computed(() => quotationTotals.value.softwareSubtotal)
 const othersSubtotal = computed(() => quotationTotals.value.othersSubtotal)
 const subtotalBeforeVat = computed(() => quotationTotals.value.subtotalBeforeVat)
 const vatAmount = computed(() => quotationTotals.value.vatAmount)
 const grandTotal = computed(() => quotationTotals.value.grandTotal)
+const additionalGrandTotalAmount = computed(() => {
+  const amount = Number(additionalGrandTotalAmountInput.value)
+  return Number.isFinite(amount) ? amount : 0
+})
 const currencySymbol = computed(() => getCurrencySymbol(currency.value))
 
 function handleResizeStart(event: PointerEvent) {
@@ -1184,6 +1259,10 @@ const previewQuote = computed<Quotation>(() => ({
   taxLabel: resolveTaxLabel(taxLabel.value),
   vatRate: quotationTotals.value.vatRate,
   vatAmount: vatAmount.value,
+  taxCalculation: taxCalculation.value,
+  additionalGrandTotalCurrency: additionalGrandTotalCurrency.value,
+  additionalGrandTotalLabel: additionalGrandTotalLabel.value,
+  additionalGrandTotalAmount: additionalGrandTotalAmount.value,
   grandTotal: grandTotal.value,
   createdAt: props.editingQuote ? props.editingQuote.createdAt : `${quoteDate.value} 00:00:00`,
 }))
@@ -1318,6 +1397,10 @@ function handleSubmit(status: 'Draft' | 'Generated') {
     taxLabel: normalizedTaxLabel,
     vatRate: quotationTotals.value.vatRate,
     vatAmount: vatAmount.value,
+    taxCalculation: taxCalculation.value,
+    additionalGrandTotalCurrency: additionalGrandTotalCurrency.value,
+    additionalGrandTotalLabel: additionalGrandTotalLabel.value,
+    additionalGrandTotalAmount: additionalGrandTotalAmount.value,
     grandTotal: grandTotal.value,
     createdAt: props.editingQuote ? props.editingQuote.createdAt : formattedDate,
   }
@@ -2190,7 +2273,7 @@ const itemErrorEntries = computed(() =>
 
         <div class="space-y-6">
           <!-- Step 5 -->
-          <div class="relative space-y-4 overflow-hidden dm-card p-5 text-sm shadow-xs">
+          <div class="relative space-y-4 dm-card p-5 text-sm shadow-xs">
             <div class="flex items-center gap-2 border-b border-slate-50 pb-2">
               <DollarSign class="h-4 w-4 text-dm-text-tertiary" />
               <h3 class="text-sm font-bold text-dm-text">{{ t('quotation.pages.create.step5Title') }}</h3>
@@ -2221,11 +2304,9 @@ const itemErrorEntries = computed(() =>
                   {{ currencySymbol }}{{ subtotalBeforeVat.toLocaleString() }}
                 </span>
               </div>
-              <div
-                class="grid grid-cols-1 items-end gap-3 rounded-lg border border-dm-border-light bg-[#fafafa]/70 p-3 2xl:grid-cols-[minmax(0,1fr)_220px]"
-              >
-                <div class="min-w-0 space-y-3">
-                  <div>
+              <div class="space-y-3 rounded-lg border border-dm-border-light bg-[#fafafa]/70 p-3">
+                <div class="grid gap-3 2xl:grid-cols-[minmax(0,1.25fr)_minmax(180px,0.75fr)]">
+                  <div class="min-w-0">
                     <label class="mb-1 block font-semibold text-dm-text-tertiary">
                       {{ t('quotation.pages.create.taxLabel') }}
                     </label>
@@ -2238,7 +2319,7 @@ const itemErrorEntries = computed(() =>
                       :helper-text="t('quotation.pages.create.taxLabelHelper')"
                     />
                   </div>
-                  <div>
+                  <div class="min-w-0">
                     <label class="mb-1 block font-semibold text-dm-text-tertiary">
                       {{
                         t('quotation.pages.create.taxRate', {
@@ -2264,17 +2345,130 @@ const itemErrorEntries = computed(() =>
                     </p>
                   </div>
                 </div>
-                <div class="min-w-0 w-full text-right 2xl:w-[220px]">
-                  <span class="block truncate text-xs font-semibold text-dm-text-tertiary">
-                    {{
-                      t('quotation.pages.create.taxAmount', {
-                        taxLabel: resolveTaxLabel(taxLabel),
-                      })
-                    }}
+                <div>
+                  <span class="mb-1 block font-semibold text-dm-text-tertiary">
+                    {{ t('quotation.pages.create.taxCalculation') }}
                   </span>
-                  <span class="font-mono font-bold text-dm-text">
-                    {{ currencySymbol }}{{ vatAmount.toLocaleString() }}
-                  </span>
+                  <div class="grid grid-cols-2 rounded-lg bg-slate-100 p-1">
+                    <button
+                      type="button"
+                      class="rounded-md px-2 py-1.5 text-xs font-semibold transition"
+                      :class="taxCalculation === 'add'
+                        ? 'bg-white text-dm-primary shadow-xs'
+                        : 'text-dm-text-tertiary hover:text-dm-text'"
+                      @click="taxCalculation = 'add'"
+                    >
+                      + {{ t('quotation.pages.create.taxCalculationAdd') }}
+                    </button>
+                    <button
+                      type="button"
+                      class="rounded-md px-2 py-1.5 text-xs font-semibold transition"
+                      :class="taxCalculation === 'subtract'
+                        ? 'bg-white text-amber-700 shadow-xs'
+                        : 'text-dm-text-tertiary hover:text-dm-text'"
+                      @click="taxCalculation = 'subtract'"
+                    >
+                      − {{ t('quotation.pages.create.taxCalculationSubtract') }}
+                    </button>
+                  </div>
+                  <p class="mt-1 text-xs font-medium text-dm-text-tertiary">
+                    {{ t('quotation.pages.create.taxCalculationHelper') }}
+                  </p>
+                </div>
+                <div class="rounded-lg border border-dm-border-light bg-white px-3 py-2.5">
+                  <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div class="flex min-w-0 items-center gap-2.5">
+                      <span
+                        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-base font-bold"
+                        :class="taxCalculation === 'subtract'
+                          ? 'bg-amber-100 text-amber-700'
+                          : 'bg-blue-100 text-dm-primary'"
+                      >
+                        {{ taxCalculation === 'subtract' ? '−' : '+' }}
+                      </span>
+                      <div class="min-w-0">
+                        <span class="block truncate text-xs font-semibold text-dm-text-tertiary">
+                          {{
+                            t('quotation.pages.create.taxAmount', {
+                              taxLabel: resolveTaxLabel(taxLabel),
+                            })
+                          }}
+                        </span>
+                        <p class="truncate text-xs font-medium text-dm-text-secondary">
+                          {{
+                            t(
+                              taxCalculation === 'subtract'
+                                ? 'quotation.pages.create.taxAdjustmentSubtractSummary'
+                                : 'quotation.pages.create.taxAdjustmentAddSummary',
+                              { taxLabel: resolveTaxLabel(taxLabel) },
+                            )
+                          }}
+                        </p>
+                      </div>
+                    </div>
+                    <span
+                      class="shrink-0 font-mono text-lg font-bold"
+                      :class="taxCalculation === 'subtract' ? 'text-amber-700' : 'text-dm-text'"
+                    >
+                      {{ taxCalculation === 'subtract' ? '-' : ''
+                      }}{{ currencySymbol }}{{ vatAmount.toLocaleString() }}
+                    </span>
+                  </div>
+                </div>
+                <div class="mt-1 border-t border-dm-border-light pt-3">
+                  <div class="mb-2 flex items-baseline justify-between gap-3">
+                    <span class="font-semibold text-dm-text">
+                      {{ t('quotation.pages.create.additionalGrandTotal') }}
+                    </span>
+                    <span class="text-xs font-medium text-dm-text-tertiary">
+                      {{ t('quotation.pages.create.additionalGrandTotalHelper') }}
+                    </span>
+                  </div>
+                  <div class="grid grid-cols-[minmax(0,1fr)_88px_120px] gap-2.5">
+                    <div>
+                      <label class="mb-1 block font-semibold text-dm-text-tertiary">
+                        {{ t('quotation.pages.create.additionalGrandTotalLabel') }}
+                      </label>
+                      <input
+                        v-model="additionalGrandTotalLabel"
+                        data-testid="quote-additional-total-label"
+                        type="text"
+                        :placeholder="t('quotation.pages.create.additionalGrandTotalLabelPlaceholder')"
+                        class="w-full rounded-lg border border-dm-border bg-white p-2 text-dm-text placeholder:text-slate-300 focus:border-blue-500 focus:outline-hidden"
+                      />
+                    </div>
+                    <div>
+                      <label class="mb-1 block font-semibold text-dm-text-tertiary">
+                        {{ t('quotation.pages.create.additionalGrandTotalCurrency') }}
+                      </label>
+                      <FormSelect
+                        v-model="additionalGrandTotalCurrency"
+                        :options="additionalCurrencyOptions"
+                        data-testid="quote-additional-total-currency"
+                      />
+                    </div>
+                    <div>
+                      <label class="mb-1 block font-semibold text-dm-text-tertiary">
+                        {{ t('quotation.pages.create.additionalGrandTotalAmount') }}
+                      </label>
+                      <div class="relative">
+                        <span
+                          class="pointer-events-none absolute inset-y-0 left-3 flex items-center font-mono text-dm-text-tertiary"
+                        >
+                          {{ getCurrencySymbol(additionalGrandTotalCurrency) }}
+                        </span>
+                        <input
+                          v-model="additionalGrandTotalAmountInput"
+                          data-testid="quote-additional-total-amount"
+                          type="text"
+                          inputmode="decimal"
+                          placeholder="0.00"
+                          class="w-full rounded-lg border border-dm-border bg-white py-2 pr-3 pl-10 text-right font-mono text-dm-text placeholder:text-slate-300 focus:border-blue-500 focus:outline-hidden"
+                          @input="handleAdditionalGrandTotalInput"
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
               <div
