@@ -8,9 +8,10 @@ import {
   watch,
 } from 'vue'
 import {
-  Download,
+  Check,
   Columns3,
   Copy,
+  Download,
   ExternalLink,
   FileSpreadsheet,
   FileText,
@@ -19,6 +20,8 @@ import {
   Search,
   Trash2,
   UploadCloud,
+  UserRound,
+  UsersRound,
   X,
 } from 'lucide-vue-next'
 import {
@@ -36,7 +39,10 @@ import {
 } from '../api/exports'
 import { downloadImportedDocument } from '../api/documents'
 import PublicAttachmentPicker from './PublicAttachmentPicker.vue'
-import type { QuotationListParams } from '../api/quotations'
+import type {
+  QuotationCreatorOption,
+  QuotationListParams,
+} from '../api/quotations'
 import type { Quotation } from '../types'
 import { FORM_SELECT_COMPACT_TRIGGER_CLASS } from '../utils/formFieldClasses'
 import { clearedFeishuFields } from '../utils/feishuLinkState'
@@ -56,6 +62,7 @@ const props = defineProps<{
   quotations: Quotation[]
   productLines: string[]
   currencies?: string[]
+  creators?: QuotationCreatorOption[]
   loading?: boolean
   page: number
   pageSize: 10 | 20 | 50
@@ -116,6 +123,40 @@ const currencyFilterOptions = computed(() => [
       label: getCurrencyShortLabel(currency),
     })),
 ])
+
+type QuotedByOption = {
+  value: string
+  label: string
+  email?: string
+  kind: 'anyone' | 'me' | 'person'
+}
+
+const quotedByFilterOptions = computed<QuotedByOption[]>(() => {
+  const currentEmail = props.currentUser?.email.trim().toLowerCase() || ''
+  const people = (props.creators || [])
+    .filter((creator) => creator.email.trim().toLowerCase() !== currentEmail)
+    .map((creator) => ({
+      value: creator.email,
+      label: creator.name || creator.email,
+      email: creator.email,
+      kind: 'person' as const,
+    }))
+  return [
+    {
+      value: 'ALL',
+      label: t('quotation.pages.list.quotedByAnyone'),
+      kind: 'anyone',
+    },
+    {
+      value: 'ME',
+      label: t('quotation.pages.list.quotedByMe', {
+        name: props.currentUser?.name || props.currentUser?.email || '',
+      }),
+      kind: 'me',
+    },
+    ...people,
+  ]
+})
 
 const pageSizeOptions = [10, 20, 50].map((value) => ({
   value: String(value),
@@ -188,12 +229,23 @@ const columnConfig = {
   },
 } as const
 
-type ResizableColumnKey = keyof typeof columnConfig
+type ColumnKey = keyof typeof columnConfig
+type ResizableColumnKey = Extract<
+  ColumnKey,
+  'quoteNo' | 'project' | 'customer' | 'contact' | 'salesperson'
+>
 
 const ACTIONS_COLUMN_WIDTH = 152
 const COLUMN_RESIZE_STEP = 16
+const resizableColumnKeys = new Set<ColumnKey>([
+  'quoteNo',
+  'project',
+  'customer',
+  'contact',
+  'salesperson',
+])
 
-const columnWidths = ref<Record<ResizableColumnKey, number>>({
+const columnWidths = ref<Record<ColumnKey, number>>({
   quoteNo: columnConfig.quoteNo.defaultWidth,
   project: columnConfig.project.defaultWidth,
   customer: columnConfig.customer.defaultWidth,
@@ -206,20 +258,20 @@ const columnWidths = ref<Record<ResizableColumnKey, number>>({
 })
 
 const resizableColumns = computed(() =>
-  (Object.keys(columnConfig) as ResizableColumnKey[]).map((key) => ({
+  (Object.keys(columnConfig) as ColumnKey[]).map((key) => ({
     key,
     ...columnConfig[key],
     label: t(columnConfig[key].labelKey),
   })),
 )
 
-const defaultColumnKeys: ResizableColumnKey[] = [
+const defaultColumnKeys: ColumnKey[] = [
   'quoteNo',
   'project',
   'customer',
   'total',
 ]
-const visibleColumnKeys = ref<ResizableColumnKey[]>([...defaultColumnKeys])
+const visibleColumnKeys = ref<ColumnKey[]>([...defaultColumnKeys])
 const columnsOpen = ref(false)
 const visibleColumns = computed(() =>
   resizableColumns.value.filter((column) =>
@@ -237,7 +289,7 @@ const tableUsesHorizontalScroll = computed(
   () => visibleColumnKeys.value.length > defaultColumnKeys.length,
 )
 
-function tableColumnWidth(key: ResizableColumnKey | 'actions'): string {
+function tableColumnWidth(key: ColumnKey | 'actions'): string {
   const width = key === 'actions'
     ? ACTIONS_COLUMN_WIDTH
     : columnWidths.value[key]
@@ -260,6 +312,13 @@ const searchText = ref('')
 const selectedProductLine = ref('ALL')
 const selectedSource = ref('ALL')
 const selectedCurrency = ref(props.initialCurrency || 'ALL')
+const selectedQuotedBy = ref('ALL')
+const quotedByOpen = ref(false)
+const selectedQuotedByOption = computed(
+  () => quotedByFilterOptions.value.find(
+    (option) => option.value === selectedQuotedBy.value,
+  ) || quotedByFilterOptions.value[0],
+)
 const createdFrom = ref(props.initialCreatedFrom || '')
 const createdTo = ref(props.initialCreatedTo || '')
 const uploadAccessLoading = ref(false)
@@ -449,6 +508,28 @@ function handleOutsideClick(event: MouseEvent) {
   if (!target?.closest('[data-column-picker]')) {
     columnsOpen.value = false
   }
+  if (!target?.closest('[data-quoted-by-filter]')) {
+    quotedByOpen.value = false
+  }
+}
+
+function selectQuotedBy(option: QuotedByOption) {
+  selectedQuotedBy.value = option.value
+  quotedByOpen.value = false
+}
+
+function creatorInitials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2)
+}
+
+function isResizableColumn(key: ColumnKey): key is ResizableColumnKey {
+  return resizableColumnKeys.has(key)
 }
 
 function clampColumnWidth(key: ResizableColumnKey, width: number): number {
@@ -908,6 +989,12 @@ function listQuery(
         ? undefined
         : (selectedSource.value as 'manual' | 'document_import'),
     currency: selectedCurrency.value === 'ALL' ? undefined : selectedCurrency.value,
+    quotedBy:
+      selectedQuotedBy.value === 'ALL'
+        ? undefined
+        : selectedQuotedBy.value === 'ME'
+          ? 'me'
+          : selectedQuotedBy.value,
     createdFrom: createdFrom.value || undefined,
     createdTo: createdTo.value || undefined,
   }
@@ -930,6 +1017,7 @@ async function handleResetFilters() {
   selectedProductLine.value = 'ALL'
   selectedSource.value = 'ALL'
   selectedCurrency.value = 'ALL'
+  selectedQuotedBy.value = 'ALL'
   createdFrom.value = ''
   createdTo.value = ''
   await nextTick()
@@ -950,6 +1038,7 @@ watch(searchText, () => {
     selectedProductLine,
     selectedSource,
     selectedCurrency,
+    selectedQuotedBy,
     createdFrom,
     createdTo,
   ],
@@ -965,6 +1054,7 @@ const hasActiveFilters = computed(
     selectedProductLine.value !== 'ALL' ||
     selectedSource.value !== 'ALL' ||
     selectedCurrency.value !== 'ALL' ||
+    selectedQuotedBy.value !== 'ALL' ||
     createdFrom.value !== '' ||
     createdTo.value !== '',
 )
@@ -1020,7 +1110,7 @@ function displayQuoteDate(quote: Quotation): string {
       aria-label="Quote filters"
       class="rounded-xl border border-dm-border-light bg-white p-2 shadow-xs"
     >
-      <div class="grid grid-cols-1 items-end gap-2 md:grid-cols-2 xl:grid-cols-[minmax(0,1.35fr)_repeat(3,minmax(0,.7fr))_minmax(0,1.4fr)]">
+      <div class="grid grid-cols-1 items-end gap-2 md:grid-cols-2 xl:grid-cols-[minmax(0,1.45fr)_minmax(0,.72fr)_minmax(0,.72fr)_minmax(0,.88fr)_minmax(0,.76fr)_minmax(0,1.55fr)]">
           <div class="min-w-0">
             <label class="mb-1 block truncate text-xs font-medium text-dm-text-tertiary">
               {{ t('quotation.pages.list.keywordLabel') }}
@@ -1068,6 +1158,69 @@ function displayQuoteDate(quote: Quotation): string {
               :trigger-class-name="`${FORM_SELECT_COMPACT_TRIGGER_CLASS} rounded-lg border-dm-border-light bg-white focus:border-blue-300 focus:ring-2 focus:ring-blue-100`"
               :options="sourceFilterOptions"
             />
+          </div>
+
+          <div class="min-w-0" data-quoted-by-filter>
+            <label class="mb-1 block truncate text-xs font-medium text-dm-text-tertiary">
+              {{ t('quotation.pages.list.quotedByLabel') }}
+            </label>
+            <div class="relative">
+              <button
+                type="button"
+                data-testid="quoted-by-filter"
+                :aria-expanded="quotedByOpen"
+                aria-haspopup="listbox"
+                :aria-label="t('quotation.pages.list.quotedByLabel')"
+                :class="`${FORM_SELECT_COMPACT_TRIGGER_CLASS} qmp-select-field relative flex w-full items-center rounded-lg border border-dm-border-light bg-white p-2 text-left focus:border-blue-300 focus:ring-2 focus:ring-blue-100`"
+                @click.stop="quotedByOpen = !quotedByOpen"
+              >
+                <span class="block truncate">
+                  {{ selectedQuotedByOption.label }}
+                </span>
+              </button>
+              <ul
+                v-if="quotedByOpen"
+                role="listbox"
+                class="qmp-dropdown-panel absolute left-0 top-full z-30 mt-1 max-h-64 w-max min-w-full max-w-[min(20rem,calc(100vw-2rem))] overflow-y-auto p-1"
+              >
+                <li
+                  v-for="(option, index) in quotedByFilterOptions"
+                  :key="option.value"
+                  :class="index === 2 ? 'border-t border-slate-100 pt-1' : ''"
+                >
+                  <button
+                    type="button"
+                    role="option"
+                    :aria-selected="option.value === selectedQuotedBy"
+                    class="flex h-10 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition hover:bg-slate-50"
+                    :class="option.value === selectedQuotedBy ? 'bg-blue-50 text-blue-600' : 'text-dm-text'"
+                    @mousedown.prevent
+                    @click="selectQuotedBy(option)"
+                  >
+                    <span
+                      class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-500"
+                      :class="option.value === selectedQuotedBy ? '!bg-dm-primary !text-white' : ''"
+                    >
+                      <UsersRound
+                        v-if="option.kind === 'anyone'"
+                        class="h-3 w-3"
+                      />
+                      <UserRound
+                        v-else-if="option.kind === 'me'"
+                        class="h-3 w-3"
+                      />
+                      <template v-else>{{ creatorInitials(option.label) }}</template>
+                    </span>
+                    <span class="min-w-0 flex-1 truncate">{{ option.label }}</span>
+                    <Check
+                      v-if="option.value === selectedQuotedBy"
+                      class="h-3.5 w-3.5 shrink-0"
+                      :stroke-width="3"
+                    />
+                  </button>
+                </li>
+              </ul>
+            </div>
           </div>
 
           <div class="min-w-0" data-currency-filter>
@@ -1167,14 +1320,16 @@ function displayQuoteDate(quote: Quotation): string {
       <div class="flex flex-1 overflow-hidden rounded-t-xl">
         <div
           class="flex-1"
-          :class="tableUsesHorizontalScroll ? 'overflow-x-auto' : 'overflow-hidden'"
+          :class="tableUsesHorizontalScroll
+            ? 'quotation-table-scroll overflow-x-auto'
+            : 'overflow-hidden'"
           data-quotation-table-scroller
         >
         <table
           class="w-full table-fixed border-collapse text-left"
           :class="{ 'h-full': pageSize === 10 && quotations.length === 10 }"
           :style="tableUsesHorizontalScroll
-            ? { width: `${visibleTableWidth}px`, minWidth: `${visibleTableWidth}px` }
+            ? { width: '100%', minWidth: `${visibleTableWidth}px` }
             : { width: '100%' }"
         >
           <colgroup>
@@ -1204,6 +1359,7 @@ function displayQuoteDate(quote: Quotation): string {
                   {{ column.label }}
                 </span>
                 <span
+                  v-if="isResizableColumn(column.key)"
                   role="separator"
                   aria-orientation="vertical"
                   :aria-label="
@@ -1278,7 +1434,7 @@ function displayQuoteDate(quote: Quotation): string {
             >
               <td v-if="visibleColumnKeys.includes('quoteNo')" class="px-3 py-1">
                 <p
-                  class="block truncate whitespace-nowrap font-mono font-semibold text-slate-700 transition group-hover:text-blue-700"
+                  class="block truncate whitespace-nowrap font-medium text-dm-text transition group-hover:text-blue-700"
                   :title="quote.quoteNo"
                 >
                   <span>{{ quote.quoteNo }}</span>
@@ -1299,17 +1455,10 @@ function displayQuoteDate(quote: Quotation): string {
               <td v-if="visibleColumnKeys.includes('project')" class="px-3 py-1">
                 <div class="min-w-0">
                   <p
-                    class="truncate whitespace-nowrap font-semibold text-dm-text"
+                    class="truncate whitespace-nowrap font-medium text-dm-text"
                     :title="quote.projectName"
                   >
                     {{ quote.projectName }}
-                  </p>
-                  <p class="mt-0.5 truncate whitespace-nowrap font-mono text-xs text-dm-text-tertiary">
-                    {{
-                      t('quotation.common.lineItemCount', {
-                        count: quote.itemCount ?? quote.items.length,
-                      })
-                    }}
                   </p>
                 </div>
               </td>
@@ -1338,13 +1487,13 @@ function displayQuoteDate(quote: Quotation): string {
               </td>
               <td
                 v-if="visibleColumnKeys.includes('total')"
-                class="px-3 py-1 text-right font-bold text-dm-text font-mono"
+                class="px-3 py-1 text-right font-medium tabular-nums text-dm-text"
               >
                 {{ displayTotal(quote) }}
               </td>
               <td
                 v-if="visibleColumnKeys.includes('currency')"
-                class="px-3 py-1 text-center font-mono text-xs font-semibold text-dm-text-secondary"
+                class="px-3 py-1 text-center text-sm font-medium tabular-nums text-dm-text-secondary"
               >
                 {{ getCurrencyShortLabel(quote.currency) }}
               </td>
@@ -1367,7 +1516,7 @@ function displayQuoteDate(quote: Quotation): string {
               </td>
               <td
                 v-if="visibleColumnKeys.includes('quoteDate')"
-                class="whitespace-nowrap px-3 py-1 font-mono text-dm-text-tertiary"
+                class="whitespace-nowrap px-3 py-1 font-medium tabular-nums text-dm-text-secondary"
               >
                 {{ displayQuoteDate(quote) }}
               </td>

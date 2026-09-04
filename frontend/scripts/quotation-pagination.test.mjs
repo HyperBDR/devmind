@@ -71,6 +71,7 @@ test('list sends all search and source filter values to the server', () => {
     'search',
     'product_line_name',
     'source_type',
+    'quoted_by',
     'created_from',
     'created_to',
   ]) {
@@ -101,6 +102,22 @@ test('list presents quote dates, salespeople and source labels', () => {
   assert.doesNotMatch(quotationList, /tableStatusSource/)
   assert.doesNotMatch(quotationList, /const tableStatusValues/)
   assert.doesNotMatch(quotationI18n, /statusFilterOptions/)
+})
+
+test('list rows use one consistent primary typography level', () => {
+  assert.doesNotMatch(quotationList, /quotation\.common\.lineItemCount/)
+  assert.match(
+    quotationList,
+    /quote\.quoteNo[\s\S]*?font-medium text-dm-text/,
+  )
+  assert.match(
+    quotationList,
+    /visibleColumnKeys\.includes\('total'\)[\s\S]*?font-medium tabular-nums/,
+  )
+  assert.match(
+    quotationList,
+    /visibleColumnKeys\.includes\('quoteDate'\)[\s\S]*?font-medium tabular-nums/,
+  )
 })
 
 test('pagination controls expose ranges, totals, pages and sizes', () => {

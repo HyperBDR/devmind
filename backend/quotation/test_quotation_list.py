@@ -14,6 +14,7 @@ from quotation.models import (
     DocumentParseStatus,
     Quotation,
     QuotationItem,
+    QuotationMembership,
     QuotationSourceType,
     QuotationVersion,
     QuoteStatus,
@@ -44,6 +45,7 @@ class QuotationListAPITests(TestCase):
         source_type: str = QuotationSourceType.MANUAL,
         quote_date: str = "2026-07-01",
         salesperson: str = "Sales Person",
+        salesperson_email: str = "sales@example.com",
         created_at=None,
     ) -> Quotation:
         if (
@@ -69,7 +71,7 @@ class QuotationListAPITests(TestCase):
             expire_date="2026-08-01",
             grand_total=Decimal(index + 1),
             issuer_contact_name=salesperson,
-            issuer_contact_email="sales@example.com",
+            issuer_contact_email=salesperson_email,
             client_company=f"Client {index}",
             contact_person=f"Contact {index}",
             email=f"client-{index}@example.com",
@@ -310,7 +312,11 @@ class QuotationListAPITests(TestCase):
             "page": 1,
             "page_size": 10,
             "total_pages": 0,
-            "facets": {"product_lines": [], "currencies": []},
+            "facets": {
+                "product_lines": [],
+                "currencies": [],
+                "creators": [],
+            },
         }
         assert beyond.status_code == 200
         assert beyond.data["items"] == []
@@ -395,6 +401,93 @@ class QuotationListAPITests(TestCase):
 
         assert [row["id"] for row in response.data["items"]] == [
             inside.id
+        ]
+
+    def test_filters_by_current_or_selected_quote_creator(self):
+        own = self._quote(
+            1,
+            salesperson=self.user.username,
+            salesperson_email=self.user.email,
+        )
+        other_user = User.objects.create_user(
+            username="other-creator",
+            email="other@example.com",
+        )
+        other = self._quote(
+            2,
+            owner=other_user.email,
+            salesperson=other_user.username,
+            salesperson_email=other_user.email,
+        )
+        self.user.is_staff = True
+        self.user.save(update_fields=["is_staff"])
+
+        mine = self.api.get(self.url, {"quoted_by": "me"})
+        selected = self.api.get(
+            self.url,
+            {"quoted_by": "OTHER@example.com"},
+        )
+
+        assert [row["id"] for row in mine.data["items"]] == [own.id]
+        assert [row["id"] for row in selected.data["items"]] == [
+            other.id
+        ]
+        assert selected.data["facets"]["creators"] == [
+            {
+                "email": "owner@example.com",
+                "name": "list-owner",
+                "is_me": True,
+            },
+            {
+                "email": "other@example.com",
+                "name": "other-creator",
+                "is_me": False,
+            },
+        ]
+
+    def test_creator_facets_do_not_expose_inaccessible_quotes(self):
+        self._quote(
+            1,
+            salesperson=self.user.username,
+            salesperson_email=self.user.email,
+        )
+        self._quote(2, owner="private@example.com")
+
+        response = self.api.get(self.url)
+
+        assert response.data["facets"]["creators"] == [
+            {
+                "email": "owner@example.com",
+                "name": "list-owner",
+                "is_me": True,
+            }
+        ]
+
+    def test_creator_facets_include_active_members_without_quotes(self):
+        member = User.objects.create_user(
+            username="member-without-quotes",
+            email="member@example.com",
+        )
+        QuotationMembership.objects.create(user=member)
+        self._quote(
+            1,
+            salesperson=self.user.username,
+            salesperson_email=self.user.email,
+        )
+
+        response = self.api.get(self.url)
+
+        assert response.data["facets"]["creators"] == [
+            {
+                "email": "owner@example.com",
+                "name": "list-owner",
+                "is_me": True,
+            },
+            {
+                "email": "member@example.com",
+                "name": "member-without-quotes",
+                "is_me": False,
+            },
         ]
 
     def test_list_returns_quote_date_salesperson_and_business_product_line(self):

@@ -166,14 +166,22 @@ export interface QuotationListParams {
   productLine?: string;
   sourceType?: 'manual' | 'document_import';
   currency?: string;
+  quotedBy?: string;
   createdFrom?: string;
   createdTo?: string;
+}
+
+export interface QuotationCreatorOption {
+  email: string;
+  name: string;
+  isMe: boolean;
 }
 
 export interface QuotationListResult {
   items: Quotation[];
   productLines: string[];
   currencies: string[];
+  creators: QuotationCreatorOption[];
   total: number;
   page: number;
   pageSize: 10 | 20 | 50;
@@ -626,6 +634,7 @@ export async function listQuotations(
   }
   if (params.sourceType) query.set('source_type', params.sourceType);
   if (params.currency) query.set('currency', params.currency);
+  if (params.quotedBy) query.set('quoted_by', params.quotedBy);
   if (params.createdFrom) query.set('created_from', params.createdFrom);
   if (params.createdTo) query.set('created_to', params.createdTo);
   const data = await apiRequest<{
@@ -637,12 +646,22 @@ export async function listQuotations(
     facets?: {
       product_lines?: string[];
       currencies?: string[];
+      creators?: Array<{
+        email: string;
+        name: string;
+        is_me: boolean;
+      }>;
     };
   }>(`/quotations?${query.toString()}`);
   return {
     items: data.items.map(mapApiQuotationListItem),
     productLines: data.facets?.product_lines || [],
     currencies: data.facets?.currencies || [],
+    creators: (data.facets?.creators || []).map((creator) => ({
+      email: creator.email,
+      name: creator.name,
+      isMe: creator.is_me,
+    })),
     total: data.total,
     page: data.page,
     pageSize: data.page_size,

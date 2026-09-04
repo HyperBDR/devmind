@@ -6,6 +6,10 @@ const source = readFileSync(
   new URL('../src/modules/quotation/components/QuotationList.vue', import.meta.url),
   'utf8',
 )
+const quotationStyle = readFileSync(
+  new URL('../src/modules/quotation/style.css', import.meta.url),
+  'utf8',
+)
 
 test('quotation filters render as a compact toolbar with a date-range group', () => {
   assert.match(source, /const hasActiveFilters = computed/)
@@ -28,13 +32,30 @@ test('quotation filters render as a compact toolbar with a date-range group', ()
   assert.doesNotMatch(source, /matchesSalesperson/)
   assert.doesNotMatch(source, /overflow-hidden rounded-lg bg-white shadow-xs ring-1 ring-dm-border-light sm:grid-cols-2/)
   assert.match(source, /grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2/)
-  assert.match(source, /xl:grid-cols-\[minmax\(0,1\.35fr\)_repeat\(3,minmax\(0,\.7fr\)\)_minmax\(0,1\.4fr\)\]/)
+  assert.match(
+    source,
+    /xl:grid-cols-\[minmax\(0,1\.45fr\)_minmax\(0,\.72fr\)_minmax\(0,\.72fr\)_minmax\(0,\.88fr\)_minmax\(0,\.76fr\)_minmax\(0,1\.55fr\)\]/,
+  )
   assert.doesNotMatch(source, /2xl:grid-cols-/)
   assert.doesNotMatch(source, /data-feishu-sync-button/)
   assert.doesNotMatch(source, /syncFeishuArchiveFolder/)
   assert.doesNotMatch(source, /getFeishuSyncJob/)
   assert.doesNotMatch(source, /syncingFeishu/)
   assert.doesNotMatch(source, /uploadAccessRequired/)
+})
+
+test('quoted-by filter stays in the primary filter row', () => {
+  assert.match(source, /data-quoted-by-filter/)
+  assert.match(source, /data-testid="quoted-by-filter"/)
+  assert.match(source, /selectedQuotedBy/)
+  assert.match(source, /quotedByFilterOptions/)
+  assert.match(source, /quotedBy:\s*[\s\S]*?'me'/)
+  assert.doesNotMatch(
+    source,
+    /border-t border-slate-100 pt-2[\s\S]*?data-quoted-by-filter/,
+  )
+  assert.match(source, /w-max min-w-full max-w-/)
+  assert.doesNotMatch(source, /!pl-9/)
 })
 
 test('quotation list supports currency filtering and visible column selection', () => {
@@ -45,7 +66,31 @@ test('quotation list supports currency filtering and visible column selection', 
   assert.match(source, /Visible columns|visibleColumns/)
   assert.match(source, /tableCurrency/)
   assert.match(source, /tableUsesHorizontalScroll/)
-  assert.match(source, /tableUsesHorizontalScroll \? 'overflow-x-auto' : 'overflow-hidden'/)
+  assert.match(source, /quotation-table-scroll overflow-x-auto/)
+  assert.match(
+    quotationStyle,
+    /\.quotation-table-scroll\s*\{[\s\S]*?scrollbar-width:\s*thin/,
+  )
+  assert.match(
+    quotationStyle,
+    /\.quotation-table-scroll::\-webkit-scrollbar\s*\{[\s\S]*?height:\s*10px/,
+  )
+  assert.match(quotationStyle, /scrollbar-thumb:hover/)
+  assert.match(quotationStyle, /scrollbar-thumb:active/)
+  assert.match(
+    source,
+    /\? \{ width: '100%', minWidth: `\$\{visibleTableWidth\}px` \}/,
+  )
   assert.match(source, /tableColumnWidth\(column\.key\)/)
+  assert.match(source, /const resizableColumnKeys = new Set<ColumnKey>/)
+  assert.match(source, /v-if="isResizableColumn\(column\.key\)"/)
+  const resizableKeys = source.match(
+    /const resizableColumnKeys = new Set<ColumnKey>\(\[[\s\S]*?\]\)/,
+  )?.[0] || ''
+  assert.match(
+    resizableKeys,
+    /'quoteNo',[\s\S]*?'project',[\s\S]*?'customer',[\s\S]*?'contact',[\s\S]*?'salesperson'/,
+  )
+  assert.doesNotMatch(resizableKeys, /'total'|'currency'|'source'|'quoteDate'/)
   assert.match(source, /border-t border-slate-100 pt-2/)
 })

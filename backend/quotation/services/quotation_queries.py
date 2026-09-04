@@ -11,6 +11,7 @@ from django.db.models import (
     QuerySet,
     When,
 )
+from django.db.models.functions import Lower, Trim
 
 from quotation.models import (
     DocumentAsset,
@@ -18,6 +19,7 @@ from quotation.models import (
     DocumentParseStatus,
     DocumentReplica,
     Quotation,
+    QuotationMembership,
     QuotationSourceType,
     QuotationVersion,
     ReplicaSyncStatus,
@@ -33,6 +35,7 @@ SEARCH_FIELDS = (
     "contact_person",
 )
 PRODUCT_LINE_FACET_LIMIT = 100
+QUOTED_BY_FACET_LIMIT = 100
 
 
 def quotation_currency_facets(
@@ -44,6 +47,66 @@ def quotation_currency_facets(
         .values_list("currency", flat=True)
         .order_by("currency")
         .distinct()
+    )
+
+
+def quotation_quoted_by_facets(
+    queryset: QuerySet[Quotation],
+    current_user_email: str,
+) -> list[dict[str, object]]:
+    """Return active members plus historical quotation issuers."""
+    people: dict[str, dict[str, object]] = {}
+    memberships = QuotationMembership.objects.filter(
+        is_active=True,
+        user__is_active=True,
+    ).select_related("user")
+    current_email = current_user_email.strip().casefold()
+    for membership in memberships:
+        user = membership.user
+        email = (user.email or "").strip().casefold()
+        name = (user.get_full_name() or user.username).strip()
+        if not email or not name:
+            continue
+        people[name.casefold()] = {
+            "email": email,
+            "name": name,
+            "is_me": email == current_email,
+        }
+
+    issuers = (
+        queryset.annotate(
+            normalized_name=Lower(Trim("issuer_contact_name")),
+            normalized_email=Lower(Trim("issuer_contact_email")),
+        )
+        .exclude(normalized_name__isnull=True)
+        .exclude(normalized_name="")
+        .exclude(normalized_email__isnull=True)
+        .exclude(normalized_email="")
+        .values(
+            "issuer_contact_name",
+            "normalized_name",
+            "normalized_email",
+        )
+        .order_by("normalized_name", "normalized_email")
+        .distinct()[:QUOTED_BY_FACET_LIMIT]
+    )
+    for issuer in issuers:
+        normalized_name = issuer["normalized_name"]
+        normalized_email = issuer["normalized_email"]
+        if normalized_name in people:
+            continue
+        people[normalized_name] = {
+            "email": normalized_email,
+            "name": issuer["issuer_contact_name"].strip(),
+            "is_me": normalized_email == current_email,
+        }
+    return sorted(
+        people.values(),
+        key=lambda person: (
+            not person["is_me"],
+            str(person["name"]).casefold(),
+            str(person["email"]),
+        ),
     )
 
 
@@ -63,6 +126,13 @@ def filter_quotation_list(
         value = filters.get(field)
         if value:
             queryset = queryset.filter(**{field: value})
+
+    quoted_by = filters.get("quoted_by")
+    if quoted_by:
+        quoted_by_query = Q(issuer_contact_email__iexact=quoted_by)
+        for name in filters.get("quoted_by_names", []):
+            quoted_by_query |= Q(issuer_contact_name__iexact=name)
+        queryset = queryset.filter(quoted_by_query)
 
     product_line_name = filters.get("product_line_name")
     if product_line_name:

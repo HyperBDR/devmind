@@ -201,6 +201,7 @@ class QuotationListQuerySerializer(serializers.Serializer):
         required=False,
     )
     currency = serializers.CharField(max_length=12, required=False)
+    quoted_by = serializers.CharField(max_length=255, required=False)
     created_from = serializers.DateField(required=False)
     created_to = serializers.DateField(required=False)
     page = serializers.IntegerField(default=1, min_value=1, required=False)
@@ -218,6 +219,12 @@ class QuotationListQuerySerializer(serializers.Serializer):
                 {"created_to": "must be on or after created_from"}
             )
         return attrs
+
+    def validate_quoted_by(self, value):
+        """Accept the current-user shortcut or one salesperson email."""
+        if value.casefold() == "me":
+            return "me"
+        return serializers.EmailField(max_length=255).run_validation(value)
 
 
 class QuotationFormContextQuerySerializer(serializers.Serializer):

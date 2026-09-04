@@ -59,6 +59,7 @@ import {
   getQuotation as getQuotationApi,
   getQuotationFormContext,
   listQuotations,
+  type QuotationCreatorOption,
   type QuotationListParams,
   updateQuotation as updateQuotationApi,
 } from './api/quotations'
@@ -204,6 +205,7 @@ const quotationListTotal = ref(0)
 const quotationListTotalPages = ref(0)
 const quotationListProductLines = ref<string[]>([])
 const quotationListCurrencies = ref<string[]>([])
+const quotationListCreators = ref<QuotationCreatorOption[]>([])
 const activeQuote = ref<Quotation | null>(null)
 const activeQuoteLoading = ref(false)
 const drawerQuoteId = ref<string | null>(null)
@@ -383,6 +385,7 @@ async function refreshQuotations(
     quotations.value = result.items
     quotationListProductLines.value = result.productLines
     quotationListCurrencies.value = result.currencies
+    quotationListCreators.value = result.creators
     quotationListTotal.value = result.total
     quotationListTotalPages.value = result.totalPages
     quotationListQuery.value = {
@@ -398,6 +401,7 @@ async function refreshQuotations(
     quotations.value = []
     quotationListProductLines.value = []
     quotationListCurrencies.value = []
+    quotationListCreators.value = []
     quotationListTotal.value = 0
     quotationListTotalPages.value = 0
   } finally {
@@ -1209,6 +1213,7 @@ function reloadPage() {
             :quotations="quotations"
             :product-lines="quotationListProductLines"
             :currencies="quotationListCurrencies"
+            :creators="quotationListCreators"
             :loading="quotationListLoading"
             :page="quotationListQuery.page || 1"
             :page-size="quotationListQuery.pageSize || 10"

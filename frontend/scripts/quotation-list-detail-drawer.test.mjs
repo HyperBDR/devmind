@@ -94,7 +94,12 @@ test('quotation columns expose pointer and keyboard resize controls', () => {
   assert.match(list, /visibleTableWidth/)
   assert.match(list, /:style="tableUsesHorizontalScroll/)
   assert.match(list, /data-quotation-table-scroller/)
-  assert.match(list, /tableUsesHorizontalScroll \? 'overflow-x-auto' : 'overflow-hidden'/)
+  assert.match(list, /quotation-table-scroll overflow-x-auto/)
+  assert.match(list, /v-if="isResizableColumn\(column\.key\)"/)
+  const resizableKeys = list.match(
+    /const resizableColumnKeys = new Set<ColumnKey>\(\[[\s\S]*?\]\)/,
+  )?.[0] || ''
+  assert.doesNotMatch(resizableKeys, /'total'|'currency'|'source'|'quoteDate'/)
   assert.doesNotMatch(list, /data-quotation-top-scrollbar/)
 })
 
@@ -142,7 +147,10 @@ test('long contact names cannot expand compact quotation rows', () => {
 
 test('quotation list removes the user hint and page-level horizontal scroll', () => {
   assert.doesNotMatch(list, /quotation\.pages\.list\.userHint/)
-  assert.match(list, /xl:grid-cols-\[minmax\(0,1\.35fr\)_repeat\(3,minmax\(0,\.7fr\)\)_minmax\(0,1\.4fr\)\]/)
+  assert.match(
+    list,
+    /xl:grid-cols-\[minmax\(0,1\.45fr\)_minmax\(0,\.72fr\)_minmax\(0,\.72fr\)_minmax\(0,\.88fr\)_minmax\(0,\.76fr\)_minmax\(0,1\.55fr\)\]/,
+  )
   assert.match(app, /overflow-x-hidden overflow-y-auto/)
   assert.match(app, /v-if="currentTab === 'list'"\s+class="flex flex-col"/)
 })

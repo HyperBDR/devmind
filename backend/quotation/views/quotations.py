@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal
 
+from django.contrib.auth.models import User
 from django.db import IntegrityError, transaction
 from django.db.models.deletion import ProtectedError
 from rest_framework import status
@@ -42,6 +43,7 @@ from quotation.services.quotation_queries import (
     annotate_quotation_list,
     attach_quotation_document_summaries,
     quotation_currency_facets,
+    quotation_quoted_by_facets,
     filter_quotation_list,
     quotation_product_line_facets,
 )
@@ -224,7 +226,26 @@ class QuotationListCreateView(APIView):
                 query_serializer.errors,
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        filters = query_serializer.validated_data
+        filters = dict(query_serializer.validated_data)
+        current_user_email = user_display_email(request.user)
+        quoted_by = filters.get("quoted_by")
+        quoted_by_user = None
+        if quoted_by == "me":
+            filters["quoted_by"] = current_user_email
+            quoted_by_user = request.user
+        elif quoted_by:
+            quoted_by_user = User.objects.filter(
+                email__iexact=quoted_by,
+                is_active=True,
+            ).first()
+        if quoted_by_user:
+            filters["quoted_by_names"] = list(
+                {
+                    quoted_by_user.get_full_name().strip(),
+                    quoted_by_user.username.strip(),
+                }
+                - {""}
+            )
         page = filters["page"]
         page_size = int(filters["page_size"])
         queryset = filter_accessible_quotations(
@@ -233,6 +254,10 @@ class QuotationListCreateView(APIView):
         )
         product_lines = quotation_product_line_facets(queryset, filters)
         currencies = quotation_currency_facets(queryset)
+        creators = quotation_quoted_by_facets(
+            queryset,
+            current_user_email,
+        )
         queryset = filter_quotation_list(queryset, filters)
         total = queryset.count()
         page_start = (page - 1) * page_size
@@ -254,6 +279,7 @@ class QuotationListCreateView(APIView):
                 "facets": {
                     "product_lines": product_lines,
                     "currencies": currencies,
+                    "creators": creators,
                 },
             }
         )
