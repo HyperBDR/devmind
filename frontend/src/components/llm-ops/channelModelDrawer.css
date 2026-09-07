@@ -30,7 +30,7 @@
 }
 
 .channel-model-drawer .add-model-layout {
-  @apply grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(13rem,0.24fr)] xl:items-start;
+  @apply grid gap-3;
 }
 
 .channel-model-drawer .add-model-main {
@@ -38,11 +38,11 @@
 }
 
 .channel-model-drawer .add-grid {
-  @apply grid gap-3 md:grid-cols-2 xl:grid-cols-1;
+  @apply grid gap-3 md:grid-cols-2;
 }
 
 .channel-model-drawer .inline-cost-grid {
-  @apply grid gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2 md:grid-cols-[minmax(0,0.45fr)_minmax(0,0.55fr)] xl:col-span-1;
+  @apply grid gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2 md:grid-cols-[minmax(0,0.45fr)_minmax(0,0.55fr)];
 }
 
 .channel-model-drawer .cost-value-readonly {
@@ -122,7 +122,7 @@
 }
 
 .channel-model-drawer .batch-price-preview {
-  @apply grid min-w-0 gap-0.5 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs xl:col-span-3;
+  @apply grid min-w-0 gap-1 rounded-lg bg-slate-50 px-2.5 py-2 text-xs xl:col-span-3;
 }
 
 .channel-model-drawer .batch-price-preview span,
@@ -138,6 +138,34 @@
   @apply font-semibold text-slate-800;
 }
 
+.channel-model-drawer .batch-price-matrix {
+  @apply grid gap-1.5 border-b border-slate-200 py-1.5 last:border-b-0;
+}
+
+.channel-model-drawer .batch-price-range {
+  @apply font-mono text-[11px] font-semibold text-slate-500;
+}
+
+.channel-model-drawer .batch-price-values {
+  @apply grid gap-1 sm:grid-cols-3;
+}
+
+.channel-model-drawer .batch-price-dimension {
+  @apply grid min-w-0 gap-0.5 rounded-md border border-slate-200 bg-white px-2 py-1.5 font-mono text-[11px];
+}
+
+.channel-model-drawer .batch-price-dimension em {
+  @apply not-italic font-semibold text-slate-700;
+}
+
+.channel-model-drawer .batch-price-dimension span {
+  @apply text-slate-500;
+}
+
+.channel-model-drawer .batch-price-dimension strong {
+  @apply text-slate-800;
+}
+
 .channel-model-drawer .batch-upstream-select,
 .channel-model-drawer .batch-region-select {
   @apply min-w-0;
@@ -151,8 +179,7 @@
 .channel-model-drawer .pending-association {
   @apply mt-3 grid gap-3 rounded-lg border border-indigo-100 bg-indigo-50/60 px-3 py-2.5 xl:items-center;
   grid-template-columns:
-    minmax(9rem, 0.8fr) minmax(0, 1.35fr) minmax(0, 1.35fr)
-    minmax(4.25rem, auto);
+    minmax(9rem, 0.8fr) minmax(0, 1.6fr) minmax(4.25rem, auto);
 }
 
 .channel-model-drawer .pending-main {
@@ -315,7 +342,7 @@
 }
 
 .channel-model-drawer .channel-model-summary-list {
-  @apply mt-3 grid gap-1.5 text-xs sm:grid-cols-[minmax(0,1fr)_max-content_max-content];
+  @apply mt-3 grid gap-1.5 text-xs;
 }
 
 .channel-model-drawer .channel-model-summary-list div {
@@ -387,19 +414,15 @@
 }
 
 .channel-model-drawer .channel-model-table .model-col {
-  width: 16%;
+  width: 19%;
 }
 
 .channel-model-drawer .channel-model-table .source-col {
-  width: 18%;
+  width: 23%;
 }
 
 .channel-model-drawer .channel-model-table .price-col {
-  width: 38%;
-}
-
-.channel-model-drawer .channel-model-table .ability-col {
-  width: 20%;
+  width: 50%;
 }
 
 .channel-model-drawer .channel-model-table .action-col {
@@ -464,7 +487,32 @@
 }
 
 .channel-model-drawer .price-tier-list {
-  @apply grid gap-1.5;
+  @apply mt-2 grid gap-1.5;
+}
+
+.channel-model-drawer .price-structure-detail {
+  @apply rounded-md border border-slate-200 bg-white px-2 py-1.5;
+}
+
+.channel-model-drawer .price-structure-detail summary {
+  @apply flex cursor-pointer list-none items-center justify-between gap-2 text-xs font-medium text-indigo-600;
+}
+
+.channel-model-drawer .price-structure-detail summary::-webkit-details-marker {
+  display: none;
+}
+
+.channel-model-drawer .price-structure-detail summary::after {
+  content: '⌄';
+  @apply text-slate-400 transition;
+}
+
+.channel-model-drawer .price-structure-detail[open] summary::after {
+  transform: rotate(180deg);
+}
+
+.channel-model-drawer .price-structure-badge {
+  @apply rounded-md bg-indigo-50 px-2 py-1 font-semibold text-indigo-700;
 }
 
 .channel-model-drawer .price-tier {
@@ -472,7 +520,7 @@
 }
 
 .channel-model-drawer .price-tier-range {
-  @apply mb-1 block font-mono text-[11px] font-semibold text-slate-500;
+  @apply mb-1 block text-[11px] font-semibold text-slate-600;
 }
 
 .channel-model-drawer .price-tier-line {

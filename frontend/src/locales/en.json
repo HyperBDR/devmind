@@ -1387,6 +1387,7 @@
       "noMatchedModels": "No addable models match",
       "noUpstreamSelected": "No channel upstream selected",
       "notApplicable": "N/A",
+      "openAddForm": "Add model",
       "pendingCostGeneration": "Cost pending generation",
       "pendingUpstream": "Select a channel upstream",
       "performance": {
@@ -1424,6 +1425,12 @@
         "discount": "Discount ratio",
         "fixed": "Fixed cost"
       },
+      "priceStructure": {
+        "conditional": "Peak/off-peak · {count} periods",
+        "conditionalTiered": "Periods × tiers · {conditions} periods / {tiers} tiers",
+        "flat": "Flat price",
+        "tiered": "Tiered price · {count} tiers"
+      },
       "priceRule": {
         "defaultDiscount": "Default discount {value}",
         "discount": "Discount {value}",
@@ -1454,6 +1461,7 @@
         "unknown": "Unlabeled type"
       },
       "sourceNotIngested": "Source not ingested",
+      "structure": "Structure",
       "unassignedVendor": "Unassigned vendor",
       "unboundUpstream": "Unbound upstream",
       "unsaved": "Unsaved changes",
@@ -1463,6 +1471,7 @@
       "upstreamSourceCount": "{count} upstream price sources",
       "upstreamSummary": "Upstream {value}",
       "vendorAddableCount": "{count} addable meta models",
+      "viewPrices": "View price details",
       "title": "Channel Models",
       "errors": {
         "save": "Failed to save channel model prices",
@@ -2682,8 +2691,11 @@
       "subtitle": "Complete prices by region, specification, and token range without collapsing tiers.",
       "searchPlaceholder": "Search meta model, provider, or code",
       "allUsage": "All usage",
+      "condition": "Pricing period",
+      "usageRange": "Usage range",
       "defaultScope": "Mainland China / default",
       "conditions": {
+        "allTime": "All times",
         "peak": "Peak",
         "offPeak": "Off-peak"
       },

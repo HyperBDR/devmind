@@ -52,16 +52,21 @@
 
       <div class="space-y-4 px-4 py-4 lg:px-5">
         <div class="panel space-y-4">
-          <div class="flex flex-col gap-3 xl:flex-row xl:items-start">
+          <div class="flex flex-col gap-3 xl:flex-row xl:items-center">
             <div class="min-w-0 flex-1">
               <h4 class="text-sm font-semibold text-slate-900">
                 {{ t('llmOps.channelModelDrawer.addTitle') }}
               </h4>
-              <p class="mt-1 text-xs leading-5 text-slate-500">
+              <p
+                v-if="addFormOpen"
+                class="mt-1 text-xs leading-5 text-slate-500"
+              >
                 {{ t('llmOps.channelModelDrawer.addDescription') }}
               </p>
             </div>
-            <div class="flex flex-wrap gap-2 text-xs text-slate-500">
+            <div
+              class="flex flex-wrap items-center gap-2 text-xs text-slate-500"
+            >
               <span class="summary-pill">
                 {{
                   t('llmOps.channelModelDrawer.configuredCount', {
@@ -83,10 +88,26 @@
                   })
                 }}
               </span>
+              <button
+                type="button"
+                :class="
+                  addFormOpen
+                    ? 'btn-secondary btn-compact btn-action-cancel'
+                    : 'btn-primary btn-compact btn-action-create'
+                "
+                :aria-expanded="addFormOpen"
+                @click="addFormOpen = !addFormOpen"
+              >
+                {{
+                  addFormOpen
+                    ? t('common.collapse')
+                    : t('llmOps.channelModelDrawer.openAddForm')
+                }}
+              </button>
             </div>
           </div>
 
-          <div class="add-model-layout">
+          <div v-if="addFormOpen" class="add-model-layout">
             <div class="add-model-main">
               <div class="add-grid">
                 <div class="form-field">
@@ -173,6 +194,7 @@
                         <span class="searchable-meta-actions">
                           <button
                             type="button"
+                            class="btn-action-create"
                             @click.stop="selectVisibleModels"
                           >
                             {{
@@ -181,6 +203,7 @@
                           </button>
                           <button
                             type="button"
+                            class="btn-action-danger"
                             @click.stop="clearSelectedModels"
                           >
                             {{ t('common.clear') }}
@@ -341,7 +364,11 @@
                       {{ t('llmOps.channelModelDrawer.selectedModelsHint') }}
                     </span>
                   </div>
-                  <button type="button" @click="clearSelectedModels">
+                  <button
+                    type="button"
+                    class="btn-danger btn-compact btn-action-danger"
+                    @click="clearSelectedModels"
+                  >
                     {{ t('llmOps.channelModelDrawer.clearSelection') }}
                   </button>
                 </div>
@@ -390,29 +417,59 @@
                       "
                     />
                     <div v-if="item.model" class="batch-price-preview">
-                      <span>
-                        {{
-                          t('llmOps.channelModelDrawer.upstreamSummary', {
-                            value: batchUpstreamPriceSummary(
-                              item.model,
-                              item.selectedSourceOfferingId,
-                              item.selectedSourceOfferingRegion
-                            )
-                          })
-                        }}
+                      <div
+                        v-for="tier in batchPriceMatrix(
+                          newDraft,
+                          item.model,
+                          item.selectedSourceOfferingId,
+                          item.selectedSourceOfferingRegion
+                        )"
+                        :key="tier.rangeLabel"
+                        class="batch-price-matrix"
+                      >
+                        <span class="batch-price-range">
+                          {{ humanPriceRangeLabel(tier.rangeLabel) }}
+                        </span>
+                        <div class="batch-price-values">
+                          <div
+                            v-for="price in tier.prices"
+                            :key="price.label"
+                            class="batch-price-dimension"
+                          >
+                            <em>{{ price.label }}</em>
+                            <span>
+                              {{ t('llmOps.channelModelDrawer.upstream') }}
+                              {{ priceNumberText(price, item.model) }}
+                            </span>
+                            <strong>
+                              {{ t('llmOps.channelModelDrawer.cost') }}
+                              {{
+                                price.costValue === null
+                                  ? '-'
+                                  : priceNumberText(
+                                      {
+                                        value: price.costValue,
+                                        currency: price.costCurrency
+                                      },
+                                      item.model
+                                    )
+                              }}
+                            </strong>
+                          </div>
+                        </div>
+                      </div>
+                      <span
+                        v-if="
+                          !batchPriceMatrix(
+                            newDraft,
+                            item.model,
+                            item.selectedSourceOfferingId,
+                            item.selectedSourceOfferingRegion
+                          ).length
+                        "
+                      >
+                        {{ t('llmOps.channelModelDrawer.selectRegion') }}
                       </span>
-                      <strong>
-                        {{
-                          t('llmOps.channelModelDrawer.costSummary', {
-                            value: batchPendingDraftPriceSummary(
-                              newDraft,
-                              item.model,
-                              item.selectedSourceOfferingId,
-                              item.selectedSourceOfferingRegion
-                            )
-                          })
-                        }}
-                      </strong>
                     </div>
                     <div v-else class="batch-price-preview muted">
                       <span>
@@ -426,32 +483,12 @@
                 </div>
               </div>
             </div>
-
-            <div class="channel-performance-panel">
-              <p class="channel-performance-title">
-                {{ t('llmOps.channelModelDrawer.forwardingCapability') }}
-              </p>
-              <div class="channel-performance-grid">
-                <label
-                  v-for="field in performanceFields"
-                  :key="field.key"
-                  class="form-field"
-                >
-                  <span class="field-label">{{ field.label }}</span>
-                  <input
-                    v-model="newDraft[field.key]"
-                    class="field compact-field text-right"
-                    min="0"
-                    step="1"
-                    type="number"
-                    :placeholder="field.placeholder"
-                  />
-                </label>
-              </div>
-            </div>
           </div>
 
-          <div v-if="selectedModelOptions.length" class="pending-association">
+          <div
+            v-if="addFormOpen && selectedModelOptions.length"
+            class="pending-association"
+          >
             <div class="pending-main">
               <p class="truncate text-sm font-semibold text-slate-900">
                 {{
@@ -471,12 +508,6 @@
             <div class="pending-price-compact">
               <span>{{ t('llmOps.channelModelDrawer.costRule') }}</span>
               <strong>{{ newDraftRuleSummary }}</strong>
-            </div>
-            <div class="pending-price-compact">
-              <span>{{
-                t('llmOps.channelModelDrawer.forwardingCapability')
-              }}</span>
-              <strong>{{ newDraftPerformanceSummary }}</strong>
             </div>
             <button
               type="button"
@@ -597,24 +628,8 @@
                     {{ priceRuleSummary(row) }}
                   </strong>
                   <strong>
-                    <em>{{ t('llmOps.channelModelDrawer.cost') }}</em>
-                    {{ compactCostSummary(row) }}
-                  </strong>
-                  <strong>
-                    <em>{{ t('llmOps.channelModelDrawer.upstream') }}</em>
-                    {{
-                      upstreamPriceSummary(row.model, row.draft.source_offering)
-                    }}
-                  </strong>
-                </div>
-                <div class="channel-model-ability-summary">
-                  <span>{{ t('llmOps.channelModelDrawer.capability') }}</span>
-                  <strong
-                    v-for="item in performanceSummaryItems(row)"
-                    :key="item.label"
-                  >
-                    <em>{{ item.label }}</em>
-                    {{ item.value }}
+                    <em>{{ t('llmOps.channelModelDrawer.structure') }}</em>
+                    {{ priceStructureSummary(row) }}
                   </strong>
                 </div>
               </div>
@@ -726,24 +741,6 @@
                     }}
                   </span>
                 </div>
-
-                <div class="mt-3 grid gap-2 sm:grid-cols-3">
-                  <label
-                    v-for="field in performanceFields"
-                    :key="field.key"
-                    class="form-field"
-                  >
-                    <span class="field-label">{{ field.label }}</span>
-                    <input
-                      v-model="row.draft[field.key]"
-                      class="field compact-field text-right"
-                      min="0"
-                      step="1"
-                      type="number"
-                      :placeholder="field.placeholder"
-                    />
-                  </label>
-                </div>
               </details>
             </article>
             <div v-if="!filteredRows.length" class="empty-card">
@@ -769,7 +766,6 @@
                 <col class="model-col" />
                 <col class="source-col" />
                 <col class="price-col" />
-                <col class="ability-col" />
                 <col class="action-col" />
               </colgroup>
               <thead>
@@ -782,9 +778,6 @@
                   </th>
                   <th class="table-head">
                     {{ t('llmOps.channelModelDrawer.price') }}
-                  </th>
-                  <th class="table-head">
-                    {{ t('llmOps.channelModelDrawer.capability') }}
                   </th>
                   <th class="table-head action-col text-center">
                     {{ t('common.actions') }}
@@ -840,7 +833,18 @@
                         <em>{{ t('llmOps.channelModelDrawer.rule') }}</em>
                         <strong>{{ priceRuleSummary(row) }}</strong>
                       </p>
-                      <template v-if="priceTierComparisonRows(row).length">
+                      <details
+                        v-if="priceTierComparisonRows(row).length"
+                        class="price-structure-detail"
+                      >
+                        <summary>
+                          <span class="price-structure-badge">
+                            {{ priceStructureSummary(row) }}
+                          </span>
+                          <span>{{
+                            t('llmOps.channelModelDrawer.viewPrices')
+                          }}</span>
+                        </summary>
                         <div class="price-tier-list">
                           <div
                             v-for="tier in priceTierComparisonRows(row)"
@@ -848,7 +852,7 @@
                             class="price-tier"
                           >
                             <span class="price-tier-range">
-                              {{ tier.rangeLabel }}
+                              {{ humanPriceRangeLabel(tier.rangeLabel) }}
                             </span>
                             <div class="price-tier-line">
                               <em>{{ t('llmOps.channelModelDrawer.cost') }}</em>
@@ -901,7 +905,7 @@
                             </div>
                           </div>
                         </div>
-                      </template>
+                      </details>
                       <template v-else>
                         <span>
                           <em>{{ t('llmOps.channelModelDrawer.cost') }}</em>
@@ -921,25 +925,6 @@
                       </template>
                     </div>
                   </td>
-                  <td class="table-cell">
-                    <div class="ability-edit-cell">
-                      <label
-                        v-for="field in performanceFields"
-                        :key="field.key"
-                        :title="field.title"
-                      >
-                        <span>{{ field.shortLabel }}</span>
-                        <input
-                          v-model="row.draft[field.key]"
-                          class="field-sm table-performance-input text-right"
-                          min="0"
-                          step="1"
-                          type="number"
-                          :placeholder="field.shortPlaceholder"
-                        />
-                      </label>
-                    </div>
-                  </td>
                   <td class="table-cell action-col text-center">
                     <div class="flex items-center justify-center">
                       <OperationIconButton
@@ -952,7 +937,7 @@
                   </td>
                 </tr>
                 <tr v-if="hiddenConfiguredRowCount">
-                  <td class="table-cell text-center text-slate-500" colspan="5">
+                  <td class="table-cell text-center text-slate-500" colspan="4">
                     <button
                       type="button"
                       class="link-btn"
@@ -967,7 +952,7 @@
                   </td>
                 </tr>
                 <tr v-if="!filteredRows.length">
-                  <td class="table-cell text-slate-500" colspan="5">
+                  <td class="table-cell text-slate-500" colspan="4">
                     {{ t('llmOps.channelModelDrawer.emptyConfigured') }}
                   </td>
                 </tr>
@@ -997,7 +982,11 @@ import { useChannelModelNewDraft } from '@/composables/useChannelModelNewDraft'
 import { useChannelModelPricing } from '@/composables/useChannelModelPricing'
 import { useChannelModelRows } from '@/composables/useChannelModelRows'
 import { useChannelModelSelection } from '@/composables/useChannelModelSelection'
-import { channelPriceTierRows } from '@/utils/channelPriceCatalog'
+import {
+  channelPriceStructure,
+  channelPriceTierRows,
+  humanTierRange
+} from '@/utils/channelPriceCatalog'
 import { asArray, errorMessage } from '@/utils/llmOpsPagination'
 
 import CompactSelect from './CompactSelect.vue'
@@ -1064,6 +1053,7 @@ const modelDropdownOpen = ref(false)
 const modelDropdownRef = ref(null)
 const modelSearchInput = ref(null)
 const configuredRowsExpanded = ref(false)
+const addFormOpen = ref(false)
 const drafts = ref({})
 const baselineDrafts = ref({})
 const saving = ref(false)
@@ -1115,8 +1105,7 @@ const {
 })
 
 const {
-  batchPendingDraftPriceSummary,
-  batchUpstreamPriceSummary,
+  batchPriceMatrix,
   channelPriceItemLabel,
   channelRowSourceLabel,
   compactCostSummary,
@@ -1126,7 +1115,6 @@ const {
   modalityLabel,
   moneyOrStatus,
   modelSourceCategory,
-  performanceSummaryItems,
   priceText,
   priceNumberText,
   providerPriceItemsForModel,
@@ -1293,7 +1281,6 @@ const {
 const {
   currencyOptions,
   newDraft,
-  newDraftPerformanceSummary,
   newDraftRuleSummary,
   newDraftSettlementPercent,
   addSelectedModels,
@@ -1374,6 +1361,7 @@ function reset() {
   clearSelectedModels()
   modelDropdownOpen.value = false
   configuredRowsExpanded.value = false
+  addFormOpen.value = false
   resetNewDraft()
   drafts.value = {}
   baselineDrafts.value = {}
@@ -1398,6 +1386,7 @@ function focusInitialModel() {
   )
   if (!group) return
   selectedVendorKey.value = metaModelVendorKey(group)
+  addFormOpen.value = true
   modelSearch.value = group.name || group.code || ''
   if (!isModelSelected(group.key)) {
     toggleModelSelection(group)
@@ -1458,19 +1447,61 @@ function priceTierComparisonRows(row) {
     })
   }
 
-  append(
-    (row?.priceItems || []).filter(
-      (item) =>
-        normalizedRegion ===
-        normalizeRegion(priceItemRegion(item, props.priceItems))
-    ),
-    'costPrices'
+  const costItems = row?.priceItems || []
+  const regionCostItems = costItems.filter(
+    (item) =>
+      normalizedRegion ===
+      normalizeRegion(priceItemRegion(item, props.priceItems))
   )
-  append(
-    providerPriceItemsForModel(row?.model, boundSourceOfferingId, region),
-    'upstreamPrices'
+  const regionalUpstreamItems = providerPriceItemsForModel(
+    row?.model,
+    boundSourceOfferingId,
+    region
   )
+  const upstreamItems = regionalUpstreamItems.length
+    ? regionalUpstreamItems
+    : providerPriceItemsForModel(row?.model, boundSourceOfferingId)
+
+  append(regionCostItems.length ? regionCostItems : costItems, 'costPrices')
+  append(upstreamItems, 'upstreamPrices')
   return Array.from(tiers.values())
+}
+
+function priceStructureSummary(row) {
+  const sourceItems = providerPriceItemsForModel(
+    row?.model,
+    row?.draft?.source_offering,
+    row?.draft?.source_sku_region
+  )
+  const structure = channelPriceStructure(
+    row?.priceItems?.length ? row.priceItems : sourceItems
+  )
+  const labels = {
+    conditional: t('llmOps.channelModelDrawer.priceStructure.conditional', {
+      count: structure.conditionCount
+    }),
+    conditional_tiered: t(
+      'llmOps.channelModelDrawer.priceStructure.conditionalTiered',
+      {
+        conditions: structure.conditionCount,
+        tiers: structure.tierCount
+      }
+    ),
+    flat: t('llmOps.channelModelDrawer.priceStructure.flat'),
+    tiered: t('llmOps.channelModelDrawer.priceStructure.tiered', {
+      count: structure.tierCount
+    })
+  }
+  return labels[structure.kind]
+}
+
+function humanPriceRangeLabel(label) {
+  const text = String(label || '')
+  const match = text.match(/\[([\d,.]+),\s*([\d,.]+|∞)\)/)
+  if (!match) return text
+  const start = match[1].replaceAll(',', '')
+  const end = match[2] === '∞' ? null : match[2].replaceAll(',', '')
+  return text.replace(match[0], humanTierRange(start, end))
 }
 
 function priceItemRegion(item, sourceItems = []) {

@@ -1,6 +1,7 @@
 import {
   channelPriceItemLabel,
-  channelPriceSummaryRows
+  channelPriceSummaryRows,
+  channelPriceTierRows
 } from '@/utils/channelPriceCatalog'
 
 export function useChannelModelPricing({
@@ -162,6 +163,50 @@ export function useChannelModelPricing({
       })),
       model
     )
+  }
+
+  function batchPriceMatrix(
+    draft,
+    model,
+    sourceOfferingId = '',
+    sourceOfferingRegion = ''
+  ) {
+    const sourceItems = providerPriceItemsForModel(
+      model,
+      sourceOfferingId,
+      sourceOfferingRegion
+    )
+    if (!sourceItems.length) return []
+
+    const currency =
+      draft?.currency || props.channel?.currency || model?.currency || 'USD'
+    const ratio =
+      draft?.price_mode === 'discount'
+        ? Number(draft.settlement_ratio || 0)
+        : Number(props.channel?.settlement_ratio || 1)
+
+    return channelPriceTierRows(sourceItems).map((tier) => ({
+      ...tier,
+      prices: tier.prices.map((price) => ({
+        ...price,
+        costCurrency: currency,
+        costValue: batchCostValue(price, draft, ratio, currency)
+      }))
+    }))
+  }
+
+  function batchCostValue(price, draft, ratio, currency) {
+    if (draft?.price_mode === 'fixed') {
+      const fields = {
+        Input: 'input_price_per_million',
+        Output: 'output_price_per_million',
+        Cache: 'cache_input_price_per_million'
+      }
+      const value = draft[fields[price.label]]
+      return value === '' || value === undefined ? null : Number(value)
+    }
+    const amount = convertAmountBetween(price.value, price.currency, currency)
+    return amount === null || !Number.isFinite(ratio) ? null : amount * ratio
   }
 
   function batchPriceSummaryText(rows, model) {
@@ -700,6 +745,7 @@ export function useChannelModelPricing({
   }
 
   return {
+    batchPriceMatrix,
     batchPendingDraftPriceSummary,
     batchUpstreamPriceSummary,
     channelPriceItemLabel,
