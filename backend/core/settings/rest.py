@@ -116,6 +116,7 @@ REST_AUTH = {
     "USE_JWT": True,
     "JWT_AUTH_HTTPONLY": False,
     "SESSION_LOGIN": False,
+    "LOGIN_SERIALIZER": "accounts.serializers.UsernameOrEmailLoginSerializer",
     "USER_DETAILS_SERIALIZER": (
         "accounts.serializers.UserDetailsSerializer"
     ),

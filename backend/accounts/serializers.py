@@ -5,6 +5,7 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.utils.translation import gettext_lazy as _
 
+from dj_rest_auth.serializers import LoginSerializer
 from rest_framework import serializers
 
 from allauth.socialaccount import providers
@@ -19,6 +20,14 @@ from accounts.access import (
     serialize_platform_options,
 )
 from accounts.models import Profile
+
+
+class UsernameOrEmailLoginSerializer(LoginSerializer):
+    """Authenticate local users with either their username or email."""
+
+    def get_auth_user(self, username, email, password):
+        """Use Django's local user lookup instead of allauth's email-only path."""
+        return self.get_auth_user_using_orm(username, email, password)
 
 
 def normalize_language_code(value):
