@@ -179,31 +179,48 @@
                         }}
                       </span>
                     </div>
-                    <div class="divide-y divide-slate-100">
-                      <div
-                        v-for="tier in variant.tiers"
-                        :key="tier.key"
-                        class="grid gap-2 px-3 py-2.5 lg:grid-cols-[13rem_minmax(0,1fr)] lg:items-center"
-                      >
-                        <span
-                          class="font-mono text-xs font-semibold text-slate-600"
-                        >
-                          {{ tier.range_label }} ·
-                          {{ billingUnitLabel(tier.billing_unit) }}
-                        </span>
-                        <div class="flex flex-wrap gap-2">
-                          <span
-                            v-for="price in tier.prices"
-                            :key="price.dimension"
-                            class="price-chip"
+                    <div class="overflow-x-auto">
+                      <table class="price-matrix">
+                        <thead>
+                          <tr>
+                            <th>{{ t('llmOps.sourcePriceDrawer.condition') }}</th>
+                            <th>{{ t('llmOps.sourcePriceDrawer.usageRange') }}</th>
+                            <th
+                              v-for="dimension in variant.dimensions"
+                              :key="dimension"
+                            >
+                              {{ dimensionLabel(dimension) }}
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <template
+                            v-for="group in variant.condition_groups"
+                            :key="group.key"
                           >
-                            <span>{{ dimensionLabel(price.dimension) }}</span>
-                            <strong>{{
-                              money(price.unit_price, price.currency)
-                            }}</strong>
-                          </span>
-                        </div>
-                      </div>
+                            <tr v-for="(tier, index) in group.tiers" :key="tier.key">
+                              <th
+                                v-if="index === 0"
+                                :rowspan="group.tiers.length"
+                                scope="rowgroup"
+                              >
+                                {{ group.label }}
+                              </th>
+                              <td class="price-range">
+                                {{ tier.display_range_label }} ·
+                                {{ billingUnitLabel(tier.billing_unit) }}
+                              </td>
+                              <td
+                                v-for="dimension in variant.dimensions"
+                                :key="dimension"
+                                class="price-value"
+                              >
+                                {{ money(priceFor(tier, dimension)?.unit_price, priceFor(tier, dimension)?.currency) }}
+                              </td>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table>
                     </div>
                   </section>
                 </div>
@@ -380,11 +397,16 @@ function schedules(priceItems) {
   return buildSourcePriceSchedules(priceItems, {
     defaultScope: t('llmOps.sourcePriceDrawer.defaultScope'),
     flat: t('llmOps.sourcePriceDrawer.allUsage'),
+    allTime: t('llmOps.sourcePriceDrawer.conditions.allTime'),
     peak: t('llmOps.sourcePriceDrawer.conditions.peak'),
     offPeak: t('llmOps.sourcePriceDrawer.conditions.offPeak'),
     beijing: t('llmOps.sourcePriceDrawer.locations.beijing'),
     chinaMainland: t('llmOps.sourcePriceDrawer.locations.chinaMainland')
   })
+}
+
+function priceFor(tier, dimension) {
+  return tier.prices.find((price) => price.dimension === dimension)
 }
 
 function money(value, currency = 'USD') {
@@ -484,14 +506,24 @@ function formatDateTime(value) {
 .table-toolbar {
   @apply flex flex-col gap-3 border-b border-slate-200 px-4 py-3 md:flex-row md:items-center md:justify-between;
 }
-.price-chip {
-  @apply inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs;
+.price-matrix {
+  @apply min-w-full border-collapse text-left text-xs;
 }
-.price-chip span {
-  @apply text-slate-400;
+.price-matrix th,
+.price-matrix td {
+  @apply border-t border-slate-100 px-3 py-2.5 align-middle;
 }
-.price-chip strong {
-  @apply font-mono font-semibold text-slate-800;
+.price-matrix thead th {
+  @apply border-t-0 bg-white text-xs font-medium text-slate-400;
+}
+.price-matrix tbody th {
+  @apply whitespace-nowrap bg-slate-50 font-semibold text-slate-700;
+}
+.price-range {
+  @apply whitespace-nowrap font-mono font-semibold text-slate-600;
+}
+.price-value {
+  @apply whitespace-nowrap font-mono font-semibold text-slate-800;
 }
 .pagination-bar {
   @apply flex flex-col gap-3 border-t border-slate-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between;

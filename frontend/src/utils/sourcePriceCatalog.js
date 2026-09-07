@@ -43,6 +43,7 @@ export function buildSourcePriceSchedules(priceItems = [], labels = {}) {
         key: tierKey,
         billing_unit: item.billing_unit,
         range_label: tierRangeLabel(item, labels),
+        display_range_label: tierRangeOnlyLabel(item, labels),
         pricing_condition: pricingCondition(item),
         prices: []
       }
@@ -65,7 +66,51 @@ export function buildSourcePriceSchedules(priceItems = [], labels = {}) {
         }))
         .sort(tierSort)
     }))
+    .map((variant) => addConditionGroups(variant, labels))
     .sort((left, right) => left.scope_label.localeCompare(right.scope_label))
+}
+
+function addConditionGroups(variant, labels = {}) {
+  const groups = new Map()
+  variant.tiers.forEach((tier) => {
+    const condition = tier.pricing_condition || {}
+    const key = stableJson(condition)
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        label:
+          pricingConditionLabel(condition, labels) ||
+          labels.allTime ||
+          'All times',
+        tiers: []
+      })
+    }
+    groups.get(key).tiers.push({
+      ...tier
+    })
+  })
+  return {
+    ...variant,
+    dimensions: Array.from(
+      new Set(
+        variant.tiers.flatMap((tier) =>
+          tier.prices.map((price) => price.dimension)
+        )
+      )
+    ).sort((left, right) =>
+      dimensionSort({ dimension: left }, { dimension: right })
+    ),
+    condition_groups: Array.from(groups.values())
+  }
+}
+
+function tierRangeOnlyLabel(item, labels = {}) {
+  if (item.tier_type !== 'usage_range') {
+    return labels.flat || 'All usage'
+  }
+  const start = compactNumber(item.tier_start ?? 0)
+  const end = item.tier_end === null ? '∞' : compactNumber(item.tier_end)
+  return `[${start}, ${end})`
 }
 
 export function tierRangeLabel(item, labels = {}) {

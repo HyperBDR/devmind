@@ -550,3 +550,61 @@ body.llm-ops-theme .danger-link-btn:disabled {
   color: var(--ui-text-muted, #71717a) !important;
   box-shadow: none !important;
 }
+
+/* Shared CRUD action contract for all LLM Ops panels and drawers. */
+body.llm-ops-theme {
+  --llm-ops-control-height: 2.25rem;
+  --llm-ops-control-radius: var(--ui-radius-control, 8px);
+  --llm-ops-control-padding: 0.5rem 0.875rem;
+}
+
+body.llm-ops-theme .btn-primary,
+body.llm-ops-theme .btn-secondary,
+body.llm-ops-theme .btn-danger,
+body.llm-ops-theme .add-listing-button,
+body.llm-ops-theme .batch-action,
+body.llm-ops-theme .btn-toolbar {
+  min-height: var(--llm-ops-control-height) !important;
+  border-radius: var(--llm-ops-control-radius) !important;
+  padding: var(--llm-ops-control-padding) !important;
+  font-size: 0.875rem !important;
+  font-weight: 600 !important;
+  line-height: 1.25rem !important;
+}
+
+body.llm-ops-theme .btn-compact,
+body.llm-ops-theme .batch-action {
+  min-height: 2rem !important;
+  padding: 0.375rem 0.75rem !important;
+  font-size: 0.8125rem !important;
+  line-height: 1.25rem !important;
+}
+
+body.llm-ops-theme .btn-action-create,
+body.llm-ops-theme .btn-action-save,
+body.llm-ops-theme .btn-action-submit,
+body.llm-ops-theme .btn-action-confirm {
+  border-color: var(--ui-color-primary, #5f4ecf) !important;
+  background: var(--ui-color-primary, #5f4ecf) !important;
+  color: var(--ui-text-on-brand, #ffffff) !important;
+}
+
+body.llm-ops-theme .btn-action-edit,
+body.llm-ops-theme .btn-action-view,
+body.llm-ops-theme .btn-action-neutral,
+body.llm-ops-theme .btn-action-cancel {
+  border-color: var(--ui-border-default, #e4e4e7) !important;
+  background: var(--ui-bg-card, #ffffff) !important;
+  color: var(--ui-text-secondary, #3f3f46) !important;
+}
+
+body.llm-ops-theme .btn-action-danger,
+body.llm-ops-theme .btn-danger {
+  border-color: color-mix(
+    in srgb,
+    var(--ui-color-destructive, #e11d48) 24%,
+    var(--ui-border-default, #e4e4e7)
+  ) !important;
+  background: var(--ui-color-destructive-subtle, #fff1f2) !important;
+  color: var(--ui-color-destructive, #e11d48) !important;
+}

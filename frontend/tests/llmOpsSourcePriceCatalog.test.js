@@ -8,8 +8,10 @@ import {
 } from '../src/utils/sourcePriceCatalog.js'
 import {
   channelPriceItemLabel,
+  channelPriceStructure,
   channelPriceSummaryRows,
-  channelPriceTierRows
+  channelPriceTierRows,
+  humanTierRange
 } from '../src/utils/channelPriceCatalog.js'
 
 const providerManagementSource = readFileSync(
@@ -38,6 +40,10 @@ const channelManagementSource = readFileSync(
 )
 const channelModelDrawerSource = readFileSync(
   new URL('../src/components/llm-ops/ChannelModelDrawer.vue', import.meta.url),
+  'utf8'
+)
+const llmOpsButtonsSource = readFileSync(
+  new URL('../src/components/llm-ops/llmOpsButtons.css', import.meta.url),
   'utf8'
 )
 const llmOpsPageSource = readFileSync(
@@ -80,7 +86,7 @@ test('keeps the newest source catalogue response during fast searches', () => {
 
 test('renders all source tiers instead of selecting one price per dimension', () => {
   assert.match(sourceDrawerSource, /price-schedule/)
-  assert.match(sourceDrawerSource, /tier\.range_label/)
+  assert.match(sourceDrawerSource, /tier\.display_range_label/)
   assert.match(sourceDrawerSource, /billingUnitLabel\(tier\.billing_unit\)/)
   assert.match(sourceDrawerSource, /variant\.scope_label/)
   assert.match(sourceDrawerSource, /variant\.tiers/)
@@ -335,6 +341,106 @@ test('groups peak prices under one Beijing schedule with clear labels', () => {
   )
 })
 
+test('keeps peak and off-peak prices in separate condition rows', () => {
+  const items = [
+    ['peak', 'text_input', '3'],
+    ['peak', 'text_output', '9'],
+    ['off_peak', 'text_input', '1.5'],
+    ['off_peak', 'text_output', '4.5']
+  ].map(([code, dimension, unit_price]) => ({
+    sku_code: 'deepseek-v4-flash-0731',
+    dimension,
+    billing_unit: 'per_1m_tokens',
+    currency: 'CNY',
+    unit_price,
+    tier_type: 'flat',
+    pricing_condition: { code }
+  }))
+
+  const [schedule] = buildSourcePriceSchedules(items, {
+    allTime: '全部时段',
+    flat: '全部用量',
+    peak: '忙时',
+    offPeak: '闲时'
+  })
+
+  assert.deepEqual(
+    schedule.condition_groups.map((group) => group.label),
+    ['忙时', '闲时']
+  )
+  assert.deepEqual(schedule.dimensions, ['text_input', 'text_output'])
+  assert.deepEqual(
+    schedule.condition_groups.map((group) =>
+      group.tiers[0].prices.map((price) => price.dimension)
+    ),
+    [
+      ['text_input', 'text_output'],
+      ['text_input', 'text_output']
+    ]
+  )
+  assert.equal(schedule.condition_groups[0].tiers[0].display_range_label, '全部用量')
+  assert.match(sourceDrawerSource, /variant\.condition_groups/)
+  assert.match(sourceDrawerSource, /:rowspan="group\.tiers\.length"/)
+})
+
+test('summarizes flat, peak, tiered and combined price structures', () => {
+  const item = (condition, start = null, end = null) => ({
+    dimension: 'text_input',
+    tier_type: start === null ? 'flat' : 'usage_range',
+    tier_start: start,
+    tier_end: end,
+    pricing_condition: condition
+      ? { type: 'provider_schedule', code: condition }
+      : { type: 'always', code: 'all_time' }
+  })
+
+  assert.deepEqual(channelPriceStructure([item()]), {
+    conditionCount: 0,
+    kind: 'flat',
+    tierCount: 0
+  })
+  assert.deepEqual(channelPriceStructure([item('peak'), item('off_peak')]), {
+    conditionCount: 2,
+    kind: 'conditional',
+    tierCount: 0
+  })
+  assert.deepEqual(
+    channelPriceStructure([item('', '0', '32768'), item('', '32768')]),
+    {
+      conditionCount: 0,
+      kind: 'tiered',
+      tierCount: 2
+    }
+  )
+  assert.deepEqual(
+    channelPriceStructure([
+      item('peak', '0', '32768'),
+      item('peak', '32768'),
+      item('off_peak', '0', '32768'),
+      item('off_peak', '32768')
+    ]),
+    {
+      conditionCount: 2,
+      kind: 'conditional_tiered',
+      tierCount: 2
+    }
+  )
+})
+
+test('formats request token ranges for operators instead of raw intervals', () => {
+  assert.equal(humanTierRange('0', '32768'), '0–<32K')
+  assert.equal(humanTierRange('32768', '131072'), '32K–<128K')
+  assert.equal(humanTierRange('131072', null), '≥128K')
+})
+
+test('removes throughput and latency configuration from channel models', () => {
+  const template = channelModelDrawerSource.split('<script setup>')[0]
+
+  assert.doesNotMatch(template, /performanceFields/)
+  assert.doesNotMatch(template, /forwardingCapability/)
+  assert.doesNotMatch(template, /tpm_limit|rpm_limit|latency_ms/)
+})
+
 test('keeps every channel price tier when summarizing one dimension', () => {
   const items = [
     ['text_input', '3', '0', '32000'],
@@ -441,6 +547,31 @@ test('renders configured channel prices as grouped tier comparisons', () => {
   assert.match(channelModelDrawerSource, /price-tier-list/)
   assert.match(channelModelDrawerSource, /priceTierComparisonRows\(row\)/)
   assert.match(channelModelDrawerSource, /price-tier-values/)
+})
+
+test('renders batch-add prices by schedule and dimension instead of one text run', () => {
+  assert.match(channelModelDrawerSource, /batchPriceMatrix\(/)
+  assert.match(channelModelDrawerSource, /batch-price-matrix/)
+  assert.match(channelModelDrawerSource, /batch-price-dimension/)
+  assert.doesNotMatch(
+    channelModelDrawerSource,
+    /batchUpstreamPriceSummary\(\n\s*item\.model/
+  )
+})
+
+test('uses one semantic CRUD button system in LLM Ops', () => {
+  assert.match(llmOpsButtonsSource, /--llm-ops-control-height: 2\.25rem/)
+  assert.match(llmOpsButtonsSource, /\.btn-action-create[\s\S]*\.btn-action-save/)
+  assert.match(llmOpsButtonsSource, /\.btn-action-edit[\s\S]*\.btn-action-cancel/)
+  assert.match(llmOpsButtonsSource, /\.btn-action-danger[\s\S]*\.btn-danger/)
+  assert.match(
+    channelModelDrawerSource,
+    /addFormOpen\s*\?\s*'btn-secondary btn-compact btn-action-cancel'\s*:\s*'btn-primary btn-compact btn-action-create'/
+  )
+  assert.match(
+    channelModelDrawerSource,
+    /class="btn-danger btn-compact btn-action-danger"/
+  )
 })
 
 test('shows final point values for every resale tier price', () => {

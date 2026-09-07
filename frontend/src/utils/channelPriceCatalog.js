@@ -46,6 +46,36 @@ export function channelPriceTierRows(priceItems = []) {
   return Array.from(tiers.values())
 }
 
+export function channelPriceStructure(priceItems = []) {
+  const conditions = new Set()
+  const tiers = new Set()
+
+  priceItems.forEach((item) => {
+    const condition = pricingConditionCode(item)
+    if (condition && condition !== 'all_time') conditions.add(condition)
+    if (item.tier_type === 'usage_range') {
+      tiers.add(`${item.tier_start ?? 0}:${item.tier_end ?? ''}`)
+    }
+  })
+
+  const conditionCount = conditions.size
+  const tierCount = tiers.size
+  let kind = 'flat'
+  if (conditionCount && tierCount) kind = 'conditional_tiered'
+  else if (conditionCount) kind = 'conditional'
+  else if (tierCount) kind = 'tiered'
+
+  return { conditionCount, kind, tierCount }
+}
+
+export function humanTierRange(startValue, endValue) {
+  const start = humanTokenCount(startValue ?? 0)
+  if (endValue === null || endValue === undefined || endValue === '') {
+    return `≥${start}`
+  }
+  return `${start}–<${humanTokenCount(endValue)}`
+}
+
 export function priceSpecLabel(spec = {}) {
   if (!spec || typeof spec !== 'object') return ''
   const values = [
@@ -78,6 +108,26 @@ function pricingConditionCode(item = {}) {
   return String(
     item.pricing_condition?.code || item.spec?.pricing_condition?.code || ''
   )
+}
+
+function humanTokenCount(value) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return String(value ?? '')
+  if (number >= 1000000 && number % 1000000 === 0) {
+    return `${number / 1000000}M`
+  }
+  if (number >= 1000 && number % 1000 === 0) {
+    return `${number / 1000}K`
+  }
+  if (number >= 1024 * 1024 && number % (1024 * 1024) === 0) {
+    return `${number / (1024 * 1024)}M`
+  }
+  if (number >= 1024 && number % 1024 === 0) {
+    return `${number / 1024}K`
+  }
+  return new Intl.NumberFormat('en-US', {
+    maximumFractionDigits: 6
+  }).format(number)
 }
 
 function channelPriceItemSort(left, right) {

@@ -1395,6 +1395,7 @@
       "noMatchedModels": "没有匹配的可添加模型",
       "noUpstreamSelected": "未选择渠道上游",
       "notApplicable": "不适用",
+      "openAddForm": "添加模型",
       "pendingCostGeneration": "成本待生成",
       "pendingUpstream": "待选择渠道上游",
       "performance": {
@@ -1432,6 +1433,12 @@
         "discount": "折扣比例",
         "fixed": "固定成本价"
       },
+      "priceStructure": {
+        "conditional": "峰谷价 · {count} 时段",
+        "conditionalTiered": "峰谷 × 区间 · {conditions} 时段 / {tiers} 档",
+        "flat": "平价",
+        "tiered": "区间价 · {count} 档"
+      },
       "priceRule": {
         "defaultDiscount": "默认折扣 {value}",
         "discount": "折扣 {value}",
@@ -1462,6 +1469,7 @@
         "unknown": "未标记类型"
       },
       "sourceNotIngested": "源未入库",
+      "structure": "结构",
       "unassignedVendor": "未归属厂商",
       "unboundUpstream": "未绑定上游",
       "unsaved": "未保存变更",
@@ -1471,6 +1479,7 @@
       "upstreamSourceCount": "{count} 个上游价格源",
       "upstreamSummary": "上游 {value}",
       "vendorAddableCount": "{count} 个可添加元模型",
+      "viewPrices": "查看价格明细",
       "title": "渠道模型",
       "errors": {
         "save": "渠道模型价格保存失败",
@@ -2690,8 +2699,11 @@
       "subtitle": "按地区、规格和 Token 区间展示完整价格，不折叠阶梯。",
       "searchPlaceholder": "搜索元模型、厂商或 code",
       "allUsage": "全部用量",
+      "condition": "计价时段",
+      "usageRange": "用量区间",
       "defaultScope": "中国内地 / 默认",
       "conditions": {
+        "allTime": "全部时段",
         "peak": "忙时",
         "offPeak": "闲时"
       },
