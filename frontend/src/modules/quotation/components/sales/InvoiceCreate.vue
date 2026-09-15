@@ -29,6 +29,7 @@ import {
   InvoiceNumberingMode,
   InvoiceStatus,
   type InvoiceCreatePayload,
+  type InvoiceDocumentKind,
   type InvoiceRecord,
   updateInvoice,
 } from '../../api/invoices'
@@ -62,6 +63,18 @@ interface EditableInvoiceItem {
 interface InvoiceItemHistory {
   invoice: InvoiceRecord
   item: InvoiceRecord['items'][number]
+}
+
+type WritableInvoiceStatus = InvoiceCreatePayload['status']
+
+function isWritableInvoiceStatus(
+  status: InvoiceStatus,
+): status is WritableInvoiceStatus {
+  return (
+    status === InvoiceStatus.DRAFT
+    || status === InvoiceStatus.ISSUED
+    || status === InvoiceStatus.PAID
+  )
 }
 
 const ADD_PRODUCT_LINE_OPTION = '__add_product_line__'
@@ -106,7 +119,8 @@ const editingStatus = ref<InvoiceStatus>(InvoiceStatus.DRAFT)
 const isFormalEditing = computed(
   () =>
     isEditing.value &&
-    [InvoiceStatus.ISSUED, InvoiceStatus.PAID].includes(editingStatus.value),
+    isWritableInvoiceStatus(editingStatus.value) &&
+    editingStatus.value !== InvoiceStatus.DRAFT,
 )
 const copyInvoiceId = computed(() =>
   !isEditing.value && typeof route.query.copy === 'string'
@@ -127,6 +141,7 @@ const selectedBankAccount = ref('')
 
 const form = reactive({
   invoiceNumber: '',
+  documentKind: 'invoice' as InvoiceDocumentKind,
   numberingMode: InvoiceNumberingMode.AUTO as InvoiceNumberingMode,
   productLine: 'BDR',
   invoiceDate: todayInputValue(),
@@ -489,6 +504,7 @@ const userEmail = computed(() =>
 
 const previewInvoice = computed<InvoicePreviewData>(() => ({
   invoiceNumber: form.invoiceNumber,
+  documentKind: form.documentKind,
   invoiceDate: form.invoiceDate,
   currency: form.currency,
   sellerName: form.sellerName,
@@ -580,7 +596,7 @@ function handleResizeStart(event: PointerEvent) {
   window.addEventListener('pointerup', stopResize)
 }
 
-function payload(status: InvoiceStatus): InvoiceCreatePayload {
+function payload(status: WritableInvoiceStatus): InvoiceCreatePayload {
   const items = form.items
     .filter((item) => item.description.trim())
     .map((item, index) => ({
@@ -634,7 +650,7 @@ function payload(status: InvoiceStatus): InvoiceCreatePayload {
   }
 }
 
-function validateForm(status: InvoiceStatus): boolean {
+function validateForm(status: WritableInvoiceStatus): boolean {
   const customNumberMissing =
     form.numberingMode === InvoiceNumberingMode.CUSTOM &&
     !form.invoiceNumber.trim()
@@ -678,6 +694,7 @@ function responseErrorMessage(submitError: unknown): string {
 
 function populateForm(invoice: InvoiceRecord) {
   form.invoiceNumber = invoice.invoice_no
+  form.documentKind = invoice.document_kind
   form.numberingMode = invoice.numbering_mode
   form.productLine = invoice.product_line || 'BDR'
   form.invoiceDate = invoice.invoice_date || ''
@@ -727,13 +744,7 @@ async function loadDraft() {
   error.value = ''
   try {
     const invoice = await getInvoice(editingInvoiceId.value)
-    if (
-      ![
-        InvoiceStatus.DRAFT,
-        InvoiceStatus.ISSUED,
-        InvoiceStatus.PAID,
-      ].includes(invoice.status)
-    ) {
+    if (!isWritableInvoiceStatus(invoice.status)) {
       await router.replace(
         `/quotation/sales/invoices/${editingInvoiceId.value}`,
       )
@@ -779,9 +790,12 @@ async function initializeForm() {
 
 async function submit(status: InvoiceStatus) {
   error.value = ''
-  const effectiveStatus = isFormalEditing.value
-    ? editingStatus.value
-    : status
+  const effectiveStatus: WritableInvoiceStatus =
+    isFormalEditing.value && isWritableInvoiceStatus(editingStatus.value)
+      ? editingStatus.value
+      : isWritableInvoiceStatus(status)
+        ? status
+        : InvoiceStatus.DRAFT
   if (!validateForm(effectiveStatus)) return
   submitting.value = true
   try {
