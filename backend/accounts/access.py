@@ -223,18 +223,6 @@ def get_effective_feature_keys(
     if not normalized_features:
         normalized_features = list(LEGACY_DEFAULT_FEATURES)
 
-    # Quote Desk membership is the platform-level assignment for users
-    # managed from the Quote Desk access page. Keep it effective even when
-    # the membership predates the newer Role-based access record.
-    from quotation.models import QuotationMembership
-
-    if QuotationMembership.objects.filter(
-        user=user,
-        is_active=True,
-    ).exists():
-        normalized_features = normalize_feature_keys(
-            [*normalized_features, 'quotation_management']
-        )
     if has_admin_role:
         return list(FEATURE_KEYS)
 
