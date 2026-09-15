@@ -79,6 +79,8 @@ def get_quotation_platform_role(user: User) -> str | None:
         False,
     ):
         return QuotationMembershipRole.ADMIN
+    if "quotation_management" not in get_effective_feature_keys(user):
+        return None
     membership = QuotationMembership.objects.filter(
         user=user,
         is_active=True,

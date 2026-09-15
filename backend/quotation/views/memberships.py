@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.access import get_effective_feature_keys
+from invoice.models import InvoiceAccessGrant
 from quotation.audit import record_audit_event
 from quotation.models import (
     AuditEvent,
@@ -36,15 +37,20 @@ def _validate_role(value) -> str:
     return role
 
 
-def _has_first_layer_access(user: User) -> bool:
-    """Return whether a user may be managed as a Quote Desk member."""
+def _has_managed_platform_access(user: User) -> bool:
+    """Return whether a user can be managed in either platform."""
     if not user.is_active or user.is_staff or user.is_superuser:
         return False
-    return "quotation_management" in get_effective_feature_keys(user)
+    if "quotation_management" in get_effective_feature_keys(user):
+        return True
+    return InvoiceAccessGrant.objects.filter(
+        user=user,
+        is_active=True,
+    ).exists()
 
 
 def _managed_user(user_id) -> User:
-    """Load an eligible first-layer Quote Desk user."""
+    """Load an eligible user with access to at least one platform."""
     try:
         parsed_user_id = int(user_id)
     except (TypeError, ValueError) as error:
@@ -52,7 +58,7 @@ def _managed_user(user_id) -> User:
             {"user_id": "A valid user is required."}
         ) from error
     user = User.objects.filter(pk=parsed_user_id).first()
-    if user is None or not _has_first_layer_access(user):
+    if user is None or not _has_managed_platform_access(user):
         raise ValidationError(
             {
                 "user_id": (
@@ -131,7 +137,7 @@ class QuotationMembershipView(APIView):
         rows = [
             _membership_row(user, memberships.get(user.id))
             for user in users
-            if _has_first_layer_access(user)
+            if _has_managed_platform_access(user)
         ]
         return Response(
             {
@@ -190,10 +196,8 @@ class QuotationMembershipDetailView(APIView):
         ).select_related("user", "assigned_by").first()
         if membership is None:
             raise ValidationError("Quotation membership not found.")
-        if not _has_first_layer_access(membership.user):
-            raise ValidationError(
-                "User no longer has first-layer Quote Desk access."
-            )
+        if not _has_managed_platform_access(membership.user):
+            raise ValidationError("User no longer has platform access.")
         role = _validate_role(request.data.get("role"))
         if role == membership.role:
             raise ValidationError({"role": "User already has this role."})
@@ -210,3 +214,23 @@ class QuotationMembershipDetailView(APIView):
             before_role=before_role,
         )
         return Response(_membership_row(membership.user, membership))
+
+    def delete(self, request, membership_id: int):
+        _require_admin(request.user)
+        membership = QuotationMembership.objects.filter(
+            pk=membership_id,
+            is_active=True,
+        ).select_related("user", "assigned_by").first()
+        if membership is None:
+            raise ValidationError("Quotation membership not found.")
+        before_role = membership.role
+        membership.is_active = False
+        membership.assigned_by = request.user
+        membership.save(update_fields=["is_active", "assigned_by", "updated_at"])
+        _record_role_event(
+            request,
+            membership,
+            action="revoke_role",
+            before_role=before_role,
+        )
+        return Response(status=204)
