@@ -114,6 +114,7 @@ def authorized_sync_targets(actor) -> list[FeishuSyncTarget]:
     if settings.QUOTATION_STORAGE_ROUTER_ENABLED:
         mounts = StorageMount.objects.select_related("connection").filter(
             enabled=True,
+            scope_key="",
             purpose=StorageMountPurpose.QUOTATION_ARCHIVE,
             connection__status=StorageConnectionStatus.ACTIVE,
         )

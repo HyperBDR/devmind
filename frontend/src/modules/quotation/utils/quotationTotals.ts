@@ -20,6 +20,8 @@ export interface QuotationTotals {
   grandTotal: number;
 }
 
+export type TaxCalculationMode = 'add' | 'subtract';
+
 export function roundMoney(value: number): number {
   return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 }
@@ -56,7 +58,11 @@ export function calculateLineItemPrices(input: LinePriceInput): CalculatedLinePr
   };
 }
 
-export function calculateQuotationTotals(items: QuotationLineItem[], vatRateValue: number): QuotationTotals {
+export function calculateQuotationTotals(
+  items: QuotationLineItem[],
+  vatRateValue: number,
+  taxMode: TaxCalculationMode = 'add',
+): QuotationTotals {
   const softwareSubtotal = roundMoney(
     items
       .filter(item => item.type === 'Software')
@@ -77,6 +83,10 @@ export function calculateQuotationTotals(items: QuotationLineItem[], vatRateValu
     subtotalBeforeVat,
     vatRate,
     vatAmount,
-    grandTotal: roundMoney(subtotalBeforeVat + vatAmount),
+    grandTotal: roundMoney(
+      taxMode === 'subtract'
+        ? subtotalBeforeVat - vatAmount
+        : subtotalBeforeVat + vatAmount,
+    ),
   };
 }

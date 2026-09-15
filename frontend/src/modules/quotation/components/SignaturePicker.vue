@@ -18,11 +18,15 @@ const props = withDefaults(
     value?: string
     userEmail?: string
     className?: string
+    drawHint?: string
+    uploadHint?: string
   }>(),
   {
     modelValue: undefined,
     value: '',
     className: '',
+    drawHint: '',
+    uploadHint: '',
   },
 )
 
@@ -325,7 +329,7 @@ function handleRemoveFromGallery(dataUrl: string) {
       </div>
       <div class="mt-2 flex items-center justify-between gap-2">
         <p class="text-xs font-medium text-slate-400">
-          {{ t('quotation.components.signature.drawHint') }}
+          {{ drawHint || t('quotation.components.signature.drawHint') }}
         </p>
         <button
           type="button"
@@ -427,7 +431,7 @@ function handleRemoveFromGallery(dataUrl: string) {
       </div>
 
       <p class="mt-2 text-xs font-medium text-slate-400">
-        {{ t('quotation.components.signature.uploadHint') }}
+        {{ uploadHint || t('quotation.components.signature.uploadHint') }}
       </p>
     </div>
   </div>

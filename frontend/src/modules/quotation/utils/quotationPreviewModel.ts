@@ -45,9 +45,13 @@ export interface QuotationPreviewModel {
   othersSubtotal: number;
   subtotalBeforeVat: number;
   taxLabel: string;
+  taxCalculationMode: 'add' | 'subtract';
   vatRate: number;
   vatAmount: number;
   grandTotal: number;
+  customTotalLabel: string;
+  customTotalAmount: number;
+  customTotalCurrency: string;
   remarksDisclaimer: string;
   issuerSignature: string;
   signer: PreviewUser;
@@ -181,9 +185,13 @@ export function buildQuotationPreviewModel(quote: Quotation, options: BuildOptio
     othersSubtotal: quote.othersSubtotal,
     subtotalBeforeVat: quote.subtotalBeforeVat ?? quote.softwareSubtotal + quote.othersSubtotal,
     taxLabel: resolveTaxLabel(quote.taxLabel),
+    taxCalculationMode: quote.taxCalculationMode || 'add',
     vatRate: quote.vatRate ?? 0,
     vatAmount: quote.vatAmount ?? 0,
     grandTotal: quote.grandTotal,
+    customTotalLabel: quote.customTotalLabel || '',
+    customTotalAmount: quote.customTotalAmount || 0,
+    customTotalCurrency: quote.customTotalCurrency || 'USD',
     remarksDisclaimer: quote.remarksDisclaimer ?? '',
     issuerSignature: quote.issuerSignature ?? '',
     signer,

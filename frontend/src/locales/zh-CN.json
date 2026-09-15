@@ -749,10 +749,16 @@
     "taskManagementConsole": "任务控制台",
     "notificationConsole": "通知控制台",
     "salesWorkOrders": "售后工单仪表盘",
-    "quotationManagement": "报价工作台"
+    "quotationManagement": "报价工作台",
+    "salesManagement": "票据平台"
   },
   "quotation": {
     "menuTitle": "报价工作台",
+    "quoteSection": "报价",
+    "salesSection": "发票",
+    "salesDashboard": "发票看板",
+    "invoices": "发票",
+    "createInvoice": "新建发票",
     "dashboard": "报价看板",
     "list": "报价查询中心",
     "create": "在线创建报价单",

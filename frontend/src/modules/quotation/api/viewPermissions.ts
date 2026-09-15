@@ -103,6 +103,10 @@ export function updateMembershipRole(
   })
 }
 
+export function revokeMembership(id: number): Promise<void> {
+  return apiRequest<void>(`/memberships/${id}`, { method: 'DELETE' })
+}
+
 export function grantViewPermission(
   payload: GrantViewPermissionPayload
 ): Promise<ViewPermissionRecord> {

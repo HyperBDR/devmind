@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import logging
-from hashlib import sha256
 from time import perf_counter
 
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 from rest_framework import serializers
 
+from core.file_hash import hash_file
 from quotation.models import (
     DocumentAsset,
     DocumentParseResult,
@@ -57,11 +57,7 @@ class QuotationDocumentParseError(ValueError):
 
 
 def _file_hash(path) -> str:
-    digest = sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    return hash_file(path)
 
 
 def _parser_for_asset(asset: DocumentAsset):

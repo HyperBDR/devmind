@@ -42,6 +42,23 @@ function highlightCellClass(changed: boolean): string {
 }
 
 const model = computed(() => buildQuotationPreviewModel(props.quote, { currentUser: props.currentUser }))
+const totalsLabelSpan = computed(() => {
+  const labels = [
+    `Subtotal before ${model.value.taxLabel}:`,
+    `${model.value.taxLabel} Amount (${model.value.vatRate}%):`,
+    model.value.customTotalLabel
+      ? `${model.value.customTotalLabel}(${model.value.customTotalCurrency || model.value.currency}):`
+      : '',
+    'Grand Total:',
+  ]
+  const length = Math.max(...labels.map((label) => label.length))
+  if (length > 78) return 6
+  if (length > 58) return 5
+  if (length > 43) return 4
+  if (length > 28) return 3
+  return 2
+})
+const totalsSpacerSpan = computed(() => 6 - totalsLabelSpan.value)
 const padding = computed(() => (props.scale === 'compact' ? 'p-4' : 'p-7'))
 const textSize = computed(() => (props.scale === 'compact' ? 'text-[10px]' : 'text-[11px]'))
 const metaHeaderSize = computed(() =>
@@ -61,6 +78,13 @@ function money(value: number): string {
     undefined,
     { maximumFractionDigits: 2 },
   )}`
+}
+
+function customMoney(value: number, currency: string): string {
+  if (!value) return ''
+  return `${getCurrencySymbol(currency)}${Number(value).toLocaleString(undefined, {
+    maximumFractionDigits: 2,
+  })}`
 }
 
 function percent(value: number): string {
@@ -273,13 +297,13 @@ const headerCellClass =
           </td>
           <td
             colspan="3"
-            class="break-words border border-slate-300 px-1.5 py-1 align-middle"
+            class="whitespace-pre-line break-words border border-slate-300 px-1.5 py-1 leading-relaxed align-top"
             :class="highlightCellClass(isHeaderChanged('projectName'))"
           >
             {{ model.projectName || '-' }}
           </td>
           <td
-            class="break-words border border-slate-300 px-1.5 py-1 align-middle"
+            class="whitespace-pre-line break-words border border-slate-300 px-1.5 py-1 leading-relaxed align-top"
             :class="highlightCellClass(isHeaderChanged('paymentTerms'))"
           >
             {{ model.paymentTerms || '-' }}
@@ -325,7 +349,7 @@ const headerCellClass =
             {{ rowHasContent(item) ? item.lineNo : '' }}
           </td>
           <td
-            class="break-words border border-slate-300 px-1.5 py-1 align-middle"
+            class="whitespace-pre-line break-words border border-slate-300 px-1.5 py-1 align-middle"
             :class="
               isLineChanged(item.id)
                 ? 'bg-rose-50 font-semibold text-rose-700'
@@ -357,10 +381,10 @@ const headerCellClass =
           </td>
         </tr>
         <tr>
-          <td colspan="4" class="px-1.5 py-1 align-middle" />
+          <td :colspan="totalsSpacerSpan" class="px-1.5 py-1 align-middle" />
           <td
-            colspan="2"
-            class="whitespace-nowrap border border-slate-300 px-1.5 py-1 text-right font-semibold align-middle"
+            :colspan="totalsLabelSpan"
+            class="whitespace-normal break-words border border-slate-300 px-1.5 py-1 text-right font-semibold leading-tight align-middle"
           >
             Software subscription subtotal:
           </td>
@@ -402,7 +426,7 @@ const headerCellClass =
             {{ rowHasContent(item) ? item.lineNo : '' }}
           </td>
           <td
-            class="break-words border border-slate-300 px-1.5 py-1 align-middle"
+            class="whitespace-pre-line break-words border border-slate-300 px-1.5 py-1 align-middle"
             :class="
               isLineChanged(item.id)
                 ? 'bg-rose-50 font-semibold text-rose-700'
@@ -449,10 +473,10 @@ const headerCellClass =
           <td colspan="7" class="px-1.5 py-1 align-middle" />
         </tr>
         <tr>
-          <td colspan="4" class="px-1.5 py-1 align-middle" />
+          <td :colspan="totalsSpacerSpan" class="px-1.5 py-1 align-middle" />
           <td
-            colspan="2"
-            class="whitespace-nowrap border border-slate-300 px-1.5 py-1 text-right font-semibold align-middle"
+            :colspan="totalsLabelSpan"
+            class="whitespace-normal break-words border border-slate-300 px-1.5 py-1 text-right font-semibold leading-tight align-middle"
           >
             Subtotal before {{ model.taxLabel }}:
           </td>
@@ -461,10 +485,10 @@ const headerCellClass =
           </td>
         </tr>
         <tr>
-          <td colspan="4" class="px-1.5 py-1 align-middle" />
+          <td :colspan="totalsSpacerSpan" class="px-1.5 py-1 align-middle" />
           <td
-            colspan="2"
-            class="whitespace-nowrap border border-slate-300 px-1.5 py-1 text-right font-semibold align-middle"
+            :colspan="totalsLabelSpan"
+            class="whitespace-normal break-words border border-slate-300 px-1.5 py-1 text-right font-semibold leading-tight align-middle"
           >
             {{ model.taxLabel }} Amount ({{ model.vatRate }}%):
           </td>
@@ -473,9 +497,30 @@ const headerCellClass =
           </td>
         </tr>
         <tr>
-          <td colspan="4" class="px-1.5 py-1 align-middle" />
+          <td :colspan="totalsSpacerSpan" class="px-1.5 py-1 align-middle" />
           <td
-            colspan="2"
+            :colspan="totalsLabelSpan"
+            class="min-h-7 whitespace-normal break-all border border-slate-300 px-1.5 py-1 text-right font-semibold leading-tight align-middle"
+            style="overflow-wrap: anywhere;"
+          >
+            <template v-if="model.customTotalLabel?.trim()">
+              {{ model.customTotalLabel }}({{ model.customTotalCurrency || model.currency }}):
+            </template>
+            <template v-else>&nbsp;</template>
+          </td>
+          <td class="whitespace-nowrap border border-slate-300 px-1.5 py-1 text-right font-mono font-semibold tabular-nums align-middle">
+            {{
+              customMoney(
+                model.customTotalAmount || 0,
+                model.customTotalCurrency || model.currency,
+              ) || '\u00a0'
+            }}
+          </td>
+        </tr>
+        <tr>
+          <td :colspan="totalsSpacerSpan" class="px-1.5 py-1 align-middle" />
+          <td
+            :colspan="totalsLabelSpan"
             class="whitespace-nowrap border border-slate-300 px-1.5 py-1 text-right font-semibold align-middle"
           >
             Grand Total:
@@ -488,9 +533,6 @@ const headerCellClass =
           >
             {{ money(model.grandTotal) }}
           </td>
-        </tr>
-        <tr class="h-3">
-          <td colspan="7" class="px-1.5 py-1 align-middle" />
         </tr>
         <tr class="h-3">
           <td colspan="7" class="px-1.5 py-1 align-middle" />

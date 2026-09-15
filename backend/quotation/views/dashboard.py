@@ -77,5 +77,8 @@ class DashboardRecentView(APIView):
         payload = build_dashboard_recent(
             _accessible_quotations(request),
             serializer.validated_data["limit"],
+            serializer.validated_data.get("currency", "USD"),
+            serializer.validated_data.get("date_from", ""),
+            serializer.validated_data.get("date_to", ""),
         )
         return Response(payload)

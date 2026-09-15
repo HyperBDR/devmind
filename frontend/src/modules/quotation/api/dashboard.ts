@@ -21,13 +21,16 @@ export interface DashboardSummary {
   previousMonthQuoteCount: number
   monthQuoteAmount: number
   previousMonthQuoteAmount: number
+  previousYearQuoteAmount: number
   monthWonAmount: number
   successRate: number
   successRateNumerator: number
   successRateDenominator: number
   followUpCount: number
+  followUpAmount: number
   activeCount: number
   draftCount: number
+  draftAmount: number
   generatedAt: string
 }
 
@@ -47,6 +50,12 @@ export interface DashboardTrendPoint {
   wonAmount: number
 }
 
+export interface DashboardProductLineBreakdown {
+  productLine: string
+  amount: number
+  quoteCount: number
+}
+
 export interface DashboardAnalytics {
   currency: DashboardCurrency
   availableCurrencies: string[]
@@ -54,6 +63,7 @@ export interface DashboardAnalytics {
   breakdownTotalAmount: number
   breakdownOmittedCount: number
   breakdownOmittedAmount: number
+  productLineBreakdown: DashboardProductLineBreakdown[]
   trends: Record<DashboardTrendGrain, DashboardTrendPoint[]>
   generatedAt: string
 }
@@ -81,13 +91,16 @@ interface ApiSummary {
   previous_month_quote_count: number
   month_quote_amount: string
   previous_month_quote_amount: string
+  previous_year_quote_amount: string
   month_won_amount: string
   success_rate: number
   success_rate_numerator: number
   success_rate_denominator: number
   follow_up_count: number
+  follow_up_amount: string
   active_count: number
   draft_count: number
+  draft_amount: string
   generated_at: string
 }
 
@@ -112,6 +125,11 @@ interface ApiAnalytics {
   breakdown_total_amount: string
   breakdown_omitted_count: number
   breakdown_omitted_amount: string
+  product_line_breakdown: Array<{
+    product_line: string
+    amount: string
+    quote_count: number
+  }>
   trends: Record<DashboardTrendGrain, ApiTrendPoint[]>
   generated_at: string
 }
@@ -179,13 +197,16 @@ export async function getDashboardSummary(
     previousMonthQuoteCount: data.previous_month_quote_count,
     monthQuoteAmount: Number(data.month_quote_amount || 0),
     previousMonthQuoteAmount: Number(data.previous_month_quote_amount || 0),
+    previousYearQuoteAmount: Number(data.previous_year_quote_amount || 0),
     monthWonAmount: Number(data.month_won_amount || 0),
     successRate: data.success_rate,
     successRateNumerator: data.success_rate_numerator,
     successRateDenominator: data.success_rate_denominator,
     followUpCount: data.follow_up_count,
+    followUpAmount: Number(data.follow_up_amount || 0),
     activeCount: data.active_count,
     draftCount: data.draft_count,
+    draftAmount: Number(data.draft_amount || 0),
     generatedAt: data.generated_at
   }
 }
@@ -218,6 +239,11 @@ export async function getDashboardAnalytics(
     breakdownTotalAmount: Number(data.breakdown_total_amount || 0),
     breakdownOmittedCount: data.breakdown_omitted_count,
     breakdownOmittedAmount: Number(data.breakdown_omitted_amount || 0),
+    productLineBreakdown: data.product_line_breakdown.map((row) => ({
+      productLine: row.product_line,
+      amount: Number(row.amount || 0),
+      quoteCount: row.quote_count || 0
+    })),
     trends: {
       monthly: data.trends.monthly.map(mapTrend),
       weekly: data.trends.weekly.map(mapTrend)
@@ -227,10 +253,19 @@ export async function getDashboardAnalytics(
 }
 
 export async function getDashboardRecent(
-  limit = 5
+  limit = 5,
+  dateFrom = '',
+  dateTo = '',
+  currency = 'USD'
 ): Promise<DashboardRecentQuotation[]> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    currency,
+  })
+  if (dateFrom) params.set('date_from', dateFrom)
+  if (dateTo) params.set('date_to', dateTo)
   const data = await apiRequest<{ items: ApiRecentQuotation[] }>(
-    `/dashboard/recent?limit=${limit}`
+    `/dashboard/recent?${params.toString()}`
   )
   return data.items.map((row) => ({
     id: row.id,

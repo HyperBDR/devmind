@@ -47,12 +47,16 @@ interface ApiQuotation {
   quote_date: string;
   expire_date: string;
   tax_label: string;
+  tax_calculation_mode?: 'add' | 'subtract';
   vat_rate: number | string;
   vat_amount: number | string;
   software_subtotal: number | string;
   others_subtotal: number | string;
   subtotal_before_vat: number | string;
   grand_total: number | string;
+  custom_total_label?: string | null;
+  custom_total_amount?: number | string | null;
+  custom_total_currency?: string | null;
   remarks_disclaimer?: string | null;
   issuer_company_name: string;
   issuer_contact_name: string;
@@ -166,6 +170,7 @@ export interface QuotationListParams {
   productLine?: string;
   sourceType?: 'manual' | 'document_import';
   currency?: string;
+  salesperson?: string;
   createdFrom?: string;
   createdTo?: string;
 }
@@ -174,6 +179,7 @@ export interface QuotationListResult {
   items: Quotation[];
   productLines: string[];
   currencies: string[];
+  salespeople: string[];
   total: number;
   page: number;
   pageSize: 10 | 20 | 50;
@@ -457,9 +463,13 @@ export function mapApiQuotation(api: ApiQuotation): Quotation {
     othersSubtotal: toNumber(api.others_subtotal),
     subtotalBeforeVat: toNumber(api.subtotal_before_vat),
     taxLabel: api.tax_label,
+    taxCalculationMode: api.tax_calculation_mode || 'add',
     vatRate: toNumber(api.vat_rate),
     vatAmount: toNumber(api.vat_amount),
     grandTotal: toNumber(api.grand_total),
+    customTotalLabel: api.custom_total_label || '',
+    customTotalAmount: toNumber(api.custom_total_amount),
+    customTotalCurrency: api.custom_total_currency || 'USD',
     createdAt: api.created_at,
     updatedAt: api.updated_at,
     feishuFileToken: api.feishu_file_token || undefined,
@@ -582,7 +592,11 @@ export function mapQuotationToCreatePayload(quote: Quotation) {
     quote_date: quote.quoteDate,
     expire_date: quote.expireDate,
     tax_label: quote.taxLabel || 'VAT',
+    tax_calculation_mode: quote.taxCalculationMode || 'add',
     vat_rate: quote.vatRate ?? 0,
+    custom_total_label: quote.customTotalLabel || '',
+    custom_total_amount: quote.customTotalAmount ?? 0,
+    custom_total_currency: quote.customTotalCurrency || 'USD',
     remarks_disclaimer: quote.remarksDisclaimer || '',
     issuer_company_name: quote.issuerCompanyName || 'OnePro Cloud Limited',
     issuer_contact_name: quote.issuerContactName || quote.salesperson,
@@ -626,6 +640,7 @@ export async function listQuotations(
   }
   if (params.sourceType) query.set('source_type', params.sourceType);
   if (params.currency) query.set('currency', params.currency);
+  if (params.salesperson) query.set('salesperson', params.salesperson);
   if (params.createdFrom) query.set('created_from', params.createdFrom);
   if (params.createdTo) query.set('created_to', params.createdTo);
   const data = await apiRequest<{
@@ -637,12 +652,14 @@ export async function listQuotations(
     facets?: {
       product_lines?: string[];
       currencies?: string[];
+      salespeople?: string[];
     };
   }>(`/quotations?${query.toString()}`);
   return {
     items: data.items.map(mapApiQuotationListItem),
     productLines: data.facets?.product_lines || [],
     currencies: data.facets?.currencies || [],
+    salespeople: data.facets?.salespeople || [],
     total: data.total,
     page: data.page,
     pageSize: data.page_size,

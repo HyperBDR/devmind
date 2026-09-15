@@ -45,7 +45,7 @@ const pageCount = computed(() => Math.max(Math.ceil(total.value / pageSize), 1))
 const rangeStart = computed(() => total.value ? (page.value - 1) * pageSize + 1 : 0)
 const rangeEnd = computed(() => Math.min(page.value * pageSize, total.value))
 
-const moduleOptions = ['quotation', 'document', 'feishu', 'catalog']
+const moduleOptions = ['quotation', 'invoice', 'document', 'feishu', 'catalog']
 const moduleAliases: Record<string, string> = {
   quote: 'quotation',
 }
@@ -146,6 +146,7 @@ function actorLabel(event: AuditEvent) {
 
 const targetFallbackByType: Record<string, string> = {
   document: 'document',
+  invoice: 'invoice',
   quotation: 'quotation',
   catalog: 'catalog',
 }
@@ -189,6 +190,14 @@ function actionLabel(value: string, module = '') {
   }
   if (value === 'update' && moduleKey === 'quotation') {
     return t('quotation.pages.audit.actions.updatedQuote')
+  }
+  if (moduleKey === 'invoice') {
+    const invoiceActions: Record<string, string> = {
+      generate: 'generatedInvoice',
+      download: 'downloadedInvoice',
+    }
+    const key = invoiceActions[value]
+    if (key) return t(`quotation.pages.audit.actions.${key}`)
   }
   if (moduleKey === 'catalog') {
     const catalogActions: Record<string, string> = {

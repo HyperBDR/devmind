@@ -739,10 +739,16 @@
     "taskManagementConsole": "Task Console",
     "notificationConsole": "Notification Console",
     "salesWorkOrders": "After-Sales Dashboard",
-    "quotationManagement": "Quote Desk"
+    "quotationManagement": "Quote Desk",
+    "salesManagement": "Invoice"
   },
   "quotation": {
     "menuTitle": "Quote Desk",
+    "quoteSection": "Quote",
+    "salesSection": "Invoice",
+    "salesDashboard": "Invoice Overview",
+    "invoices": "Invoices",
+    "createInvoice": "New Invoice",
     "dashboard": "Overview",
     "list": "Quotes",
     "create": "New Quote",

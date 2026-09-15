@@ -26,6 +26,10 @@ class QuoteDateParsingTests(SimpleTestCase):
             date(2026, 5, 14),
         )
         self.assertEqual(
+            parse_quote_date("30th Apr.2026"),
+            date(2026, 4, 30),
+        )
+        self.assertEqual(
             parse_quote_date("2026-08-03"),
             date(2026, 8, 3),
         )

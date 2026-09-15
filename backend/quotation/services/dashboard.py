@@ -4,13 +4,17 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from django.db.models import (
+    Case,
+    CharField,
     Count,
     DateTimeField,
+    F,
     OuterRef,
     Q,
     QuerySet,
     Subquery,
     Sum,
+    When,
 )
 from django.db.models.functions import (
     Coalesce,
@@ -198,6 +202,8 @@ def build_dashboard_summary(
     )
     previous_month_start = _shift_month(month_start, -range_months)
     previous_month_end = _shift_month(previous_month_start, range_months)
+    previous_year_start = _shift_month(month_start, -12)
+    previous_year_end = _shift_month(month_end, -12)
     month_filter = Q(
         quote_date__gte=month_start.date(),
         quote_date__lt=month_end.date(),
@@ -205,6 +211,10 @@ def build_dashboard_summary(
     previous_month_filter = Q(
         quote_date__gte=previous_month_start.date(),
         quote_date__lt=previous_month_end.date(),
+    )
+    previous_year_filter = Q(
+        quote_date__gte=previous_year_start.date(),
+        quote_date__lt=previous_year_end.date(),
     )
     counts = currency_queryset.aggregate(
         accepted_count=Count(
@@ -219,6 +229,14 @@ def build_dashboard_summary(
             "pk",
             filter=Q(status=QuoteStatus.DRAFT),
         ),
+        follow_up_amount=Sum(
+            "grand_total",
+            filter=Q(status__in=OPEN_STATUSES),
+        ),
+        draft_amount=Sum(
+            "grand_total",
+            filter=Q(status=QuoteStatus.DRAFT),
+        ),
         month_quote_count=Count("pk", filter=month_filter),
         previous_month_quote_count=Count(
             "pk",
@@ -231,6 +249,10 @@ def build_dashboard_summary(
         previous_month_quote_amount=Sum(
             "grand_total",
             filter=previous_month_filter,
+        ),
+        previous_year_quote_amount=Sum(
+            "grand_total",
+            filter=previous_year_filter,
         ),
     )
     won_amount = (
@@ -268,13 +290,18 @@ def build_dashboard_summary(
         "previous_month_quote_amount": _money(
             counts["previous_month_quote_amount"]
         ),
+        "previous_year_quote_amount": _money(
+            counts["previous_year_quote_amount"]
+        ),
         "month_won_amount": _money(won_amount),
         "success_rate": success_rate,
         "success_rate_numerator": accepted_count,
         "success_rate_denominator": rate_denominator,
         "follow_up_count": open_count,
+        "follow_up_amount": _money(counts["follow_up_amount"]),
         "active_count": open_count,
         "draft_count": counts["draft_count"],
+        "draft_amount": _money(counts["draft_amount"]),
         "generated_at": local_now.isoformat(),
     }
 
@@ -430,11 +457,33 @@ def build_dashboard_analytics(
         quote_date__gte=range_start.date(),
         quote_date__lt=range_end.date(),
     )
-    breakdown_totals = breakdown_queryset.aggregate(
-        amount=Sum("grand_total"),
-        count=Count("pk"),
+    product_line_display = Case(
+        When(product_line_name="", then=F("product_line")),
+        default=F("product_line_name"),
+        output_field=CharField(),
     )
-    total_amount = breakdown_totals["amount"] or Decimal("0")
+    product_line_rows = (
+        breakdown_queryset.annotate(
+            product_line_display=product_line_display,
+        )
+        .values("product_line_display")
+        .annotate(amount=Sum("grand_total"), quote_count=Count("pk"))
+        .order_by("-amount", "product_line_display")
+    )
+    product_line_rows = list(product_line_rows)
+    total_amount = sum(
+        (row["amount"] for row in product_line_rows),
+        Decimal("0"),
+    )
+    total_count = sum(row["quote_count"] for row in product_line_rows)
+    product_line_breakdown = [
+        {
+            "product_line": row["product_line_display"] or "Unspecified",
+            "amount": _money(row["amount"]),
+            "quote_count": row["quote_count"],
+        }
+        for row in product_line_rows
+    ]
     minimum_amount = total_amount * BREAKDOWN_MIN_SHARE
     breakdown_rows = list(
         breakdown_queryset.filter(grand_total__gte=minimum_amount)
@@ -484,10 +533,11 @@ def build_dashboard_analytics(
         "amount_breakdown": breakdown,
         "breakdown_total_amount": _money(total_amount),
         "breakdown_omitted_count": max(
-            breakdown_totals["count"] - len(breakdown),
+            total_count - len(breakdown),
             0,
         ),
         "breakdown_omitted_amount": _money(total_amount - displayed_amount),
+        "product_line_breakdown": product_line_breakdown,
         "trends": {
             "monthly": _merge_trend_rows(
                 _trend_rows(
@@ -525,9 +575,20 @@ def build_dashboard_analytics(
 def build_dashboard_recent(
     queryset: QuerySet[Quotation],
     limit: int,
+    currency: str = DEFAULT_DASHBOARD_CURRENCY,
+    date_from: str = "",
+    date_to: str = "",
 ) -> dict[str, object]:
     """Return a bounded projection for the recent quotations card."""
-    rows = queryset.order_by("-updated_at", "-id").values(
+    currency = _normalize_currency(currency)
+    filtered_queryset = _filter_by_currency(queryset, currency)
+    if date_from or date_to:
+        range_start, range_end = _dashboard_range(date_from, date_to)
+        filtered_queryset = filtered_queryset.filter(
+            quote_date__gte=range_start.date(),
+            quote_date__lt=range_end.date(),
+        )
+    rows = filtered_queryset.order_by("-updated_at", "-id").values(
         "id",
         "quote_no",
         "draft_quote_no",

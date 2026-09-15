@@ -163,7 +163,7 @@ class DashboardSummaryQuerySerializer(DashboardCurrencyQuerySerializer):
         return value
 
 
-class DashboardRecentQuerySerializer(serializers.Serializer):
+class DashboardRecentQuerySerializer(DashboardCurrencyQuerySerializer):
     """Validate the bounded recent quotation list size."""
 
     limit = serializers.IntegerField(
@@ -201,6 +201,7 @@ class QuotationListQuerySerializer(serializers.Serializer):
         required=False,
     )
     currency = serializers.CharField(max_length=12, required=False)
+    salesperson = serializers.CharField(max_length=255, required=False)
     created_from = serializers.DateField(required=False)
     created_to = serializers.DateField(required=False)
     page = serializers.IntegerField(default=1, min_value=1, required=False)
@@ -763,12 +764,16 @@ class QuotationSerializer(serializers.ModelSerializer):
             "quote_date",
             "expire_date",
             "tax_label",
+            "tax_calculation_mode",
             "vat_rate",
             "vat_amount",
             "software_subtotal",
             "others_subtotal",
             "subtotal_before_vat",
             "grand_total",
+            "custom_total_label",
+            "custom_total_amount",
+            "custom_total_currency",
             "remarks_disclaimer",
             "issuer_company_name",
             "issuer_contact_name",
@@ -864,6 +869,29 @@ class QuotationCreateSerializer(serializers.Serializer):
         max_value=Decimal("100"),
         required=False,
         default=Decimal("0"),
+    )
+    tax_calculation_mode = serializers.ChoiceField(
+        choices=("add", "subtract"),
+        required=False,
+        default="add",
+    )
+    custom_total_label = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+        max_length=120,
+    )
+    custom_total_amount = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        min_value=Decimal("0"),
+        required=False,
+        default=Decimal("0"),
+    )
+    custom_total_currency = serializers.ChoiceField(
+        choices=settings.QUOTATION_ALLOWED_CURRENCIES,
+        required=False,
+        default="USD",
     )
     remarks_disclaimer = serializers.CharField(
         required=False,
@@ -1014,6 +1042,25 @@ class QuotationUpdateSerializer(serializers.Serializer):
         decimal_places=2,
         min_value=Decimal("0"),
         max_value=Decimal("100"),
+        required=False,
+    )
+    tax_calculation_mode = serializers.ChoiceField(
+        choices=("add", "subtract"),
+        required=False,
+    )
+    custom_total_label = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=120,
+    )
+    custom_total_amount = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        min_value=Decimal("0"),
+        required=False,
+    )
+    custom_total_currency = serializers.ChoiceField(
+        choices=settings.QUOTATION_ALLOWED_CURRENCIES,
         required=False,
     )
     remarks_disclaimer = serializers.CharField(

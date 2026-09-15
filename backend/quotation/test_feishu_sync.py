@@ -16,6 +16,9 @@ from quotation.models import (
     FeishuSyncDifferenceType,
     FeishuSyncState,
     FeishuSyncStatus,
+    StorageConnection,
+    StorageMount,
+    StorageMountPurpose,
     SyncJob,
     SyncJobStatus,
     SyncJobType,
@@ -585,6 +588,32 @@ class FeishuAutomaticSyncTests(TestCase):
 
         self.assertEqual(len(targets), 1)
         self.assertEqual(targets[0].folder_token, "owned-folder")
+
+    @override_settings(QUOTATION_STORAGE_ROUTER_ENABLED=True)
+    def test_quote_sync_excludes_invoice_scoped_mounts(self):
+        connection = StorageConnection.objects.create(
+            display_name="Shared Feishu connection",
+            app_id="app-id",
+            app_secret="app-secret",
+        )
+        quote_mount = StorageMount.objects.create(
+            connection=connection,
+            scope_key="",
+            purpose=StorageMountPurpose.QUOTATION_ARCHIVE,
+            root_folder_token="quote-folder",
+        )
+        StorageMount.objects.create(
+            connection=connection,
+            scope_key="invoice",
+            purpose=StorageMountPurpose.QUOTATION_ARCHIVE,
+            root_folder_token="invoice-folder",
+        )
+
+        targets = authorized_sync_targets(self.user)
+
+        self.assertEqual(len(targets), 1)
+        self.assertEqual(targets[0].mount_id, quote_mount.id)
+        self.assertEqual(targets[0].folder_token, "quote-folder")
 
     def test_timeout_marks_async_sync_for_retry(self):
         job = SyncJob.objects.create(

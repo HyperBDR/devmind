@@ -81,7 +81,7 @@ const defaultInputClass =
   'h-10 w-full min-w-0 rounded-lg border border-dm-border bg-white px-3 py-2 text-xs text-dm-text focus:outline-hidden focus:border-blue-500'
 
 const datepickerUi = computed(() => ({
-  input: props.inputClass || defaultInputClass,
+  input: `${props.inputClass || defaultInputClass} !pl-9 !pr-9`,
 }))
 
 function onUpdate(value) {

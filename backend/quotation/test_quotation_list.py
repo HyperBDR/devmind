@@ -310,7 +310,11 @@ class QuotationListAPITests(TestCase):
             "page": 1,
             "page_size": 10,
             "total_pages": 0,
-            "facets": {"product_lines": [], "currencies": []},
+            "facets": {
+                "product_lines": [],
+                "salespeople": [],
+                "currencies": [],
+            },
         }
         assert beyond.status_code == 200
         assert beyond.data["items"] == []
@@ -413,6 +417,28 @@ class QuotationListAPITests(TestCase):
         assert row["quote_date"] == "2026-07-12"
         assert row["issuer_contact_name"] == "Taylor Sales"
         assert row["product_line_name"] == "HyperMotion"
+
+    def test_salesperson_filter_and_facet_use_accessible_rows(self):
+        matching = self._quote(1, salesperson="Taylor Sales")
+        self._quote(2, salesperson="Morgan Sales")
+        self._quote(
+            3,
+            owner="other@example.com",
+            salesperson="Private Sales",
+        )
+
+        response = self.api.get(
+            self.url,
+            {"salesperson": "Taylor Sales"},
+        )
+
+        assert [row["id"] for row in response.data["items"]] == [
+            matching.id
+        ]
+        assert response.data["facets"]["salespeople"] == [
+            "Morgan Sales",
+            "Taylor Sales",
+        ]
 
     def test_product_line_facets_cover_accessible_rows_beyond_page(self):
         self._create_quotes(11)

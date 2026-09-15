@@ -31,11 +31,13 @@ class QuotationDashboardTests(TestCase):
         quote_date=None,
         status: str = QuoteStatus.GENERATED,
         source_quote_no: str = "",
+        product_line: str = "BDR",
     ) -> Quotation:
         return Quotation.objects.create(
             quote_no=quote_no,
             source_quote_no=source_quote_no,
             status=status,
+            product_line=product_line,
             project_name=f"Project {quote_no}",
             currency=currency,
             payment_terms="CIA",
@@ -331,6 +333,33 @@ class QuotationDashboardTests(TestCase):
             "Q-IMP-1",
             "Q-IMP-2",
         }
+
+    def test_analytics_includes_product_line_breakdown(self):
+        self._quote(
+            "Q-BDR",
+            amount="300.00",
+            product_line="BDR",
+        )
+        self._quote(
+            "Q-MOTION",
+            amount="200.00",
+            product_line="Motion",
+        )
+
+        response = self.api.get(
+            "/api/v1/quotation/dashboard/analytics?currency=USD"
+            "&date_from=2026-07&date_to=2026-07"
+        )
+
+        assert response.status_code == 200
+        assert response.data["product_line_breakdown"] == [
+            {"product_line": "BDR", "amount": "300.00", "quote_count": 1},
+            {
+                "product_line": "Motion",
+                "amount": "200.00",
+                "quote_count": 1,
+            },
+        ]
 
     def test_rmb_dashboard_request_is_normalized_to_cny(self):
         current_month = timezone.localdate().replace(day=1)

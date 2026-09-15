@@ -8,7 +8,7 @@ from zipfile import BadZipFile
 
 from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
-from pypdf import PdfReader
+from core.pdf_text import extract_pdf_text
 
 from quotation.models import DocumentAsset
 from quotation.services.document_parsing.business_fields import (
@@ -63,22 +63,7 @@ def _number(value: str) -> Decimal:
 
 
 def _pdf_layout(path: Path) -> str:
-    try:
-        import pymupdf
-
-        with pymupdf.open(path) as document:
-            text = "\n".join(
-                page.get_text("text", sort=True) for page in document
-            )
-        if text.strip():
-            return text
-    except (ImportError, RuntimeError, ValueError):
-        pass
-    reader = PdfReader(str(path))
-    return "\n".join(
-        page.extract_text(extraction_mode="layout") or ""
-        for page in reader.pages
-    )
+    return extract_pdf_text(path, layout=True)
 
 
 def _pdf_label(layout: str, pattern: str) -> str:
@@ -117,19 +102,52 @@ def _pdf_product_line(layout: str) -> tuple[str, str]:
 
 def _pdf_items(layout: str) -> list[ParsedQuotationItem]:
     from quotation.services.document_parsing.pdf_parser import (
+        _clean_item_description,
         _parse_currency_item_line,
     )
 
     items = []
     pending_description = ""
+    section_markers = {"software", "others"}
+    has_section = any(
+        line.strip().lower() in section_markers
+        for line in layout.splitlines()
+    )
+    in_section = not has_section
+    last_item = None
     for line in layout.splitlines():
         stripped = line.strip()
         if len(stripped) > 1000:
             continue
+        if stripped.lower() in section_markers:
+            in_section = True
+            pending_description = ""
+            continue
+        if in_section and "subtotal" in stripped.lower():
+            in_section = False
+            pending_description = ""
+            continue
+        if not in_section:
+            continue
+        if (
+            last_item is not None
+            and re.match(r"^\d+\s+", stripped)
+            and not re.search(
+                r"(?:MYR|HK\$|RM|USD|HKD|CNY|RMB|EUR|GBP|[$¥￥€£])",
+                stripped,
+                re.IGNORECASE,
+            )
+        ):
+            pending_description = re.sub(r"^\d+\s+", "", stripped)
+            continue
         marker_count = len(
-            re.findall(r"(?:HK\$|RM|[$¥￥€£])", stripped, re.I)
+            re.findall(
+                r"(?:MYR|HK\$|RM|USD|HKD|CNY|RMB|EUR|GBP|[$¥￥€£])",
+                stripped,
+                re.I,
+            )
         )
-        if marker_count >= 3 and re.match(r"^\d+\s", stripped):
+        if marker_count >= 2 and re.match(r"^\d+\s", stripped):
             item = _parse_currency_item_line(
                 re.sub(r"\s+", " ", stripped),
                 pending_description,
@@ -138,9 +156,43 @@ def _pdf_items(layout: str) -> list[ParsedQuotationItem]:
                 item.line_no = len(items) + 1
                 item.type = "Software" if not items else "Other"
                 items.append(item)
+                last_item = item
                 pending_description = ""
                 continue
         lower = stripped.lower()
+        header_fragment = re.fullmatch(
+            r"[a-z]\s*\(%\)",
+            stripped,
+            flags=re.IGNORECASE,
+        )
+        if (
+            in_section
+            and last_item is not None
+            and stripped
+            and not re.fullmatch(r"[\d.,\s]+", stripped)
+            and not header_fragment
+            and not lower.startswith("discoun")
+            and not any(
+                label in lower
+                for label in (
+                    "item",
+                    "description",
+                    "qty",
+                    "list price",
+                    "discount",
+                    "discoun",
+                    "extended price",
+                )
+            )
+        ):
+            separator = "\n\n" if stripped.startswith(
+                ("*", "~")
+            ) else "\n"
+            last_item.description = (
+                f"{last_item.description}"
+                f"{separator}{stripped}"
+            )
+            continue
         if (
             stripped
             and len(stripped) <= 500
@@ -155,11 +207,17 @@ def _pdf_items(layout: str) -> list[ParsedQuotationItem]:
                     "extended price",
                     "subtotal",
                     "grand total",
+                    "contact person",
+                    "payment terms",
+                    "currency",
                 )
             )
+            and "@" not in stripped
             and not re.fullmatch(r"[()A-Z ]+", stripped)
         ):
-            pending_description = re.sub(r"\s+", " ", stripped)
+            pending_description = _clean_item_description(
+                re.sub(r"^\d+\s+", "", stripped)
+            )
         if stripped.count("$") < 3 or not re.match(r"^\d+\s", stripped):
             continue
         currency_parts = stripped.split("$")
@@ -170,7 +228,9 @@ def _pdf_items(layout: str) -> list[ParsedQuotationItem]:
         if len(prefix) < 4 or len(price_discount) != 2:
             continue
         line_no, qty = prefix[0], prefix[-1]
-        description = " ".join(prefix[1:-1]).strip()
+        description = _clean_item_description(
+            " ".join(prefix[1:-1]).strip()
+        )
         discount = price_discount[1].rstrip("%")
         if not line_no.isdigit() or not description:
             continue
