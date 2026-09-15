@@ -28,6 +28,9 @@ const viewGrantTable = await optionalSource(
 const permissionApi = await optionalSource(
   '../src/modules/quotation/api/viewPermissions.ts'
 )
+const invoicePermissionApi = await optionalSource(
+  '../src/modules/quotation/api/invoicePermissions.ts'
+)
 const quotationApp = await optionalSource('../src/modules/quotation/App.vue')
 const sidebar = await optionalSource('../src/components/layout/AppSidebar.vue')
 const english = JSON.parse(
@@ -51,8 +54,13 @@ test('permission page exposes a dedicated user permission section', () => {
   assert.match(userPermissionSection, /userPermissionsTitle/)
   assert.match(userPermissionSection, /quotation_admin/)
   assert.match(userPermissionSection, /quotation_user/)
-  assert.match(userPermissionSection, /@click="assignRole/)
-  assert.match(userPermissionSection, /@click="changeRole/)
+  assert.match(userPermissionSection, /@click="saveChanges/)
+  assert.match(userPermissionSection, /platformColumn/)
+  assert.match(userPermissionSection, /invoiceColumn/)
+  assert.match(userPermissionSection, /platformOff/)
+  assert.match(userPermissionSection, /invoiceRoleUser/)
+  assert.match(userPermissionSection, /invoiceRoleAdmin/)
+  assert.match(invoicePermissionApi, /role: InvoiceAccessRole/)
 })
 
 test('view grants support create, expiry edit, status, and revocation', () => {
@@ -93,7 +101,10 @@ test('permission lifecycle copy is complete in both languages', () => {
       'neverExpires',
       'expired',
       'saveExpiry',
-      'editFailed'
+      'editFailed',
+      'invoiceRoleColumn',
+      'invoiceRoleUser',
+      'invoiceRoleAdmin'
     ]) {
       assert.equal(typeof copy[key], 'string')
       assert.notEqual(copy[key].trim(), '')

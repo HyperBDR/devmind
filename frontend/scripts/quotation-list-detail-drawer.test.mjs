@@ -35,6 +35,13 @@ const enLocale = await readFile(
   new URL('../src/modules/quotation/locales/en.json', import.meta.url),
   'utf8'
 )
+const invoiceDetails = await readFile(
+  new URL(
+    '../src/modules/quotation/components/sales/InvoiceDetail.vue',
+    import.meta.url
+  ),
+  'utf8'
+)
 
 test('quotation rows open the detail drawer without routing', () => {
   assert.match(list, /openDetailDrawer: \[id: string\]/)
@@ -80,6 +87,11 @@ test('drawer loads full details and supports accessible close paths', () => {
     details,
     /data-embedded-quotation-preview[\s\S]{0,220}overflow-y-auto/
   )
+})
+
+test('invoice drawer falls back to the shared contact fields', () => {
+  assert.match(invoiceDetails, /customerContactPerson:\s*record\.customer_contact_person\s*\|\|\s*record\.contact_person/)
+  assert.match(invoiceDetails, /customerContactEmail:\s*record\.customer_contact_email\s*\|\|\s*record\.contact_email/)
 })
 
 test('quotation columns expose pointer and keyboard resize controls', () => {
@@ -142,7 +154,7 @@ test('long contact names cannot expand compact quotation rows', () => {
 
 test('quotation list removes the user hint and page-level horizontal scroll', () => {
   assert.doesNotMatch(list, /quotation\.pages\.list\.userHint/)
-  assert.match(list, /xl:grid-cols-\[minmax\(0,1\.35fr\)_repeat\(3,minmax\(0,\.7fr\)\)_minmax\(0,1\.4fr\)\]/)
+  assert.match(list, /xl:grid-cols-\[minmax\(0,1\.2fr\)_repeat\(4,minmax\(0,\.65fr\)\)_minmax\(0,1\.3fr\)\]/)
   assert.match(app, /overflow-x-hidden overflow-y-auto/)
   assert.match(app, /v-if="currentTab === 'list'"\s+class="flex flex-col"/)
 })

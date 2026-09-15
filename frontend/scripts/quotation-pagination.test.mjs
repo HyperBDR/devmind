@@ -71,6 +71,7 @@ test('list sends all search and source filter values to the server', () => {
     'search',
     'product_line_name',
     'source_type',
+    'salesperson',
     'created_from',
     'created_to',
   ]) {
@@ -85,7 +86,9 @@ test('list maps business metadata and server product-line facets', () => {
   assert.match(quotationsApi, /salesperson: api\.issuer_contact_name/)
   assert.match(quotationsApi, /quoteDate: api\.quote_date/)
   assert.match(quotationsApi, /facets\?\.product_lines/)
+  assert.match(quotationsApi, /facets\?\.salespeople/)
   assert.match(quotationList, /props\.productLines\.map/)
+  assert.match(quotationList, /selectedSalesperson/)
   assert.doesNotMatch(quotationList, /loadProductLineOptions/)
 })
 
@@ -178,7 +181,7 @@ test('details drawer copy distinguishes local and imported quotations', () => {
 })
 
 test('list column widths reserve stable space for longer headers and actions', () => {
-  assert.match(quotationList, /project:\s*\{[\s\S]*?defaultWidth:\s*360/)
+  assert.match(quotationList, /project:\s*\{[\s\S]*?defaultWidth:\s*420/)
   assert.match(quotationList, /customer:\s*\{[\s\S]*?defaultWidth:\s*300/)
   assert.match(quotationList, /contact:\s*\{[\s\S]*?defaultWidth:\s*180/)
   assert.match(quotationList, /salesperson:\s*\{[\s\S]*?defaultWidth:\s*170/)

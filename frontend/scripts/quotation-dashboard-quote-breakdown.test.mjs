@@ -45,16 +45,23 @@ test('dashboard pie chart shows quote-level breakdown with native English copy',
   assert.doesNotMatch(enLocale, /Leader lines show quote no\. and total/)
 })
 
-test('dashboard keeps charts stacked at every desktop width', () => {
+test('dashboard hides year-over-year change when either period has no value', () => {
   assert.match(
     dashboardSource,
-    /id="dashboard-quotation-overview"[^>]*xl:grid-cols-\[minmax\(23rem,0\.86fr\)_minmax\(0,1\.64fr\)\]/
+    /if \(!current \|\| !previous\) return null/,
+  )
+})
+
+test('dashboard mirrors the invoice two-column desktop layout', () => {
+  assert.match(
+    dashboardSource,
+    /id="dashboard-quotation-overview"[^>]*md:grid-cols-2 xl:grid-cols-4/
   )
   assert.match(
     dashboardSource,
-    /id="dashboard-charts"[\s\S]*class="grid min-w-0 max-w-full grid-cols-1 items-stretch gap-6"/
+    /id="dashboard-charts"[\s\S]*class="grid min-w-0 max-w-full grid-cols-1 items-stretch gap-6 xl:grid-cols-2"/
   )
-  assert.doesNotMatch(dashboardSource, /dashboard-charts[\s\S]{0,180}2xl:grid-cols/)
+  assert.match(dashboardSource, /dashboard-charts[\s\S]{0,180}xl:grid-cols-2/)
   assert.match(
     dashboardSource,
     /id="chart-quote-amount"[\s\S]{0,120}class="dm-card flex h-full min-w-0 max-w-full flex-col p-5"/
