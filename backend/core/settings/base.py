@@ -174,6 +174,7 @@ INSTALLED_APPS += [
     'llm_ops',
     'sals',
     'quotation',
+    'invoice',
     'agentcore_metering.adapters.django',
     'agentcore_task.adapters.django',
     'agentcore_notifier.adapters.django',
@@ -547,6 +548,7 @@ DATA_COLLECTOR_ROOT = os.getenv(
 )
 
 from .quotation import *
+from .invoice import *
 
 # ============================
 # DRF Spectacular Configuration

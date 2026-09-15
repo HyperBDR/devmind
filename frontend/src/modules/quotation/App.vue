@@ -2,13 +2,8 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  LayoutDashboard,
-  PlusCircle,
-  Settings,
-  Search,
   CheckCircle,
   LogOut,
-  ScrollText,
 } from 'lucide-vue-next'
 import type {
   DiscountOption,
@@ -62,30 +57,34 @@ import {
   type QuotationListParams,
   updateQuotation as updateQuotationApi,
 } from './api/quotations'
+import {
+  listInvoices,
+  type InvoiceRecord,
+} from './api/invoices'
 import { useAuthStore } from './stores/auth'
 import { useQuotationI18n } from './composables/useQuotationI18n'
+import { useUserStore } from '@/store/user'
 import { saveContactTitle } from './utils/contactTitleStorage'
 import { clearCurrentUserSignature } from './utils/signatureStorage'
+import {
+  QUOTE_DESK_ROUTES,
+  quotationTabFromPath,
+} from './config/workspace'
 
 const auth = useAuthStore()
+const userStore = useUserStore()
 const { t, quoteStatusLabel } = useQuotationI18n()
 const route = useRoute()
 const router = useRouter()
 
-const TAB_ROUTES: Record<string, string> = {
-  dashboard: '/quotation/dashboard',
-  list: '/quotation/list',
-  create: '/quotation/create',
-  catalog: '/quotation/catalog',
-  audit: '/quotation/audit',
-  permissions: '/quotation/permissions',
-  customers: '/quotation/customers',
-}
+const TAB_ROUTES = QUOTE_DESK_ROUTES
 
 type ListDateFilters = {
   createdFrom?: string
   createdTo?: string
   currency?: string
+  salesperson?: string
+  sourceType?: 'manual' | 'document_import'
 }
 
 function listDateFiltersFromRoute(
@@ -97,14 +96,29 @@ function listDateFiltersFromRoute(
     typeof query.created_to === 'string' ? query.created_to : undefined
   const currency =
     typeof query.currency === 'string' ? query.currency : undefined
-  return { createdFrom, createdTo, currency }
+  const salesperson =
+    typeof query.salesperson === 'string' ? query.salesperson : undefined
+  const sourceType =
+    query.source_type === 'manual' || query.source_type === 'document_import'
+      ? query.source_type
+      : undefined
+  return { createdFrom, createdTo, currency, salesperson, sourceType }
 }
 
 function listRouteLocation(listFilters?: ListDateFilters, page = 1) {
   const createdFrom = listFilters?.createdFrom
   const createdTo = listFilters?.createdTo
   const currency = listFilters?.currency
-  if (!createdFrom && !createdTo && !currency && page <= 1) {
+  const salesperson = listFilters?.salesperson
+  const sourceType = listFilters?.sourceType
+  if (
+    !createdFrom
+    && !createdTo
+    && !currency
+    && !salesperson
+    && !sourceType
+    && page <= 1
+  ) {
     return { path: TAB_ROUTES.list }
   }
   return {
@@ -113,6 +127,8 @@ function listRouteLocation(listFilters?: ListDateFilters, page = 1) {
       ...(createdFrom ? { created_from: createdFrom } : {}),
       ...(createdTo ? { created_to: createdTo } : {}),
       ...(currency ? { currency } : {}),
+      ...(salesperson ? { salesperson } : {}),
+      ...(sourceType ? { source_type: sourceType } : {}),
       ...(page > 1 ? { page: String(page) } : {}),
     },
   }
@@ -127,6 +143,8 @@ function applyListDateFilters(listFilters?: ListDateFilters) {
     createdFrom: listFilters?.createdFrom,
     createdTo: listFilters?.createdTo,
     currency: listFilters?.currency,
+    salesperson: listFilters?.salesperson,
+    sourceType: listFilters?.sourceType,
   }
 }
 
@@ -138,6 +156,8 @@ async function handleQuotationListQueryChange(query: QuotationListParams) {
           createdFrom: query.createdFrom,
           createdTo: query.createdTo,
           currency: query.currency,
+          salesperson: query.salesperson,
+          sourceType: query.sourceType,
         },
         query.page || 1,
       ),
@@ -147,15 +167,7 @@ async function handleQuotationListQueryChange(query: QuotationListParams) {
 }
 
 function tabFromRoutePath(path: string): string {
-  if (path.startsWith('/quotation/details/')) return 'details'
-  if (path.startsWith('/quotation/list')) return 'list'
-  if (path.startsWith('/quotation/create')) return 'create'
-  if (path.startsWith('/quotation/imports')) return 'list'
-  if (path.startsWith('/quotation/catalog')) return 'catalog'
-  if (path.startsWith('/quotation/audit')) return 'audit'
-  if (path.startsWith('/quotation/permissions')) return 'permissions'
-  if (path.startsWith('/quotation/customers')) return 'customers'
-  return 'dashboard'
+  return quotationTabFromPath(path)
 }
 
 function syncTabFromRoute() {
@@ -204,12 +216,14 @@ const quotationListTotal = ref(0)
 const quotationListTotalPages = ref(0)
 const quotationListProductLines = ref<string[]>([])
 const quotationListCurrencies = ref<string[]>([])
+const quotationListSalespeople = ref<string[]>([])
 const activeQuote = ref<Quotation | null>(null)
 const activeQuoteLoading = ref(false)
 const drawerQuoteId = ref<string | null>(null)
 const editingQuote = ref<Quotation | null>(null)
 const copySourceQuote = ref<Quotation | null>(null)
 const quotationFormContext = ref<Quotation[]>([])
+const customerInvoices = ref<InvoiceRecord[]>([])
 const quotationFormContextQuoteNumbers = ref<string[]>([])
 const lineItemDescriptionHistory = ref<LineItemDescriptionHistory[]>([])
 const quotationFormContextPage = ref(0)
@@ -383,6 +397,7 @@ async function refreshQuotations(
     quotations.value = result.items
     quotationListProductLines.value = result.productLines
     quotationListCurrencies.value = result.currencies
+    quotationListSalespeople.value = result.salespeople
     quotationListTotal.value = result.total
     quotationListTotalPages.value = result.totalPages
     quotationListQuery.value = {
@@ -398,6 +413,7 @@ async function refreshQuotations(
     quotations.value = []
     quotationListProductLines.value = []
     quotationListCurrencies.value = []
+    quotationListSalespeople.value = []
     quotationListTotal.value = 0
     quotationListTotalPages.value = 0
   } finally {
@@ -472,6 +488,45 @@ async function loadQuotationFormContext(reset = true) {
   }
 }
 
+async function loadCustomerInvoices() {
+  try {
+    const firstPage = await listInvoices({ page: 1, pageSize: 50 })
+    if (firstPage.totalPages <= 1) {
+      customerInvoices.value = firstPage.items
+      return
+    }
+    const remainingPages = await Promise.all(
+      Array.from({ length: firstPage.totalPages - 1 }, (_, index) =>
+        listInvoices({ page: index + 2, pageSize: 50 }),
+      ),
+    )
+    customerInvoices.value = [
+      ...firstPage.items,
+      ...remainingPages.flatMap((page) => page.items),
+    ]
+  } catch (error) {
+    console.error('Unable to load invoice customers', error)
+    customerInvoices.value = []
+  }
+}
+
+async function loadCustomers() {
+  const tasks: Promise<unknown>[] = [loadCustomerInvoices()]
+  const canUseQuotation = Boolean(
+    userStore.user?.is_staff
+    || userStore.user?.is_superuser
+    || userStore.user?.access_profile?.visible_features?.includes(
+      'quotation_management',
+    )
+  )
+  if (canUseQuotation) {
+    tasks.push(loadQuotationFormContext())
+  } else {
+    quotationFormContext.value = []
+  }
+  await Promise.all(tasks)
+}
+
 function loadMoreQuotationFormContext() {
   void loadQuotationFormContext(false)
 }
@@ -495,7 +550,7 @@ async function loadCurrentQuotationTab() {
     await Promise.all(tasks)
   }
   if (currentTab.value === 'customers') {
-    await loadQuotationFormContext()
+    await loadCustomers()
   }
 }
 
@@ -564,22 +619,6 @@ async function handleLogout() {
   editingQuoteId.value = null
 }
 
-const userInitials = computed(() => {
-  if (!auth.currentUser) return ''
-  return auth.currentUser.name
-    .split(' ')
-    .map((n) => n[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2)
-})
-
-function navClass(tab: string) {
-  return currentTab.value === tab
-    ? 'bg-dm-primary-bg text-dm-primary font-medium border-l-[3px] border-l-dm-primary pl-[9px]'
-    : 'text-dm-text-secondary hover:bg-[#f5f5f5] hover:text-dm-text border-l-[3px] border-l-transparent pl-[9px]'
-}
-
 function goTab(tab: string, listFilters?: ListDateFilters) {
   selectedQuotationId.value = null
   drawerQuoteId.value = null
@@ -599,7 +638,9 @@ function goTab(tab: string, listFilters?: ListDateFilters) {
       router.push(listRouteLocation(listFilters))
       return
     }
-    const target = TAB_ROUTES[tab]
+    const target = tab in TAB_ROUTES
+      ? TAB_ROUTES[tab as keyof typeof TAB_ROUTES]
+      : undefined
     if (target) {
       router.push(target)
     }
@@ -746,7 +787,7 @@ async function handleFeishuUploadDone(_id: string) {
 }
 
 async function handleRefreshCustomers() {
-  await loadQuotationFormContext()
+  await loadCustomers()
 }
 
 async function handleReconcileFeishuLinks() {
@@ -1043,93 +1084,6 @@ function reloadPage() {
       <span class="font-medium">{{ toastMessage }}</span>
     </div>
 
-    <aside
-      v-if="!auth.embeddedAuth"
-      id="app-sidebar"
-      class="flex w-[220px] shrink-0 flex-col border-r border-dm-border bg-white"
-    >
-      <div class="flex items-center gap-2.5 border-b border-dm-border-light px-5 py-4">
-        <div
-          class="flex h-8 w-8 shrink-0 items-center justify-center rounded-dm bg-dm-primary text-sm font-bold text-white"
-        >
-          Q
-        </div>
-        <div>
-          <h1 class="text-sm font-semibold tracking-tight text-dm-text">
-            {{ t('quotation.app.title') }}
-          </h1>
-          <span class="text-xs font-medium uppercase tracking-wider text-dm-text-tertiary"
-            >{{ t('quotation.app.subtitle') }}</span
-          >
-        </div>
-      </div>
-
-      <nav class="flex-1 space-y-0.5 p-3 text-sm">
-        <button
-          id="nav-tab-dashboard"
-          type="button"
-          :class="`flex w-full cursor-pointer items-center gap-3 rounded-dm py-2.5 pr-3 text-left transition-colors ${navClass('dashboard')}`"
-          @click="goTab('dashboard')"
-        >
-          <LayoutDashboard class="h-4 w-4 shrink-0" />
-          <span>Dashboard 看板</span>
-        </button>
-
-        <button
-          id="nav-tab-list"
-          type="button"
-          :class="`flex w-full cursor-pointer items-center gap-3 rounded-dm py-2.5 pr-3 text-left transition-colors ${navClass('list')}`"
-          @click="goTab('list')"
-        >
-          <Search class="h-4 w-4 shrink-0" />
-          <span>报价查询中心</span>
-        </button>
-
-        <button
-          id="nav-tab-create"
-          type="button"
-          :class="`flex w-full cursor-pointer items-center gap-3 rounded-dm py-2.5 pr-3 text-left transition-colors ${navClass('create')}`"
-          @click="goTab('create')"
-        >
-          <PlusCircle class="h-4 w-4 shrink-0" />
-          <span>在线创建报价单</span>
-        </button>
-
-        <button
-          id="nav-tab-catalog"
-          type="button"
-          :class="`flex w-full cursor-pointer items-center gap-3 rounded-dm py-2.5 pr-3 text-left transition-colors ${navClass('catalog')}`"
-          @click="goTab('catalog')"
-        >
-          <Settings class="h-4 w-4 shrink-0" />
-          <span>业务目录要素配置</span>
-        </button>
-
-        <button
-          id="nav-tab-audit"
-          type="button"
-          :class="`flex w-full cursor-pointer items-center gap-3 rounded-dm py-2.5 pr-3 text-left transition-colors ${navClass('audit')}`"
-          @click="goTab('audit')"
-        >
-          <ScrollText class="h-4 w-4 shrink-0" />
-          <span>{{ t('quotation.pages.audit.menuLabel') }}</span>
-        </button>
-
-      </nav>
-
-      <div class="flex items-center gap-3 border-t border-dm-border-light px-4 py-3">
-        <div
-          class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#ff4d4f] text-sm font-semibold text-white"
-        >
-          {{ userInitials }}
-        </div>
-        <div class="min-w-0 flex-1">
-          <p class="truncate text-sm font-medium text-dm-text">{{ auth.currentUser.name }}</p>
-          <p class="truncate text-sm text-dm-text-tertiary">{{ auth.currentUser.title }}</p>
-        </div>
-      </div>
-    </aside>
-
     <div
       id="main-content-pane"
       class="flex min-w-0 w-0 flex-1 flex-col overflow-hidden"
@@ -1209,6 +1163,7 @@ function reloadPage() {
             :quotations="quotations"
             :product-lines="quotationListProductLines"
             :currencies="quotationListCurrencies"
+            :salespeople="quotationListSalespeople"
             :loading="quotationListLoading"
             :page="quotationListQuery.page || 1"
             :page-size="quotationListQuery.pageSize || 10"
@@ -1217,6 +1172,8 @@ function reloadPage() {
             :initial-created-from="quotationListQuery.createdFrom"
             :initial-created-to="quotationListQuery.createdTo"
             :initial-currency="quotationListQuery.currency"
+            :initial-salesperson="quotationListQuery.salesperson"
+            :initial-source="quotationListQuery.sourceType"
             :current-user="auth.currentUser"
             @view-quote="handleViewQuoteDetails"
             @open-detail-drawer="handleOpenDetailDrawer"
@@ -1294,6 +1251,7 @@ function reloadPage() {
         <CustomerCenter
           v-if="currentTab === 'customers'"
           :quotations="quotationFormContext"
+          :invoices="customerInvoices"
           @navigate-to-create="handleCustomerQuote"
           @toast="triggerToast"
           @refresh="handleRefreshCustomers"

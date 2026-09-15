@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quote Desk — Sales workspace prototype</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --nav: #070a19;
+        --nav-soft: #171b2d;
+        --blue: #2463eb;
+        --blue-soft: #eaf1ff;
+        --text: #24262d;
+        --muted: #7d828d;
+        --line: #dde1e8;
+        --page: #f7f8fa;
+        --green: #138a59;
+        --amber: #b66c06;
+        --red: #d83f48;
+      }
+
+      * { box-sizing: border-box; }
+      html, body { margin: 0; min-height: 100%; background: var(--page); color: var(--text); }
+      button, input, select { font: inherit; }
+      button { cursor: pointer; }
+
+      .app { min-height: 100vh; display: flex; }
+      .sidebar {
+        position: fixed; inset: 0 auto 0 0; width: 255px; background: var(--nav);
+        color: #cbd1e6; border-right: 1px solid #151a2c; z-index: 3;
+      }
+      .brand { height: 64px; padding: 0 18px; display: flex; align-items: center; gap: 11px; border-bottom: 1px solid #1a1e30; }
+      .brand-logo { width: 29px; height: 29px; border-radius: 8px; background: white; display: grid; place-items: center; color: var(--blue); font-weight: 800; box-shadow: inset 0 0 0 1px #c7d7ff; }
+      .brand strong { color: #fff; font-size: 14px; }
+      .brand .collapse { margin-left: auto; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; color: #aab3cf; border: 1px solid #33405c; background: #101728; }
+      .nav { padding: 18px 12px; }
+      .eyebrow { margin: 5px 12px 10px; color: #7f89aa; font-size: 11px; font-weight: 700; letter-spacing: .08em; }
+      .nav-group { margin-bottom: 7px; }
+      .nav-parent, .nav-link { width: 100%; border: 0; color: inherit; background: transparent; border-radius: 10px; display: flex; align-items: center; gap: 11px; text-align: left; font-weight: 650; }
+      .nav-parent { padding: 10px 12px; color: #eef1ff; }
+      .nav-link { padding: 9px 12px 9px 42px; font-size: 14px; position: relative; }
+      .nav-link::before { content: ""; position: absolute; left: 24px; top: 0; bottom: 0; width: 1px; background: #28304a; }
+      .nav-link:hover, .nav-parent:hover { background: var(--nav-soft); }
+      .nav-link.active { background: var(--blue); color: #fff; }
+      .nav-link.active::before { display: none; }
+      .ico { width: 18px; text-align: center; font-size: 16px; }
+      .chevron { margin-left: auto; font-size: 11px; color: #8d97b7; }
+      .badge { margin-left: auto; min-width: 20px; height: 20px; border-radius: 10px; display: grid; place-items: center; padding: 0 6px; background: #d83f48; color: white; font-size: 11px; }
+      .shared { margin-top: 16px; padding-top: 14px; border-top: 1px solid #1c2134; }
+      .shared .nav-link { padding-left: 12px; }
+      .shared .nav-link::before { display: none; }
+      .sidebar-foot { position: absolute; bottom: 0; left: 0; right: 0; border-top: 1px solid #1c2134; padding: 13px 16px; display: flex; align-items: center; gap: 10px; }
+      .avatar { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: #ee434b; color: #fff; font-weight: 700; }
+      .sidebar-foot strong { display: block; color: white; font-size: 13px; }
+      .sidebar-foot span { color: #858fad; font-size: 11px; }
+
+      .shell { width: calc(100% - 255px); margin-left: 255px; min-height: 100vh; }
+      .topbar { height: 64px; background: white; border-bottom: 1px solid #e4e7ec; display: flex; align-items: center; justify-content: flex-end; gap: 18px; padding: 0 30px; }
+      .workspace { border: 1px solid var(--line); background: #fff; border-radius: 20px; padding: 9px 15px; font-weight: 650; color: #394052; }
+      .top-user { display: flex; align-items: center; gap: 9px; font-size: 14px; }
+      .top-user .avatar { width: 33px; height: 33px; }
+      main { padding: 25px; }
+      .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 20px; }
+      h1 { font-size: 23px; margin: 0 0 5px; }
+      h2 { font-size: 16px; margin: 0; }
+      p { margin: 0; }
+      .subtitle { color: var(--muted); font-size: 14px; }
+      .actions { display: flex; gap: 10px; align-items: center; }
+      .btn { border: 1px solid var(--line); color: #343a48; background: white; border-radius: 7px; height: 38px; padding: 0 14px; font-weight: 650; }
+      .btn.primary { color: #fff; background: var(--blue); border-color: var(--blue); }
+      .btn.ghost { background: #f7f8fb; }
+      .prototype { border-radius: 16px; padding: 6px 10px; background: #fff8e7; color: #8c5b0c; border: 1px solid #f2d89a; font-size: 11px; font-weight: 700; }
+
+      .filters { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+      .control { height: 38px; border: 1px solid var(--line); border-radius: 7px; background: white; padding: 0 12px; color: #333a49; min-width: 104px; }
+      .segmented { display: inline-flex; padding: 3px; border: 1px solid var(--line); background: white; border-radius: 8px; }
+      .segmented button { height: 30px; padding: 0 12px; border: 0; border-radius: 6px; color: #6b7280; background: transparent; font-size: 12px; font-weight: 650; }
+      .segmented button.active { background: #20283a; color: white; }
+
+      .grid { display: grid; gap: 14px; }
+      .kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 14px; }
+      .card { background: white; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 1px 2px rgba(14, 20, 37, .025); }
+      .kpi { padding: 17px 18px; min-height: 122px; }
+      .kpi-label { display: flex; justify-content: space-between; color: #666d79; font-size: 13px; }
+      .kpi-value { margin-top: 10px; font-size: 27px; font-weight: 750; letter-spacing: -.02em; }
+      .delta { margin-top: 8px; font-size: 12px; color: var(--green); font-weight: 650; }
+      .delta.down { color: var(--red); }
+      .delta span { color: #969ba4; font-weight: 500; margin-left: 4px; }
+      .card-head { padding: 16px 18px 0; display: flex; justify-content: space-between; align-items: flex-start; }
+      .card-head p { color: var(--muted); font-size: 12px; margin-top: 4px; }
+      .chart-main { grid-template-columns: minmax(0, 2fr) minmax(260px, .75fr); margin-bottom: 14px; }
+      .chart-card { min-height: 310px; }
+      .chart-wrap { padding: 10px 18px 15px; height: 248px; }
+      svg text { font-family: inherit; }
+      .insight { padding: 18px; }
+      .insight h2 { margin-bottom: 14px; }
+      .insight-row { padding: 12px 0; border-top: 1px solid #edf0f4; }
+      .insight-row:first-of-type { border-top: 0; }
+      .insight-row strong { display: block; font-size: 14px; }
+      .insight-row span { display: block; margin-top: 5px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+      .breakdowns { grid-template-columns: 1fr 1fr; margin-bottom: 14px; }
+      .breakdown { padding-bottom: 15px; }
+      .bar-list { padding: 12px 18px 2px; display: grid; gap: 10px; }
+      .bar-row { display: grid; grid-template-columns: 100px 1fr 90px; align-items: center; gap: 10px; font-size: 12px; }
+      .track { background: #edf1f6; border-radius: 5px; height: 8px; overflow: hidden; }
+      .fill { height: 100%; background: var(--blue); border-radius: inherit; }
+      .fill.teal { background: #1e9a96; }
+      .amount { text-align: right; font-weight: 700; }
+
+      .table-card { overflow: hidden; }
+      table { width: 100%; border-collapse: collapse; }
+      th { padding: 11px 14px; background: #f8f9fb; color: #727986; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; text-align: left; border-bottom: 1px solid var(--line); }
+      td { padding: 12px 14px; border-bottom: 1px solid #edf0f3; font-size: 13px; }
+      tr:last-child td { border-bottom: 0; }
+      td strong { font-weight: 700; }
+      .money { font-variant-numeric: tabular-nums; font-weight: 700; }
+      .pill { display: inline-flex; align-items: center; height: 23px; padding: 0 8px; border-radius: 12px; background: #eaf7f0; color: #13734c; font-size: 11px; font-weight: 700; }
+      .pill.review { background: #fff5dd; color: #9a6004; }
+      .pill.draft { background: #eef1f6; color: #626a77; }
+      .pill.void { background: #feecef; color: #b12e3a; }
+      .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; margin-right: 5px; }
+
+      .summary-strip { grid-template-columns: repeat(3, 1fr); margin-bottom: 14px; }
+      .summary-mini { padding: 14px 16px; }
+      .summary-mini span { color: var(--muted); font-size: 12px; }
+      .summary-mini strong { display: block; margin-top: 5px; font-size: 20px; }
+      .filter-card { padding: 14px; margin-bottom: 14px; display: flex; gap: 9px; align-items: end; }
+      .field { display: grid; gap: 5px; }
+      .field label { font-size: 11px; color: #727986; font-weight: 650; }
+      .field input, .field select { height: 37px; min-width: 150px; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; background: white; }
+      .grow { flex: 1; }
+      .grow input { width: 100%; }
+      .link { color: var(--blue); font-weight: 700; }
+
+      .create-grid { grid-template-columns: minmax(0, 1.08fr) minmax(410px, .92fr); align-items: start; }
+      .form-card { padding: 19px; }
+      .section-title { margin: 0 0 14px; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+      .form-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 13px; }
+      .form-grid .span-2 { grid-column: span 2; }
+      .form-grid .span-3 { grid-column: span 3; }
+      .form-divider { height: 1px; background: #edf0f3; margin: 19px 0; }
+      .line-editor { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+      .line-editor .row { display: grid; grid-template-columns: 35px 1fr 64px 85px 80px 95px 30px; align-items: center; min-height: 42px; border-bottom: 1px solid #edf0f3; }
+      .line-editor .row:last-child { border-bottom: 0; }
+      .line-editor .row > * { padding: 8px; min-width: 0; font-size: 12px; }
+      .line-editor .head { background: #f7f8fa; color: #6e7582; font-weight: 700; }
+      .line-editor input { width: 100%; border: 1px solid #e0e4ea; border-radius: 5px; padding: 6px; }
+      .form-total { display: grid; grid-template-columns: 1fr auto; gap: 7px 30px; justify-content: end; margin-top: 14px; font-size: 13px; }
+      .form-total strong { font-size: 16px; }
+      .sticky { position: sticky; top: 82px; }
+      .paper { margin: 0 auto; background: white; border: 1px solid #d9dde5; width: 100%; max-width: 520px; min-height: 686px; padding: 30px 32px; box-shadow: 0 4px 18px rgba(17, 23, 41, .08); font-family: Arial, sans-serif; color: #555; font-size: 8px; }
+      .paper .logo { font-size: 19px; letter-spacing: 2px; color: #414852; }
+      .paper .doc-title { text-align: center; margin: 20px 0 25px; }
+      .paper .doc-title strong { font-size: 16px; color: #555; }
+      .paper .doc-title div { font-size: 12px; text-decoration: underline; margin-top: 8px; }
+      .paper .top-info { display: flex; justify-content: space-between; line-height: 1.6; }
+      .paper .number { text-align: right; }
+      .paper .bill { margin-top: 19px; border: 1px solid #a9adb3; padding: 7px; line-height: 1.6; }
+      .paper .bill-head { background: #8d8d8d; color: white; text-align: center; font-weight: bold; margin: -7px -7px 5px; padding: 3px; }
+      .paper .meta { display: grid; grid-template-columns: 1.3fr 1.3fr 1.5fr .6fr .8fr; border: 1px solid #aaa; margin-top: 16px; text-align: center; }
+      .paper .meta div { padding: 4px; border-right: 1px solid #aaa; }
+      .paper .meta div:last-child { border-right: 0; }
+      .paper .meta .mh { background: #8d8d8d; color: white; font-weight: bold; }
+      .paper .items { width: 100%; margin-top: 28px; }
+      .paper .items th, .paper .items td { border: 1px solid #aaa; padding: 6px; font-size: 7px; background: white; text-transform: none; letter-spacing: 0; }
+      .paper .items th { background: #dedede; color: #555; }
+      .paper .paper-total { text-align: right; margin-top: 9px; font-size: 9px; font-weight: bold; }
+      .paper .notes { border: 1px solid #aaa; min-height: 48px; margin-top: 12px; padding: 6px; font-style: italic; }
+      .paper .bank { border: 1px solid #aaa; margin-top: 20px; width: 72%; padding: 6px; line-height: 1.5; }
+      .paper .sign { margin: 28px 0 0 auto; width: 42%; line-height: 1.5; }
+      .paper .signature { font-family: cursive; font-size: 19px; transform: rotate(-8deg); margin: 8px 0 -3px 42px; color: #30343b; }
+
+      .review-grid { grid-template-columns: 340px minmax(0, 1fr); align-items: start; }
+      .queue { overflow: hidden; }
+      .queue-item { padding: 14px; border-bottom: 1px solid #edf0f3; background: white; }
+      .queue-item.active { background: #eef4ff; border-left: 3px solid var(--blue); }
+      .queue-item strong { display: flex; justify-content: space-between; font-size: 13px; }
+      .queue-item p { color: #707784; font-size: 12px; margin-top: 5px; }
+      .review-workspace { display: grid; grid-template-columns: minmax(370px, .9fr) minmax(390px, 1.1fr); gap: 14px; }
+      .pdf-stage { background: #eceff3; padding: 18px; border-radius: 10px; border: 1px solid var(--line); }
+      .pdf-stage .paper { min-height: 620px; padding: 22px; }
+      .review-form { padding: 18px; }
+      .warning { border: 1px solid #f0d289; background: #fff8e7; color: #88570b; padding: 11px; border-radius: 7px; font-size: 12px; line-height: 1.5; margin-bottom: 14px; }
+      .confidence { display: flex; align-items: center; gap: 8px; }
+      .confidence-bar { width: 70px; height: 5px; background: #e7eaf0; border-radius: 4px; overflow: hidden; }
+      .confidence-bar i { display: block; height: 100%; background: var(--green); }
+      .review-actions { border-top: 1px solid #edf0f3; margin-top: 16px; padding-top: 14px; display: flex; justify-content: flex-end; gap: 9px; }
+
+      .detail-grid { grid-template-columns: minmax(430px, .95fr) minmax(0, 1.05fr); align-items: start; }
+      .detail-info { display: grid; gap: 14px; }
+      .detail-card { padding: 18px; }
+      .detail-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px 22px; margin-top: 15px; }
+      .detail-list dt { color: #888e99; font-size: 11px; }
+      .detail-list dd { margin: 4px 0 0; font-size: 13px; font-weight: 650; }
+      .timeline { margin-top: 14px; display: grid; gap: 13px; }
+      .timeline-item { display: grid; grid-template-columns: 11px 1fr auto; gap: 9px; align-items: start; font-size: 12px; }
+      .timeline-item .mark { width: 8px; height: 8px; margin-top: 3px; background: var(--blue); border-radius: 50%; }
+      .timeline-item span { color: #858b96; }
+
+      @media (max-width: 1000px) {
+        .sidebar { width: 220px; }
+        .shell { width: calc(100% - 220px); margin-left: 220px; }
+        .kpis { grid-template-columns: repeat(2, 1fr); }
+        .create-grid, .detail-grid, .review-grid, .review-workspace { grid-template-columns: 1fr; }
+        .sticky { position: static; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script>
+      const view = new URLSearchParams(location.search).get("view") || "dashboard";
+
+      const icon = (value) => `<span class="ico">${value}</span>`;
+
+      function sidebar() {
+        const active = (name) => view === name ? "active" : "";
+        return `
+          <aside class="sidebar">
+            <div class="brand"><div class="brand-logo">Q</div><strong>Quote Desk</strong><div class="collapse">‹</div></div>
+            <nav class="nav">
+              <div class="eyebrow">BUSINESS VIEWS</div>
+              <div class="nav-group">
+                <button class="nav-parent">${icon("◇")}<span>Quote</span><span class="chevron">›</span></button>
+              </div>
+              <div class="nav-group">
+                <button class="nav-parent">${icon("▥")}<span>Sales</span><span class="chevron">⌄</span></button>
+                <button class="nav-link ${active("dashboard")}" data-view="dashboard">Dashboard</button>
+                <button class="nav-link ${active("invoices")}" data-view="invoices">Invoices</button>
+                <button class="nav-link ${active("create")}" data-view="create">New Invoice</button>
+                <button class="nav-link ${active("review")}" data-view="review">Review Queue <span class="badge">6</span></button>
+              </div>
+              <div class="shared">
+                <div class="eyebrow">SHARED</div>
+                <button class="nav-link">${icon("♙")}<span>Customers</span></button>
+                <button class="nav-link">${icon("⚙")}<span>Catalog</span></button>
+                <button class="nav-link">${icon("▤")}<span>Audit Log</span></button>
+                <button class="nav-link">${icon("♢")}<span>Access</span></button>
+              </div>
+            </nav>
+            <div class="sidebar-foot"><div class="avatar">A</div><div><strong>admin</strong><span>Sales administrator</span></div></div>
+          </aside>`;
+      }
+
+      const topbar = `
+        <header class="topbar"><span>文A 🇺🇸</span><button class="workspace">Quote Desk　⌄</button><div class="top-user"><div class="avatar">A</div><span>admin</span><span>⌄</span></div></header>`;
+
+      function trendSvg() {
+        return `<svg viewBox="0 0 820 230" width="100%" height="100%" aria-label="Sales trend chart">
+          <g stroke="#e7eaf0" stroke-width="1"><line x1="52" y1="28" x2="800" y2="28"/><line x1="52" y1="77" x2="800" y2="77"/><line x1="52" y1="126" x2="800" y2="126"/><line x1="52" y1="175" x2="800" y2="175"/></g>
+          <g fill="#9298a4" font-size="10"><text x="8" y="31">$40K</text><text x="8" y="80">$30K</text><text x="8" y="129">$20K</text><text x="8" y="178">$10K</text></g>
+          <g fill="#9298a4" font-size="10" text-anchor="middle"><text x="75" y="211">Jan</text><text x="137" y="211">Feb</text><text x="199" y="211">Mar</text><text x="261" y="211">Apr</text><text x="323" y="211">May</text><text x="385" y="211">Jun</text><text x="447" y="211">Jul</text><text x="509" y="211">Aug</text><text x="571" y="211">Sep</text><text x="633" y="211">Oct</text><text x="695" y="211">Nov</text><text x="757" y="211">Dec</text></g>
+          <polyline fill="none" stroke="#2463eb" stroke-width="3" points="75,143 137,116 199,132 261,88 323,102 385,63 447,84 509,51 571,73"/>
+          <polyline fill="none" stroke="#24a29c" stroke-width="2" stroke-dasharray="5 4" points="75,155 137,138 199,145 261,121 323,132 385,104 447,113 509,92 571,99 633,87 695,70 757,58"/>
+          <polyline fill="none" stroke="#a5adbb" stroke-width="2" stroke-dasharray="3 5" points="75,173 137,159 199,166 261,145 323,151 385,132 447,142 509,120 571,127 633,111 695,104 757,91"/>
+          <g fill="#2463eb"><circle cx="75" cy="143" r="3"/><circle cx="137" cy="116" r="3"/><circle cx="199" cy="132" r="3"/><circle cx="261" cy="88" r="3"/><circle cx="323" cy="102" r="3"/><circle cx="385" cy="63" r="3"/><circle cx="447" cy="84" r="3"/><circle cx="509" cy="51" r="3"/><circle cx="571" cy="73" r="3"/></g>
+        </svg>`;
+      }
+
+      function dashboard() {
+        return `<main>
+          <div class="page-head">
+            <div><div class="actions" style="justify-content:flex-start;margin-bottom:5px"><h1>Sales dashboard</h1><span class="prototype">PROTOTYPE · ILLUSTRATIVE DATA</span></div><p class="subtitle">Invoice-backed sales performance and period-over-period comparison.</p></div>
+            <div class="filters"><select class="control"><option>Jan 2026 – Sep 2026</option></select><select class="control"><option>USD</option></select><select class="control"><option>Compare: 2 years</option></select><button class="btn">Export</button></div>
+          </div>
+          <section class="grid kpis">
+            <article class="card kpi"><div class="kpi-label"><span>Current month</span><span>Sep 2026</span></div><div class="kpi-value">USD 31,240</div><div class="delta">↑ 12.4% <span>vs Sep 2025</span></div></article>
+            <article class="card kpi"><div class="kpi-label"><span>Quarter to date</span><span>Q3</span></div><div class="kpi-value">USD 82,560</div><div class="delta">↑ 8.7% <span>vs Q3 2025 to date</span></div></article>
+            <article class="card kpi"><div class="kpi-label"><span>Year to date</span><span>As of 04 Sep</span></div><div class="kpi-value">USD 236,880</div><div class="delta">↑ 15.2% <span>vs 2025 same period</span></div></article>
+            <article class="card kpi"><div class="kpi-label"><span>Confirmed invoices</span><span>YTD</span></div><div class="kpi-value">84</div><div class="delta">↑ 9 invoices <span>vs last year</span></div></article>
+          </section>
+          <section class="grid chart-main">
+            <article class="card chart-card"><div class="card-head"><div><h2>Sales trend</h2><p>Current period aligned with the same period in prior years</p></div><div class="segmented"><button class="active">Month</button><button>Quarter</button><button>Year</button></div></div><div class="chart-wrap">${trendSvg()}</div><div style="display:flex;gap:18px;padding:0 20px 14px;font-size:11px;color:#6f7682"><span style="color:#2463eb">━ 2026 YTD</span><span style="color:#24a29c">┅ 2025</span><span style="color:#8d95a4">┅ 2024</span></div></article>
+            <aside class="card insight"><h2>Performance signals</h2><div class="insight-row"><strong style="color:#138a59">Q3 is tracking 8.7% ahead</strong><span>Compared through the same day of Q3 2025, not the full prior quarter.</span></div><div class="insight-row"><strong>HyperBDR leads product sales</strong><span>USD 142,340 · 60.1% of year-to-date invoice value.</span></div><div class="insight-row"><strong style="color:#b66c06">6 invoices need review</strong><span>They are excluded from every dashboard total until confirmed.</span></div></aside>
+          </section>
+          <section class="grid breakdowns">
+            <article class="card breakdown"><div class="card-head"><div><h2>Sales by region</h2><p>Confirmed invoices · 2026 YTD</p></div><span class="link">View details →</span></div><div class="bar-list"><div class="bar-row"><span>APAC</span><div class="track"><div class="fill" style="width:100%"></div></div><span class="amount">$108,420</span></div><div class="bar-row"><span>EMEA</span><div class="track"><div class="fill" style="width:67%"></div></div><span class="amount">$72,900</span></div><div class="bar-row"><span>Africa</span><div class="track"><div class="fill" style="width:34%"></div></div><span class="amount">$36,800</span></div><div class="bar-row"><span>Americas</span><div class="track"><div class="fill" style="width:17%"></div></div><span class="amount">$18,760</span></div></div></article>
+            <article class="card breakdown"><div class="card-head"><div><h2>Sales by product</h2><p>Normalized from invoice line items</p></div><span class="link">View details →</span></div><div class="bar-list"><div class="bar-row"><span>HyperBDR</span><div class="track"><div class="fill teal" style="width:100%"></div></div><span class="amount">$142,340</span></div><div class="bar-row"><span>HyperMotion</span><div class="track"><div class="fill teal" style="width:39%"></div></div><span class="amount">$55,600</span></div><div class="bar-row"><span>AGIOne</span><div class="track"><div class="fill teal" style="width:19%"></div></div><span class="amount">$27,440</span></div><div class="bar-row"><span>Services</span><div class="track"><div class="fill teal" style="width:8%"></div></div><span class="amount">$11,500</span></div></div></article>
+          </section>
+          <section class="card table-card"><div class="card-head" style="padding-bottom:14px"><div><h2>Top 10 customers</h2><p>Ranked by confirmed invoice value · selected period</p></div><span class="link">View all customers →</span></div><table><thead><tr><th>Rank</th><th>Customer</th><th>Region</th><th>Invoice value</th><th>Invoices</th><th>vs 2025</th></tr></thead><tbody><tr><td>1</td><td><strong>Ai-T Consulting Services (Pty) Ltd</strong></td><td>Africa</td><td class="money">USD 38,640</td><td>12</td><td style="color:#138a59">+26.7%</td></tr><tr><td>2</td><td><strong>Nimbus Technology Group</strong></td><td>APAC</td><td class="money">USD 32,180</td><td>9</td><td style="color:#138a59">+14.3%</td></tr><tr><td>3</td><td><strong>Northstar Cloud Services</strong></td><td>EMEA</td><td class="money">USD 27,950</td><td>8</td><td style="color:#d83f48">−7.4%</td></tr></tbody></table></section>
+        </main>`;
+      }
+
+      const invoiceRows = [
+        ["BDR040926", "04 Sep 2026", "Nimbus Technology Group", "APAC", "HyperBDR", "USD 11,718.15", "Confirmed"],
+        ["BDR031225", "03 Dec 2025", "Ai-T Consulting Services (Pty) Ltd", "Africa", "HyperBDR", "USD 960.00", "Confirmed"],
+        ["BDR190625", "19 Jun 2025", "Ai-T Consulting Services (Pty) Ltd", "Africa", "HyperBDR", "USD 600.00", "Confirmed"],
+        ["INV-2025-104", "22 May 2025", "Northstar Cloud Services", "EMEA", "HyperMotion", "USD 8,400.00", "Review required"],
+        ["INV-2025-091", "08 Apr 2025", "Orion Systems", "APAC", "AGIOne", "USD 6,250.00", "Draft"],
+        ["INV-2025-063", "12 Mar 2025", "Cedar Ridge Partners", "Americas", "Services", "USD 4,820.00", "Void"],
+      ];
+
+      function invoices() {
+        const rows = invoiceRows.map((row) => {
+          const statusClass = row[6] === "Confirmed" ? "" : row[6] === "Review required" ? "review" : row[6].toLowerCase();
+          return `<tr><td><span class="link" data-view="detail">${row[0]}</span></td><td>${row[1]}</td><td><strong>${row[2]}</strong></td><td>${row[3]}</td><td>${row[4]}</td><td class="money">${row[5]}</td><td><span class="pill ${statusClass}"><i class="dot"></i>${row[6]}</span></td><td>•••</td></tr>`;
+        }).join("");
+        return `<main><div class="page-head"><div><div class="actions" style="justify-content:flex-start;margin-bottom:5px"><h1>Invoices</h1><span class="prototype">PROTOTYPE · ILLUSTRATIVE DATA</span></div><p class="subtitle">Create, import, review, and trace invoice-backed sales records.</p></div><div class="actions"><button class="btn">Import PDF</button><button class="btn primary" data-view="create">＋ New Invoice</button></div></div>
+          <section class="grid summary-strip"><article class="card summary-mini"><span>Invoice value · selected period</span><strong>USD 236,880</strong></article><article class="card summary-mini"><span>Confirmed invoices</span><strong>84</strong></article><article class="card summary-mini"><span>Needs review</span><strong style="color:#b66c06">6</strong></article></section>
+          <section class="card filter-card"><div class="field grow"><label>SEARCH</label><input value="" placeholder="Invoice number, customer, PO..." /></div><div class="field"><label>DATE RANGE</label><select><option>2025 – 2026</option></select></div><div class="field"><label>STATUS</label><select><option>All statuses</option></select></div><div class="field"><label>REGION</label><select><option>All regions</option></select></div><div class="field"><label>PRODUCT</label><select><option>All products</option></select></div><button class="btn primary">Apply</button></section>
+          <section class="card table-card"><table><thead><tr><th>Invoice no.</th><th>Invoice date</th><th>Customer</th><th>Region</th><th>Product</th><th>Total</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table><div style="padding:13px 15px;display:flex;justify-content:space-between;color:#7d828d;font-size:12px"><span>Showing 1–6 of 84 invoices</span><span>‹　1　2　3　…　14　›</span></div></section>
+        </main>`;
+      }
+
+      function invoicePaper(scale = "") {
+        return `<div class="paper ${scale}"><div class="logo">One<span style="color:#9d2c64">Pro</span></div><div class="doc-title"><strong>OnePro Cloud Limited</strong><div>Commercial Invoice</div></div><div class="top-info"><div><strong>OnePro Cloud Limited</strong><br/>UNIT 701A, 7/F, RAILWAY PLAZA<br/>39 CHATHAM ROAD SOUTH, HONG KONG<br/><u>www.oneprocloud.com</u></div><div class="number"><strong>Date:</strong>　03.12.2025<br/><br/><strong>Invoice Number:</strong>　BDR031225</div></div><div class="bill"><div class="bill-head">Bill to:</div><strong>Company：</strong> Ai-T Consulting Services (Pty) Ltd<br/><strong>Name：</strong> Vandana<br/><strong>Address：</strong> Unit 35 Polo Fields, Cullinan Close, Morningside<br/><strong>Email：</strong> <u>info@aitcs.co.za</u></div><div class="meta"><div class="mh">Contact Person</div><div class="mh">Email</div><div class="mh">PO#</div><div class="mh">Currency</div><div class="mh">Payment Term</div><div>Natalie</div><div><u>ecosys@oneprocloud.com</u></div><div>20251203001</div><div>USD</div><div>Due Now</div></div><table class="items"><thead><tr><th>Item</th><th>Description</th><th>Qty</th><th>Price</th><th>Extended Price</th></tr></thead><tbody><tr><td>1</td><td><strong>HyperBDR for 1 Year</strong></td><td>8</td><td>$ 10.00</td><td>$960.00</td></tr></tbody></table><div class="paper-total">Total Amount:　$　960.00</div><div class="notes"><strong>Additional Notes & Disclaimers:</strong></div><div class="bank"><strong>Remarks:</strong><br/><strong>Account Name:</strong> OnePro Cloud Limited<br/><strong>Bank Name:</strong> DBS Bank Limited, Hong Kong Branch<br/><strong>Account Number:</strong> 2000273088<br/><strong>SWIFT CODE:</strong> DBSSHKHH</div><div class="sign"><strong>OnePro Cloud Limited</strong><div class="signature">Natalie</div>_______________________<br/>Name：Natalie Chan<br/>Title：Marketing & Operations Senior Manager<br/>Date：03.12.2025</div></div>`;
+      }
+
+      function create() {
+        return `<main><div class="page-head"><div><div class="actions" style="justify-content:flex-start;margin-bottom:5px"><h1>New invoice</h1><span class="prototype">PROTOTYPE</span></div><p class="subtitle">Create a standardized commercial invoice and archive its PDF to Feishu.</p></div><div class="actions"><button class="btn">Save draft</button><button class="btn primary">Generate Invoice</button></div></div>
+          <section class="grid create-grid"><div class="card form-card"><h2 class="section-title">▤　Invoice information</h2><div class="form-grid"><div class="field"><label>INVOICE NUMBER</label><input value="BDR031225" /></div><div class="field"><label>INVOICE DATE</label><input value="2025-12-03" /></div><div class="field"><label>PO NUMBER</label><input value="20251203001" /></div><div class="field"><label>CURRENCY</label><select><option>USD</option></select></div><div class="field"><label>PAYMENT TERMS</label><select><option>Due Now</option></select></div><div class="field"><label>SALESPERSON</label><input value="Natalie" /></div></div><div class="form-divider"></div><h2 class="section-title">♙　Bill to</h2><div class="form-grid"><div class="field span-2"><label>COMPANY</label><input value="Ai-T Consulting Services (Pty) Ltd" /></div><div class="field"><label>CONTACT PERSON</label><input value="Vandana" /></div><div class="field span-2"><label>ADDRESS</label><input value="Unit 35 Polo Fields, Morningside, Sandton 2057" /></div><div class="field"><label>EMAIL</label><input value="info@aitcs.co.za" /></div><div class="field"><label>COUNTRY</label><select><option>South Africa</option></select></div><div class="field"><label>SALES REGION</label><select><option>Africa</option></select></div></div><div class="form-divider"></div><h2 class="section-title">▦　Invoice items</h2><div class="line-editor"><div class="row head"><span>#</span><span>Description / Product</span><span>Qty</span><span>Unit price</span><span>Months</span><span>Amount</span><span></span></div><div class="row"><span>1</span><input value="HyperBDR for 1 Year" /><input value="8" /><input value="$10.00" /><input value="12" /><strong>$960.00</strong><span>×</span></div></div><button class="btn ghost" style="margin-top:10px">＋ Add line item</button><div class="form-total"><span>Subtotal</span><span>$960.00</span><span>Tax</span><span>$0.00</span><strong>Total</strong><strong>USD 960.00</strong></div><div class="form-divider"></div><h2 class="section-title">✎　Notes, bank and signature</h2><div class="form-grid"><div class="field span-3"><label>ADDITIONAL NOTES</label><input placeholder="Optional notes or disclaimers" /></div><div class="field span-2"><label>BANK ACCOUNT</label><select><option>DBS Bank · 2000273088 · USD</option></select></div><div class="field"><label>SIGNATURE</label><select><option>Natalie Chan</option></select></div></div></div><aside class="sticky"><div class="card" style="padding:12px;background:#eef1f5"><div style="display:flex;justify-content:space-between;padding:1px 4px 10px;font-size:12px;color:#6f7682"><span>Live PDF preview</span><span>100%</span></div>${invoicePaper()}</div></aside></section>
+        </main>`;
+      }
+
+      function review() {
+        return `<main><div class="page-head"><div><div class="actions" style="justify-content:flex-start;margin-bottom:5px"><h1>Invoice review queue</h1><span class="prototype">PROTOTYPE · ILLUSTRATIVE DATA</span></div><p class="subtitle">Validate OCR results before invoices become sales records.</p></div><div class="actions"><select class="control"><option>All review reasons</option></select><button class="btn">Sync Feishu</button></div></div><section class="grid summary-strip"><article class="card summary-mini"><span>Waiting for review</span><strong style="color:#b66c06">6</strong></article><article class="card summary-mini"><span>Amount checks</span><strong>2</strong></article><article class="card summary-mini"><span>Unmatched customers/products</span><strong>3</strong></article></section><section class="grid review-grid"><div class="card queue"><div class="card-head" style="padding-bottom:13px"><div><h2>Pending documents</h2><p>Oldest first</p></div></div><div class="queue-item active"><strong><span>BDR031225.pdf</span><span class="pill review">Amount check</span></strong><p>Ai-T Consulting Services · USD 960.00</p><p>OCR confidence 94% · 3 minutes ago</p></div><div class="queue-item"><strong><span>BDR190625.pdf</span><span class="pill review">Product match</span></strong><p>Ai-T Consulting Services · USD 600.00</p><p>OCR confidence 91% · 18 minutes ago</p></div><div class="queue-item"><strong><span>invoice_2025_041.pdf</span><span class="pill review">Customer match</span></strong><p>Unrecognized customer · USD 4,200.00</p><p>OCR confidence 82% · 42 minutes ago</p></div><div class="queue-item"><strong><span>scan_0098.pdf</span><span class="pill review">Low confidence</span></strong><p>Page 1 requires manual inspection</p><p>OCR confidence 63% · 1 hour ago</p></div></div><div class="review-workspace"><div class="pdf-stage">${invoicePaper()}</div><div class="card review-form"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div><h2>Recognized invoice</h2><p class="subtitle" style="margin-top:4px">BDR031225.pdf · page 1 of 1</p></div><div class="confidence"><span style="font-size:12px">94%</span><div class="confidence-bar"><i style="width:94%"></i></div></div></div><div class="warning"><strong>Amount formula needs confirmation</strong><br/>8 × USD 10.00 does not equal USD 960.00. A 12-month billing period was inferred from “for 1 Year”.</div><div class="form-grid" style="grid-template-columns:1fr 1fr"><div class="field"><label>INVOICE NUMBER</label><input value="BDR031225" /></div><div class="field"><label>INVOICE DATE</label><input value="2025-12-03" /></div><div class="field span-2"><label>CUSTOMER</label><input value="Ai-T Consulting Services (Pty) Ltd" /></div><div class="field"><label>COUNTRY</label><select><option>South Africa</option></select></div><div class="field"><label>REGION</label><select><option>Africa</option></select></div><div class="field"><label>PO NUMBER</label><input value="20251203001" /></div><div class="field"><label>CURRENCY</label><select><option>USD</option></select></div><div class="field span-2"><label>NORMALIZED PRODUCT</label><select><option>HyperBDR</option></select></div><div class="field"><label>QUANTITY</label><input value="8" /></div><div class="field"><label>UNIT PRICE</label><input value="10.00" /></div><div class="field"><label>BILLING MONTHS</label><input value="12" /></div><div class="field"><label>TOTAL AMOUNT</label><input value="960.00" /></div></div><div class="review-actions"><button class="btn">Reject import</button><button class="btn">Save changes</button><button class="btn primary">Confirm invoice</button></div></div></div></section></main>`;
+      }
+
+      function detail() {
+        return `<main><div class="page-head"><div><div class="actions" style="justify-content:flex-start;margin-bottom:5px"><h1>Invoice BDR031225</h1><span class="pill"><i class="dot"></i>Confirmed</span><span class="prototype">PROTOTYPE</span></div><p class="subtitle">Ai-T Consulting Services (Pty) Ltd · Issued 03 Dec 2025</p></div><div class="actions"><button class="btn">Download PDF</button><button class="btn">Create credit note</button><button class="btn primary">••• Actions</button></div></div><section class="grid detail-grid"><div class="pdf-stage">${invoicePaper()}</div><div class="detail-info"><article class="card detail-card"><div style="display:flex;justify-content:space-between"><h2>Invoice information</h2><span class="link">Edit draft fields</span></div><dl class="detail-list"><div><dt>INVOICE NUMBER</dt><dd>BDR031225</dd></div><div><dt>INVOICE DATE</dt><dd>03 Dec 2025</dd></div><div><dt>PO NUMBER</dt><dd>20251203001</dd></div><div><dt>PAYMENT TERMS</dt><dd>Due Now</dd></div><div><dt>CURRENCY</dt><dd>USD</dd></div><div><dt>SALESPERSON</dt><dd>Natalie Chan</dd></div><div><dt>REGION</dt><dd>Africa</dd></div><div><dt>SOURCE</dt><dd>Feishu PDF import</dd></div></dl></article><article class="card detail-card"><h2>Customer</h2><dl class="detail-list"><div><dt>LEGAL NAME</dt><dd>Ai-T Consulting Services (Pty) Ltd</dd></div><div><dt>CONTACT</dt><dd>Vandana</dd></div><div><dt>EMAIL</dt><dd>info@aitcs.co.za</dd></div><div><dt>COUNTRY</dt><dd>South Africa</dd></div></dl></article><article class="card table-card"><div class="card-head" style="padding-bottom:12px"><div><h2>Line items</h2><p>Normalized for product reporting</p></div></div><table><thead><tr><th>Description</th><th>Product</th><th>Qty</th><th>Price</th><th>Period</th><th>Amount</th></tr></thead><tbody><tr><td>HyperBDR for 1 Year</td><td><span class="pill">HyperBDR</span></td><td>8</td><td>$10.00</td><td>12 months</td><td class="money">$960.00</td></tr></tbody></table></article><article class="card detail-card"><h2>Activity & audit</h2><div class="timeline"><div class="timeline-item"><i class="mark"></i><div><strong>Invoice confirmed</strong><br/><span>Fields and amount formula reviewed by admin</span></div><span>10:42</span></div><div class="timeline-item"><i class="mark"></i><div><strong>OCR parsing completed</strong><br/><span>94% overall confidence · amount warning created</span></div><span>10:36</span></div><div class="timeline-item"><i class="mark"></i><div><strong>PDF synchronized from Feishu</strong><br/><span>Content hash verified · no duplicate found</span></div><span>10:35</span></div></div></article></div></section></main>`;
+      }
+
+      const pages = { dashboard, invoices, create, review, detail };
+      document.getElementById("app").innerHTML = `<div class="app">${sidebar()}<section class="shell">${topbar}${(pages[view] || dashboard)()}</section></div>`;
+      document.addEventListener("click", (event) => {
+        const target = event.target.closest("[data-view]");
+        if (target) location.search = `?view=${target.dataset.view}`;
+      });
+    </script>
+  </body>
+</html>

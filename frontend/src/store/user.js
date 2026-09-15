@@ -5,7 +5,9 @@ import { authApi } from '@/api/auth'
 import {
   getAvailablePlatforms,
   getLandingPath,
-  hasFeature
+  hasFeature,
+  hasInvoiceCapability,
+  hasQuotationAdminAccess
 } from '@/utils/platformAccess'
 
 const USER_CACHE_KEY = 'user_profile_cache'
@@ -240,6 +242,10 @@ export const useUserStore = defineStore('user', () => {
   }
 
   const userHasFeature = (featureKey) => hasFeature(user.value, featureKey)
+  const userHasInvoiceCapability = (capability) =>
+    hasInvoiceCapability(user.value, capability)
+  const userHasQuotationAdminAccess = () =>
+    hasQuotationAdminAccess(user.value)
   const getUserLandingPath = () => getLandingPath(user.value)
 
   return {
@@ -263,6 +269,8 @@ export const useUserStore = defineStore('user', () => {
     setUser,
     setToken,
     userHasFeature,
+    userHasInvoiceCapability,
+    userHasQuotationAdminAccess,
     getUserLandingPath,
     // Helper functions
     loadUserPreferences

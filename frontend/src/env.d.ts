@@ -12,5 +12,6 @@ declare module '@/store/user' {
     user: any
     checkAuth(): Promise<unknown>
     logout(): Promise<unknown>
+    userHasInvoiceCapability(capability: string): boolean
   }
 }
