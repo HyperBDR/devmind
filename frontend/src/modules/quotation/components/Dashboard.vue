@@ -44,14 +44,12 @@ ChartJS.register(
 type TrendGrain = 'monthly'
 
 const QUOTE_BREAKDOWN_COLORS = [
-  '#2b9da3',
-  '#389e0d',
-  '#67b7bc',
-  '#58b42d',
-  '#1f7f86',
-  '#9bcf53',
-  '#136b73',
-  '#d6a21f'
+  '#2f6fed',
+  '#4f8f88',
+  '#75839a',
+  '#a58f67',
+  '#5f7288',
+  '#87a6a3'
 ]
 const CURRENCY_ORDER = ['USD', 'CNY', 'EUR', 'GBP', 'MYR', 'HKD']
 
@@ -194,14 +192,31 @@ const selectedDashboardCurrency = computed(() =>
   normalizeDashboardCurrency(dashboardCurrency.value)
 )
 
+function formatDashboardAmount(value: number): string {
+  return `${currencyShortLabel(selectedDashboardCurrency.value)} ${Math.round(
+    value || 0
+  ).toLocaleString()}`
+}
+
+const productLineBars = computed(() => {
+  const rows = analytics.value?.productLineBreakdown || []
+  const total = rows.reduce((sum, row) => sum + row.amount, 0) || 1
+  return rows.slice(0, 6).map((row, index) => ({
+    ...row,
+    color: QUOTE_BREAKDOWN_COLORS[index % QUOTE_BREAKDOWN_COLORS.length],
+    share: (row.amount / total) * 100
+  }))
+})
+
+const yearOverYearChange = computed(() => {
+  const current = summary.value?.monthQuoteAmount || 0
+  const previous = summary.value?.previousYearQuoteAmount || 0
+  if (!current || !previous) return null
+  return ((current - previous) / previous) * 100
+})
+
 const quoteBreakdownData = computed(() =>
-  (analytics.value?.amountBreakdown || [])
-    .filter((quote) =>
-      normalizeDashboardCurrency(
-        quote.currency || analytics.value?.currency || ''
-      ) === selectedDashboardCurrency.value
-    )
-    .map((quote, index) => {
+  (analytics.value?.amountBreakdown || []).map((quote, index) => {
       const currency = selectedDashboardCurrency.value
       const amountLabel = `${currencyShortLabel(currency)} ${quote.amount.toLocaleString()}`
       return {
@@ -448,12 +463,14 @@ const trendPeriods = computed(() =>
 const trendSeries = computed(() => {
   const rows = analytics.value?.trends[trendGrain] || []
   return {
-    quote: rows.map((row) => row.quoteAmount)
+    quote: rows.map((row) => row.quoteAmount),
+    accepted: rows.map((row) => row.wonAmount)
   }
 })
 
 const hasTrendData = computed(
   () => trendSeries.value.quote.some((value) => value > 0)
+    || trendSeries.value.accepted.some((value) => value > 0)
 )
 
 const trendLineData = computed<ChartData<'line'>>(() => ({
@@ -462,13 +479,25 @@ const trendLineData = computed<ChartData<'line'>>(() => ({
     {
       label: t('quotation.pages.dashboard.chartTrendQuoteValue'),
       data: trendSeries.value.quote,
-      borderColor: '#1677ff',
-      backgroundColor: '#1677ff',
+      borderColor: '#2f6fed',
+      backgroundColor: '#2f6fed',
       fill: false,
       tension: 0,
       pointRadius: 3,
       pointHoverRadius: 5,
       borderWidth: 2
+    },
+    {
+      label: t('quotation.pages.dashboard.chartTrendAccepted'),
+      data: trendSeries.value.accepted,
+      borderColor: '#4f8f88',
+      backgroundColor: '#4f8f88',
+      fill: false,
+      tension: 0,
+      pointRadius: 3,
+      pointHoverRadius: 5,
+      borderWidth: 2,
+      borderDash: [5, 4]
     }
   ]
 }))
@@ -638,7 +667,12 @@ async function loadDashboardAnalytics() {
 
 async function loadRecentQuotations() {
   try {
-    recentQuotes.value = await getDashboardRecent(3)
+    recentQuotes.value = await getDashboardRecent(
+      5,
+      selectedDateFrom.value,
+      selectedDateTo.value,
+      selectedDashboardCurrency.value
+    )
   } catch (error) {
     recentQuotes.value = []
     console.error('Unable to load recent quotations', error)
@@ -648,6 +682,7 @@ async function loadRecentQuotations() {
 watch(dashboardCurrency, () => {
   void loadDashboardSummary()
   void loadDashboardAnalytics()
+  void loadRecentQuotations()
   selectedQuoteBreakdownIndex.value = null
 })
 
@@ -675,6 +710,7 @@ watch([selectedDateFrom, selectedDateTo], () => {
   }
   void loadDashboardSummary()
   void loadDashboardAnalytics()
+  void loadRecentQuotations()
 })
 
 onMounted(async () => {
@@ -747,157 +783,76 @@ onMounted(async () => {
 
     <div
       id="dashboard-quotation-overview"
-      class="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-[minmax(23rem,0.86fr)_minmax(0,1.64fr)]"
+      class="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4"
     >
-      <div
-        id="dashboard-month-summary"
-        class="dm-card min-h-40 min-w-0 p-4"
-      >
-        <div class="flex items-start justify-between gap-3">
-          <div>
-            <h3 class="text-sm font-semibold text-dm-text">
-            {{ t('quotation.pages.dashboard.rangeSummaryTitle') }}
-            </h3>
-          </div>
-          <span
-            v-if="selectedDateRangeLabel"
-            class="shrink-0 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-600"
-          >
-            {{ selectedDateRangeLabel }}
-          </span>
+      <div class="contents">
+        <div
+          id="dashboard-month-summary"
+          class="dm-card min-h-36 min-w-0 p-4"
+        >
+          <p class="text-sm font-semibold text-dm-text-secondary">
+            {{ t('quotation.pages.dashboard.totalQuotes') }}
+          </p>
+          <p class="mt-4 font-mono text-3xl font-bold text-dm-text">
+            {{ summaryLoading ? '—' : summary?.monthQuoteCount || 0 }}
+          </p>
+          <p class="mt-2 text-xs text-dm-text-tertiary">{{ selectedDateRangeLabel }}</p>
+          <p class="min-h-4 text-xs text-dm-text-tertiary">
+            <span v-if="summaryLoading">—</span>
+            <span v-else>
+              {{ t('quotation.pages.dashboard.previousPeriodCount', {
+                count: summary?.previousMonthQuoteCount || 0
+              }) }}
+            </span>
+          </p>
         </div>
 
         <div
-          v-if="summaryError"
-          class="flex min-h-24 items-center justify-center"
+          id="dashboard-quoted-value"
+          class="dm-card min-h-36 min-w-0 p-4"
         >
-          <button
-            type="button"
-            class="text-sm font-medium text-dm-primary"
-            @click="loadDashboardSummary"
-          >
-            {{ t('quotation.pages.dashboard.retrySummary') }}
-          </button>
-        </div>
-        <div
-          v-else
-          class="mt-5 grid grid-cols-[0.75fr_1.25fr] divide-x divide-dm-border-light"
-          :class="{ 'animate-pulse opacity-50': summaryLoading }"
-        >
-          <div class="pr-4">
-            <span class="text-xs text-dm-text-tertiary">
-              {{ t('quotation.pages.dashboard.rangeQuoteCount') }}
-            </span>
-            <div class="mt-1 font-mono text-2xl font-bold text-dm-text">
-              {{ summaryLoading ? '—' : summary?.monthQuoteCount || 0 }}
-              <span class="font-sans text-xs font-medium text-dm-text-tertiary">
-                {{ t('quotation.pages.dashboard.quoteUnit') }}
-              </span>
-            </div>
-          </div>
-          <div class="pl-4">
-            <span class="text-xs text-dm-text-tertiary">
-              {{ t('quotation.pages.dashboard.rangeQuoteDelta') }}
-            </span>
-            <div
-              class="mt-1 font-mono text-2xl font-bold"
-              :class="monthQuoteDeltaClass"
-            >
-              {{ summaryLoading ? '—' : monthQuoteDeltaLabel }}
-            </div>
-            <div
-              class="mt-1 min-h-4 text-xs text-dm-text-tertiary"
-            >
-              <span v-if="summaryLoading">—</span>
-              <span v-else-if="summary">
-                {{
-                  t('quotation.pages.dashboard.previousPeriodCount', {
-                    count: summary.previousMonthQuoteCount || 0
-                  })
-                }}
-              </span>
-            </div>
-          </div>
-        </div>
-        <div
-          class="mt-4 flex justify-end border-t border-dm-border-light pt-3 text-xs"
-        >
-          <button
-            type="button"
-            class="font-medium text-dm-primary"
-            @click="openSelectedRangeQuotes"
-          >
-            {{ t('quotation.pages.dashboard.viewRangeQuotes') }}
-          </button>
+          <p class="text-sm font-semibold text-dm-text-secondary">
+            {{ t('quotation.pages.dashboard.quotedValue') }}
+          </p>
+          <p class="mt-4 truncate font-mono text-3xl font-bold text-dm-text">
+            {{ summaryLoading ? '—' : formatDashboardAmount(summary?.monthQuoteAmount || 0) }}
+          </p>
+          <p class="mt-2 text-xs text-dm-text-tertiary">{{ selectedDateRangeLabel }}</p>
         </div>
       </div>
 
-      <div
-        id="dashboard-recent-overview"
-        class="dm-card min-h-40 min-w-0 p-4"
-      >
-        <div class="flex items-start justify-between gap-3">
-          <div>
-            <h3 class="text-sm font-semibold text-dm-text">
-              {{ t('quotation.pages.dashboard.recentOverviewTitle') }}
-            </h3>
-            <p class="mt-0.5 text-xs text-dm-text-tertiary">
-              {{ t('quotation.pages.dashboard.recentOverviewSubtitle') }}
-            </p>
-          </div>
-          <button
-            type="button"
-            class="flex items-center gap-1 text-xs font-medium text-dm-primary"
-            @click="emit('navigateToTab', { tab: 'list' })"
-          >
-            {{ t('quotation.actions.viewAll') }}
-            <ChevronRight class="h-3.5 w-3.5" />
-          </button>
+      <div class="contents">
+        <div id="dashboard-previous-year-value" class="dm-card min-h-36 min-w-0 p-4">
+          <p class="text-sm font-semibold text-dm-text-secondary">
+            {{ t('quotation.pages.dashboard.previousYearValue') }}
+          </p>
+          <p class="mt-4 truncate font-mono text-3xl font-bold text-dm-text">
+            {{ summaryLoading ? '—' : formatDashboardAmount(summary?.previousYearQuoteAmount || 0) }}
+          </p>
+          <p class="mt-2 text-xs text-dm-text-tertiary">{{ t('quotation.pages.dashboard.samePeriodLastYear') }}</p>
         </div>
 
-        <div
-          class="mt-3 overflow-hidden rounded-lg border border-dm-border-light"
-        >
-          <button
-            v-for="quote in overviewRecentQuotes"
-            :key="quote.id"
-            type="button"
-            class="grid w-full grid-cols-[7.5rem_minmax(0,1fr)_6.5rem_6.5rem_1rem] items-center gap-3 border-b border-dm-border-light bg-white px-3 py-2 text-left text-xs last:border-b-0 hover:bg-slate-50"
-            @click="emit('viewQuote', quote.id)"
-          >
-            <span class="truncate font-mono font-semibold text-dm-primary">
-              {{ quote.quoteNo }}
-            </span>
-            <span class="flex min-w-0 items-baseline gap-2">
-              <strong class="truncate font-medium text-dm-text">
-                {{ quote.projectName }}
-              </strong>
-              <span class="truncate text-dm-text-tertiary">
-                {{ quote.clientCompany }}
-              </span>
-            </span>
-            <span class="text-right text-dm-text-tertiary">
-              {{ formatRecentQuoteTime(quote.updatedAt) }}
-            </span>
-            <strong class="text-right font-mono text-dm-text">
-              {{ currencyShortLabel(quote.currency) }}
-              {{ quote.grandTotal.toLocaleString() }}
-            </strong>
-            <ChevronRight class="h-3.5 w-3.5 text-slate-400" />
-          </button>
-          <div
-            v-if="overviewRecentQuotes.length === 0"
-            class="flex min-h-24 items-center justify-center text-sm text-dm-text-tertiary"
-          >
-            {{ t('quotation.pages.dashboard.recentOverviewEmpty') }}
-          </div>
+        <div id="dashboard-year-over-year" class="dm-card min-h-36 min-w-0 p-4">
+          <p class="text-sm font-semibold text-dm-text-secondary">
+            {{ t('quotation.pages.dashboard.yearOverYearChange') }}
+          </p>
+          <p class="mt-4 truncate font-mono text-3xl font-bold text-dm-text">
+            {{
+              summaryLoading || yearOverYearChange == null
+                ? '—'
+                : `${yearOverYearChange >= 0 ? '+' : ''}${yearOverYearChange.toFixed(1)}%`
+            }}
+          </p>
+          <p class="mt-2 text-xs text-dm-text-tertiary">
+            {{ t('quotation.pages.dashboard.samePeriodLastYear') }}
+          </p>
         </div>
       </div>
     </div>
 
     <div
       id="dashboard-charts"
-      class="grid min-w-0 max-w-full grid-cols-1 items-stretch gap-6"
+      class="grid min-w-0 max-w-full grid-cols-1 items-stretch gap-6 xl:grid-cols-2"
     >
       <div
         id="chart-quote-amount"
@@ -908,10 +863,10 @@ onMounted(async () => {
         >
           <div class="min-w-0">
             <h3 class="text-sm font-semibold text-dm-text">
-              {{ t('quotation.pages.dashboard.chartAmountTitle') }}
+              {{ t('quotation.pages.dashboard.quoteMixTitle') }}
             </h3>
             <p class="mt-0.5 text-sm text-dm-text-tertiary">
-              {{ t('quotation.pages.dashboard.chartAmountSubtitle') }}
+              {{ t('quotation.pages.dashboard.quoteMixSubtitle') }}
             </p>
           </div>
           <div class="shrink-0 text-right text-[11px] leading-4">
@@ -961,7 +916,7 @@ onMounted(async () => {
             <div
               class="flex min-h-[320px] w-full min-w-0 max-w-full items-center justify-center"
             >
-              <div class="relative h-80 w-[min(100%,700px)]">
+                <div class="relative h-80 w-[min(100%,700px)]">
                 <Pie
                   :key="
                     normalizeDashboardCurrency(
@@ -1030,7 +985,7 @@ onMounted(async () => {
           </div>
         </div>
 
-        <div class="relative h-64 w-full">
+        <div class="relative h-72 w-full">
           <div
             v-if="analyticsLoading"
             class="absolute inset-0 flex items-center justify-center text-sm text-dm-text-tertiary"
@@ -1061,6 +1016,94 @@ onMounted(async () => {
             t('quotation.pages.dashboard.chartTrendFooterSource')
           }}</span>
           <span>{{ t('quotation.pages.dashboard.chartTrendFooterHint') }}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid min-w-0 grid-cols-1 items-stretch gap-4 xl:grid-cols-2">
+      <div id="dashboard-product-line" class="dm-card flex h-full min-w-0 flex-col p-5">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <h3 class="text-sm font-semibold text-dm-text">
+              {{ t('quotation.pages.dashboard.valueByProductLineTitle') }}
+            </h3>
+            <p class="mt-0.5 text-sm text-dm-text-tertiary">
+              {{ t('quotation.pages.dashboard.valueByProductLineSubtitle') }}
+            </p>
+          </div>
+          <span class="text-xs font-medium text-dm-text-tertiary">
+            {{ selectedDateRangeLabel }}
+          </span>
+        </div>
+        <div v-if="analyticsLoading" class="mt-6 text-sm text-dm-text-tertiary">
+          {{ t('quotation.pages.dashboard.loading') }}
+        </div>
+        <div
+          v-else-if="productLineBars.length === 0"
+          class="mt-6 text-sm text-dm-text-tertiary"
+        >
+          {{ t('quotation.pages.dashboard.chartAmountEmpty') }}
+        </div>
+        <div v-else class="mt-5 space-y-4">
+          <div v-for="row in productLineBars" :key="row.productLine">
+            <div class="mb-1.5 flex items-center justify-between gap-3 text-sm">
+              <span class="min-w-0 truncate font-medium text-dm-text-secondary">
+                {{ row.productLine }}
+              </span>
+              <span class="shrink-0 font-mono font-semibold text-dm-text">
+                {{ formatDashboardAmount(row.amount) }}
+              </span>
+            </div>
+            <div class="h-2.5 overflow-hidden rounded-full bg-slate-100">
+              <div
+                class="h-full rounded-full transition-[width] duration-300"
+                :style="{ width: `${Math.max(row.share, 3)}%`, backgroundColor: row.color }"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="dashboard-recent-overview" class="dm-card flex h-full min-w-0 flex-col p-5">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <h3 class="text-sm font-semibold text-dm-text">
+              {{ t('quotation.pages.dashboard.recentQuotesTitle') }}
+            </h3>
+            <p class="mt-0.5 text-sm text-dm-text-tertiary">
+              {{ t('quotation.pages.dashboard.recentQuotesSubtitle') }}
+            </p>
+          </div>
+          <button
+            type="button"
+            class="flex items-center gap-1 text-sm font-medium text-dm-primary"
+            @click="openSelectedRangeQuotes"
+          >
+            {{ t('quotation.actions.viewAll') }}
+            <ChevronRight class="h-4 w-4" />
+          </button>
+        </div>
+        <div class="mt-4 overflow-hidden rounded-lg border border-dm-border-light">
+          <button
+            v-for="quote in overviewRecentQuotes"
+            :key="quote.id"
+            type="button"
+            class="grid w-full grid-cols-[7.5rem_minmax(0,1fr)_6.5rem_6.5rem_1rem] items-center gap-3 border-b border-dm-border-light bg-white px-3 py-3 text-left text-sm last:border-b-0 hover:bg-slate-50"
+            @click="openSelectedRangeQuotes"
+          >
+            <span class="truncate font-mono font-semibold text-dm-primary">{{ quote.quoteNo }}</span>
+            <span class="min-w-0 truncate text-dm-text-secondary">{{ quote.clientCompany || quote.projectName }}</span>
+            <span class="text-right font-mono font-semibold text-dm-text">
+              {{ currencyShortLabel(quote.currency) }} {{ quote.grandTotal.toLocaleString() }}
+            </span>
+            <span class="text-right text-xs text-dm-text-tertiary">
+              {{ formatRecentQuoteTime(quote.updatedAt) }}
+            </span>
+            <ChevronRight class="h-4 w-4 text-dm-text-tertiary" />
+          </button>
+          <div v-if="recentQuotes.length === 0" class="flex min-h-24 items-center justify-center text-sm text-dm-text-tertiary">
+            {{ t('quotation.pages.dashboard.recentOverviewEmpty') }}
+          </div>
         </div>
       </div>
     </div>
