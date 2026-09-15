@@ -36,11 +36,11 @@ const quotationSources = readFilesRecursively(
 
 const oldPurplePalette = /#(?:7559f5|5c43ed|8b7bff|6755f5|4c35d9|6250ea|b2a9f8|c9c2ff)/i
 
-test('Quote Desk branding uses blue and teal instead of the old purple palette', () => {
+test('Quote Desk branding uses the approved dark shell and blue-teal logo', () => {
   assert.match(quoteDeskLogo, /#2563eb/i)
   assert.match(quoteDeskLogo, /#14b8a6/i)
   assert.doesNotMatch(quoteDeskLogo, oldPurplePalette)
-  assert.match(sidebar, /background-color:\s*#2563eb/i)
+  assert.match(sidebar, /background:\s*#070a18/i)
   assert.doesNotMatch(sidebar, /linear-gradient/i)
 })
 

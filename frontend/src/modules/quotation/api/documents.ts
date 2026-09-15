@@ -116,7 +116,7 @@ export function listImportedFeishuDocuments(
   lifecycle: 'active' | 'archived' = 'active',
 ): Promise<ImportedDocument[]> {
   return apiRequest<ImportedDocument[]>(
-    `/documents?source=feishu&lifecycle=${lifecycle}`,
+    `/documents?source=feishu&lifecycle=${lifecycle}&limit=5000`,
   );
 }
 

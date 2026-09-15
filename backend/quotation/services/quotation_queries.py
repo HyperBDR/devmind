@@ -33,6 +33,7 @@ SEARCH_FIELDS = (
     "contact_person",
 )
 PRODUCT_LINE_FACET_LIMIT = 100
+SALESPERSON_FACET_LIMIT = 100
 
 
 def quotation_currency_facets(
@@ -74,6 +75,10 @@ def filter_quotation_list(
             )
         )
 
+    salesperson = filters.get("salesperson")
+    if salesperson:
+        queryset = queryset.filter(issuer_contact_name=salesperson)
+
     created_from = filters.get("created_from")
     if created_from:
         queryset = queryset.filter(quote_date__gte=created_from)
@@ -107,6 +112,25 @@ def quotation_product_line_facets(
         .values_list("facet_product_line", flat=True)
         .order_by("facet_product_line")
         .distinct()[:PRODUCT_LINE_FACET_LIMIT]
+    )
+
+
+def quotation_salesperson_facets(
+    queryset: QuerySet[Quotation],
+    filters: dict,
+) -> list[str]:
+    """Return salespeople from accessible rows matching other filters."""
+    facet_filters = {
+        key: value
+        for key, value in filters.items()
+        if key != "salesperson"
+    }
+    return list(
+        filter_quotation_list(queryset, facet_filters)
+        .exclude(issuer_contact_name="")
+        .values_list("issuer_contact_name", flat=True)
+        .order_by("issuer_contact_name")
+        .distinct()[:SALESPERSON_FACET_LIMIT]
     )
 
 

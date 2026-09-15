@@ -29,6 +29,10 @@ export interface CreateQuoteDraft {
   paymentTermsCustom: string;
   vatRateInput: string;
   taxLabel: string;
+  taxCalculationMode?: 'add' | 'subtract';
+  customTotalLabel?: string;
+  customTotalAmountInput?: string;
+  customTotalCurrency?: string;
   quoteDate: string;
   expireDate: string;
   remarksDisclaimer: string;

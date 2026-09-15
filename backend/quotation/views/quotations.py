@@ -44,6 +44,7 @@ from quotation.services.quotation_queries import (
     quotation_currency_facets,
     filter_quotation_list,
     quotation_product_line_facets,
+    quotation_salesperson_facets,
 )
 from quotation.services.quotation_service import (
     FormalQuotationNumberError,
@@ -232,6 +233,7 @@ class QuotationListCreateView(APIView):
             Quotation.objects.all(),
         )
         product_lines = quotation_product_line_facets(queryset, filters)
+        salespeople = quotation_salesperson_facets(queryset, filters)
         currencies = quotation_currency_facets(queryset)
         queryset = filter_quotation_list(queryset, filters)
         total = queryset.count()
@@ -253,6 +255,7 @@ class QuotationListCreateView(APIView):
                 "total_pages": total_pages,
                 "facets": {
                     "product_lines": product_lines,
+                    "salespeople": salespeople,
                     "currencies": currencies,
                 },
             }

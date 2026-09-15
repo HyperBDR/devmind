@@ -181,6 +181,10 @@ const paymentTermOption = ref<PaymentTermOption>(DEFAULT_PAYMENT_TERM_OPTION)
 const paymentTermsCustom = ref('')
 const vatRateInput = ref('')
 const taxLabel = ref(DEFAULT_TAX_LABEL)
+const taxCalculationMode = ref<'add' | 'subtract'>('add')
+const customTotalLabel = ref('')
+const customTotalAmountInput = ref('')
+const customTotalCurrency = ref<string>('USD')
 const historySourceQuotations = computed(() => props.historyQuotations ?? props.quotations)
 const taxLabelHistory = ref<string[]>(
   getMergedTaxLabelHistory(props.currentUser?.email, historySourceQuotations.value),
@@ -607,6 +611,12 @@ function loadEditingQuoteIntoForm(editingQuote: Quotation) {
     loadedPaymentTermOption === 'Others' ? editingQuote.paymentTerms || '' : ''
   vatRateInput.value = formatVatRateForInput(editingQuote.vatRate)
   taxLabel.value = resolveTaxLabel(editingQuote.taxLabel)
+  taxCalculationMode.value = editingQuote.taxCalculationMode || 'add'
+  customTotalLabel.value = editingQuote.customTotalLabel || ''
+  customTotalAmountInput.value = editingQuote.customTotalAmount
+    ? String(editingQuote.customTotalAmount)
+    : ''
+  customTotalCurrency.value = editingQuote.customTotalCurrency || 'USD'
   const todayInput = formatDateInput(new Date())
   quoteDate.value = draftLifecycleForm.value
     ? editingQuote.quoteDate || todayInput
@@ -664,6 +674,12 @@ function loadCopiedQuoteIntoForm(sourceQuote: Quotation) {
     loadedPaymentTermOption === 'Others' ? sourceQuote.paymentTerms || '' : ''
   vatRateInput.value = formatVatRateForInput(sourceQuote.vatRate)
   taxLabel.value = resolveTaxLabel(sourceQuote.taxLabel)
+  taxCalculationMode.value = sourceQuote.taxCalculationMode || 'add'
+  customTotalLabel.value = sourceQuote.customTotalLabel || ''
+  customTotalAmountInput.value = sourceQuote.customTotalAmount
+    ? String(sourceQuote.customTotalAmount)
+    : ''
+  customTotalCurrency.value = sourceQuote.customTotalCurrency || 'USD'
   const todayInput = formatDateInput(new Date())
   quoteDate.value = todayInput
   expireDate.value = getDefaultExpireDate(dateFromInput(todayInput))
@@ -720,6 +736,10 @@ function resetCreateForm() {
   paymentTermsCustom.value = ''
   vatRateInput.value = ''
   taxLabel.value = DEFAULT_TAX_LABEL
+  taxCalculationMode.value = 'add'
+  customTotalLabel.value = ''
+  customTotalAmountInput.value = ''
+  customTotalCurrency.value = 'USD'
   quoteDate.value = todayInput
   expireDate.value = getDefaultExpireDate(dateFromInput(todayInput))
   remarksDisclaimer.value = ''
@@ -765,6 +785,10 @@ function buildCreateDraftPayload(): Omit<CreateQuoteDraft, 'version' | 'savedAt'
     paymentTermsCustom: paymentTermsCustom.value,
     vatRateInput: vatRateInput.value,
     taxLabel: taxLabel.value,
+    taxCalculationMode: taxCalculationMode.value,
+    customTotalLabel: customTotalLabel.value,
+    customTotalAmountInput: customTotalAmountInput.value,
+    customTotalCurrency: customTotalCurrency.value,
     quoteDate: quoteDate.value,
     expireDate: expireDate.value,
     remarksDisclaimer: remarksDisclaimer.value,
@@ -799,6 +823,10 @@ function applyCreateDraft(draft: CreateQuoteDraft) {
   paymentTermsCustom.value = draft.paymentTermsCustom || ''
   vatRateInput.value = draft.vatRateInput || ''
   taxLabel.value = draft.taxLabel || DEFAULT_TAX_LABEL
+  taxCalculationMode.value = draft.taxCalculationMode || 'add'
+  customTotalLabel.value = draft.customTotalLabel || ''
+  customTotalAmountInput.value = draft.customTotalAmountInput || ''
+  customTotalCurrency.value = draft.customTotalCurrency || 'USD'
   quoteDate.value = draft.quoteDate || formatDateInput(new Date())
   expireDate.value = draft.expireDate || getDefaultExpireDate()
   remarksDisclaimer.value = draft.remarksDisclaimer || ''
@@ -947,6 +975,10 @@ watch(
     paymentTermsCustom,
     vatRateInput,
     taxLabel,
+    taxCalculationMode,
+    customTotalLabel,
+    customTotalAmountInput,
+    customTotalCurrency,
     quoteDate,
     expireDate,
     remarksDisclaimer,
@@ -1114,7 +1146,11 @@ function handleDescriptionSelect(
 }
 
 const parsedVatRate = computed(() => parseVatRateInput(vatRateInput.value))
-const quotationTotals = computed(() => calculateQuotationTotals(items.value, parsedVatRate.value))
+const quotationTotals = computed(() => calculateQuotationTotals(
+  items.value,
+  parsedVatRate.value,
+  taxCalculationMode.value,
+))
 const softwareSubtotal = computed(() => quotationTotals.value.softwareSubtotal)
 const othersSubtotal = computed(() => quotationTotals.value.othersSubtotal)
 const subtotalBeforeVat = computed(() => quotationTotals.value.subtotalBeforeVat)
@@ -1182,9 +1218,13 @@ const previewQuote = computed<Quotation>(() => ({
   othersSubtotal: othersSubtotal.value,
   subtotalBeforeVat: subtotalBeforeVat.value,
   taxLabel: resolveTaxLabel(taxLabel.value),
+  taxCalculationMode: taxCalculationMode.value,
   vatRate: quotationTotals.value.vatRate,
   vatAmount: vatAmount.value,
   grandTotal: grandTotal.value,
+  customTotalLabel: customTotalLabel.value.trim(),
+  customTotalAmount: Number(customTotalAmountInput.value) || 0,
+  customTotalCurrency: customTotalCurrency.value,
   createdAt: props.editingQuote ? props.editingQuote.createdAt : `${quoteDate.value} 00:00:00`,
 }))
 
@@ -1315,10 +1355,14 @@ function handleSubmit(status: 'Draft' | 'Generated') {
     softwareSubtotal: softwareSubtotal.value,
     othersSubtotal: othersSubtotal.value,
     subtotalBeforeVat: subtotalBeforeVat.value,
-    taxLabel: normalizedTaxLabel,
-    vatRate: quotationTotals.value.vatRate,
-    vatAmount: vatAmount.value,
-    grandTotal: grandTotal.value,
+  taxLabel: normalizedTaxLabel,
+  taxCalculationMode: taxCalculationMode.value,
+  vatRate: quotationTotals.value.vatRate,
+  vatAmount: vatAmount.value,
+  grandTotal: grandTotal.value,
+  customTotalLabel: customTotalLabel.value.trim(),
+  customTotalAmount: Number(customTotalAmountInput.value) || 0,
+  customTotalCurrency: customTotalCurrency.value,
     createdAt: props.editingQuote ? props.editingQuote.createdAt : formattedDate,
   }
 
@@ -2190,7 +2234,7 @@ const itemErrorEntries = computed(() =>
 
         <div class="space-y-6">
           <!-- Step 5 -->
-          <div class="relative space-y-4 overflow-hidden dm-card p-5 text-sm shadow-xs">
+          <div class="relative space-y-4 overflow-visible dm-card p-5 text-sm shadow-xs">
             <div class="flex items-center gap-2 border-b border-slate-50 pb-2">
               <DollarSign class="h-4 w-4 text-dm-text-tertiary" />
               <h3 class="text-sm font-bold text-dm-text">{{ t('quotation.pages.create.step5Title') }}</h3>
@@ -2263,6 +2307,29 @@ const itemErrorEntries = computed(() =>
                       {{ t('quotation.pages.create.taxRateHelper') }}
                     </p>
                   </div>
+                  <div class="flex items-center justify-between gap-3">
+                    <label class="font-semibold text-dm-text-tertiary">
+                      {{ t('quotation.pages.create.taxCalculation') }}
+                    </label>
+                    <div class="inline-flex shrink-0 overflow-hidden rounded-lg border border-dm-border bg-white">
+                      <button
+                        type="button"
+                        data-testid="quote-tax-add"
+                        class="min-w-9 px-3 py-1.5 text-base font-bold transition"
+                        :class="taxCalculationMode === 'add' ? 'bg-dm-primary text-white' : 'text-dm-text-secondary hover:bg-slate-50'"
+                        :aria-label="t('quotation.pages.create.taxAdd')"
+                        @click="taxCalculationMode = 'add'"
+                      >+</button>
+                      <button
+                        type="button"
+                        data-testid="quote-tax-subtract"
+                        class="min-w-9 border-l border-dm-border px-3 py-1.5 text-base font-bold transition"
+                        :class="taxCalculationMode === 'subtract' ? 'bg-dm-primary text-white' : 'text-dm-text-secondary hover:bg-slate-50'"
+                        :aria-label="t('quotation.pages.create.taxSubtract')"
+                        @click="taxCalculationMode = 'subtract'"
+                      >−</button>
+                    </div>
+                  </div>
                 </div>
                 <div class="min-w-0 w-full text-right 2xl:w-[220px]">
                   <span class="block truncate text-xs font-semibold text-dm-text-tertiary">
@@ -2276,6 +2343,46 @@ const itemErrorEntries = computed(() =>
                     {{ currencySymbol }}{{ vatAmount.toLocaleString() }}
                   </span>
                 </div>
+              </div>
+              <div class="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,120px)_minmax(0,80px)] items-end gap-3 rounded-lg border border-dm-border-light bg-white p-3">
+                <div>
+                  <label class="mb-1 block font-semibold text-dm-text-tertiary">
+                    {{ t('quotation.pages.create.customTotalLabel') }}
+                  </label>
+                  <input
+                    v-model="customTotalLabel"
+                    type="text"
+                    maxlength="120"
+                    :placeholder="t('quotation.pages.create.customTotalLabelPlaceholder')"
+                    class="w-full rounded-lg border border-dm-border bg-white p-2 text-dm-text placeholder:text-slate-300 focus:border-blue-500 focus:outline-hidden"
+                  />
+                </div>
+                <div>
+                  <label class="mb-1 block font-semibold text-dm-text-tertiary">
+                    {{ t('quotation.pages.create.customTotalAmount') }}
+                  </label>
+                  <input
+                    v-model="customTotalAmountInput"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    class="w-full rounded-lg border border-dm-border bg-white p-2 font-mono text-dm-text placeholder:text-slate-300 focus:border-blue-500 focus:outline-hidden"
+                  />
+                </div>
+                <div>
+                  <label class="mb-1 block font-semibold text-dm-text-tertiary">
+                    {{ t('quotation.pages.create.customTotalCurrency') }}
+                  </label>
+                  <FormSelect
+                    test-id="quote-custom-total-currency"
+                    :model-value="customTotalCurrency"
+                    :options="currencyOptions"
+                    @update:model-value="customTotalCurrency = $event"
+                  />
+                </div>
+                <p class="col-span-3 min-w-0 text-xs font-medium text-dm-text-tertiary">
+                  {{ t('quotation.pages.create.customTotalHelper') }}
+                </p>
               </div>
               <div
                 class="my-2 flex justify-between border-t border-dm-border-light pt-2 text-base font-extrabold text-dm-text"

@@ -6,13 +6,13 @@ the original file name and content type stay in the database.
 """
 
 import logging
-import os
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from uuid import UUID
 
 from django.conf import settings
 from django.db import transaction
+
+from core.document_storage import LocalDocumentStorage
 
 logger = logging.getLogger(__name__)
 
@@ -42,87 +42,31 @@ def storage_root() -> Path:
     return Path(settings.QUOTATION_STORAGE).absolute()
 
 
+def _storage() -> LocalDocumentStorage:
+    return LocalDocumentStorage(
+        storage_root(),
+        chunk_size=settings.QUOTATION_UPLOAD_CHUNK_BYTES,
+    )
+
+
 def resolve_document_path(storage_key: str) -> Path:
-    root = storage_root()
-    path = (root / str(storage_key)).absolute()
-    resolved_root = root.resolve()
-    resolved_path = path.resolve()
-    if resolved_path != resolved_root and resolved_root not in resolved_path.parents:
-        raise ValueError("document path is outside quotation storage")
-    return path
+    return _storage().resolve(storage_key)
 
 
 def write_document(content: bytes, storage_key: str) -> Path:
-    path = resolve_document_path(storage_key)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(content)
-    return path
+    return _storage().write(content, storage_key)
 
 
 def write_document_stream(stream, storage_key: str) -> tuple[Path, int]:
-    """Atomically persist a seekable upload without a full-file copy."""
-    path = resolve_document_path(storage_key)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path = None
-    original_position = stream.tell()
-    written_bytes = 0
-    try:
-        stream.seek(0)
-        with NamedTemporaryFile(dir=path.parent, delete=False) as temporary:
-            temporary_path = Path(temporary.name)
-            chunks = getattr(stream, "chunks", None)
-            if callable(chunks):
-                iterator = chunks(
-                    chunk_size=settings.QUOTATION_UPLOAD_CHUNK_BYTES,
-                )
-            else:
-                iterator = iter(
-                    lambda: stream.read(
-                        settings.QUOTATION_UPLOAD_CHUNK_BYTES,
-                    ),
-                    b"",
-                )
-            for chunk in iterator:
-                temporary.write(chunk)
-                written_bytes += len(chunk)
-            temporary.flush()
-            os.fsync(temporary.fileno())
-        os.replace(temporary_path, path)
-    finally:
-        stream.seek(original_position)
-        if temporary_path is not None and temporary_path.exists():
-            temporary_path.unlink()
-    return path, written_bytes
+    return _storage().write_stream(stream, storage_key)
 
 
 def write_document_atomic(content: bytes, storage_key: str) -> Path:
-    """Replace one storage object atomically on the local filesystem."""
-    path = resolve_document_path(storage_key)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path = None
-    try:
-        with NamedTemporaryFile(dir=path.parent, delete=False) as temporary:
-            temporary.write(content)
-            temporary.flush()
-            os.fsync(temporary.fileno())
-            temporary_path = Path(temporary.name)
-        os.replace(temporary_path, path)
-    finally:
-        if temporary_path is not None and temporary_path.exists():
-            temporary_path.unlink()
-    return path
+    return _storage().write_atomic(content, storage_key)
 
 
 def delete_document(storage_key: str) -> bool:
-    path = resolve_document_path(storage_key)
-    if not path.is_file():
-        return False
-    path.unlink()
-    try:
-        path.parent.rmdir()
-    except OSError:
-        pass
-    return True
+    return _storage().delete(storage_key)
 
 
 def delete_documents_after_commit(storage_keys) -> None:

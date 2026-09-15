@@ -657,6 +657,147 @@ class StandardQuotationPdfParserTests(TestCase):
         self.assertEqual(parsed.source_totals["grand_total"], "1080")
         self.assertEqual(parsed.validation_errors, [])
 
+    def test_normalizes_contact_punctuation_in_pdf_fields(self):
+        from quotation.services.document_parsing.pdf_parser import (
+            parse_quotation_pdf_text,
+        )
+
+        parsed = parse_quotation_pdf_text(
+            "\n".join(
+                [
+                    "Quotation",
+                    "Ship to",
+                    "Company : Customer Ltd",
+                    "Name : ; Customer Contact",
+                    "Email : customer@example.com,",
+                    "Bill to:",
+                    "Company : Customer Ltd",
+                    "Name : | Billing Contact",
+                    "Email : billing@example.com;",
+                    "Contact Person Email Project Payment Terms Currency",
+                    "Alex Wong alex@example.com Project CIA USD",
+                ]
+            )
+        )
+
+        quote = parsed.quotation
+        self.assertEqual(quote.contact_person, "Customer Contact")
+        self.assertEqual(quote.email, "customer@example.com")
+        self.assertEqual(quote.billing_contact, "Billing Contact")
+        self.assertEqual(quote.billing_email, "billing@example.com")
+
+    def test_preserves_multiline_pdf_remarks(self):
+        from quotation.services.document_parsing.pdf_parser import (
+            parse_quotation_pdf_text,
+        )
+
+        parsed = parse_quotation_pdf_text(
+            "\n".join(
+                [
+                    "Quotation",
+                    "Remarks",
+                    "Account Name: OnePro Cloud Limited",
+                    "Bank Name: DBS Bank",
+                    "SWIFT CODE: DBSSHKHH",
+                ]
+            )
+        )
+
+        self.assertEqual(
+            parsed.quotation.remarks_disclaimer,
+            "Account Name: OnePro Cloud Limited\n"
+            "Bank Name: DBS Bank\n"
+            "SWIFT CODE: DBSSHKHH",
+        )
+
+    def test_pdf_remarks_stop_before_signature_and_split_items_keep_details(self):
+        from quotation.services.document_parsing.pdf_parser import (
+            parse_quotation_pdf_text,
+        )
+
+        parsed = parse_quotation_pdf_text(
+            "\n".join(
+                [
+                    "Quotation",
+                    "Others",
+                    "Item Description Qty List Price Discount (%) Discounted Price Extended Price",
+                    "Landing Zone Design Services",
+                    "• Environment assessment and information gathering",
+                    "1 • Security auditing design 1 ¥ 75,294.12 0% ¥ 75,294.12 ¥ 75,294.12",
+                    "• Backup strategy design",
+                    "Remarks:",
+                    "- Payment Terms:",
+                    "• 60% upon contract signing",
+                    "To indicate Customer acceptance of this quotation, please sign below",
+                    "Carrie Chen",
+                    "OnePro Cloud Confidential",
+                ]
+            )
+        )
+
+        self.assertEqual(len(parsed.quotation.items), 1)
+        self.assertIn("Landing Zone Design Services", parsed.quotation.items[0].description)
+        self.assertIn("Backup strategy design", parsed.quotation.items[0].description)
+        self.assertEqual(
+            parsed.quotation.remarks_disclaimer,
+            "- Payment Terms:\n• 60% upon contract signing",
+        )
+
+    def test_pdf_split_rows_without_qty_column_stay_separate(self):
+        from quotation.services.document_parsing.pdf_parser import (
+            parse_quotation_pdf_text,
+        )
+
+        parsed = parse_quotation_pdf_text(
+            "\n".join(
+                [
+                    "Quotation",
+                    "Others",
+                    "Item Description Qty List Price Discount (%) "
+                    "Discounted Price Extended Price",
+                    "1 Remote Professional Service for Installation & "
+                    "Deployment (One-time) ￥ 59,000.00 0% ￥ 59,000.00 "
+                    "￥ 59,000.00",
+                    "2 Remote Product Service-Premium 7*24 (Optional, "
+                    "Yearly) ￥ 23,000.00 ￥ 23,000.00 ￥ 23,000.00",
+                    "Others Subtotal: ￥ 82,000.00",
+                    "Total Amount: ￥ 82,000.00",
+                ]
+            )
+        )
+
+        self.assertEqual(len(parsed.quotation.items), 2)
+        second = parsed.quotation.items[1]
+        self.assertEqual(
+            second.description,
+            "Remote Product Service-Premium 7*24 (Optional, Yearly)",
+        )
+        self.assertEqual(str(second.qty), "1")
+        self.assertEqual(second.list_price, Decimal("23000"))
+        self.assertEqual(second.discount_percent, Decimal("0"))
+        self.assertEqual(second.extended_price, Decimal("23000"))
+        self.assertEqual(
+            Decimal(parsed.source_totals["grand_total"]),
+            Decimal("82000"),
+        )
+
+    def test_parses_compact_payment_terms_from_pdf_table(self):
+        from quotation.services.document_parsing.pdf_parser import (
+            parse_quotation_pdf_text,
+        )
+
+        parsed = parse_quotation_pdf_text(
+            "\n".join(
+                [
+                    "Quotation",
+                    "Contact Person Email Project Payment Terms Currency",
+                    "Sales sales@example.com Project Alpha Net45 MYR",
+                    "Quote Valid Till: 22.05.2025",
+                ]
+            )
+        )
+
+        self.assertEqual(parsed.quotation.payment_terms, "NET 45")
     def test_pymupdf_fast_path_retains_validated_result(self):
         from quotation.services.document_parsing import pdf_parser
 
@@ -1076,6 +1217,265 @@ class StandardQuotationPdfParserTests(TestCase):
         self.assertEqual(symbol_item.extended_price, Decimal("900.00"))
         self.assertEqual(marker_item.extended_price, Decimal("900.00"))
 
+    def test_parses_monthly_price_layout_without_dropping_items(self):
+        from quotation.services.document_parsing.pdf_parser import (
+            parse_quotation_pdf_text,
+        )
+
+        parsed = parse_quotation_pdf_text(
+            "\n".join(
+                [
+                    "Quotation",
+                    "Date: 20-Feb-26",
+                    "Quote No.: MONTHLY-1",
+                    "Ship to",
+                    "Company : Customer",
+                    "Name : Customer Contact",
+                    "Email : customer@example.com",
+                    "Contact Person Email Project Payment Terms Currency",
+                    "Evelyn Chee evelyn.chee@oneprocloud.com Project CIA MYR",
+                    "Software",
+                    "Item Description Qty List Price/Month Month Price",
+                    "1 HyperBDR Backup & DR License for 4 VMs 4 MYR 37.04 2 MYR 296.32",
+                    "Software subscription subtotal: MYR 296.32",
+                    "Total Amount: MYR 296.32",
+                ]
+            )
+        )
+
+        self.assertEqual(len(parsed.quotation.items), 1)
+        item = parsed.quotation.items[0]
+        self.assertEqual(item.qty, Decimal("4"))
+        self.assertEqual(item.list_price, Decimal("37.04"))
+        self.assertEqual(item.net_unit_price, Decimal("37.04"))
+        self.assertEqual(item.extended_price, Decimal("296.32"))
+
+    def test_parses_mr_monthly_item_and_keeps_table_note(self):
+        from quotation.services.document_parsing.pdf_parser import (
+            parse_quotation_pdf_text,
+        )
+
+        parsed = parse_quotation_pdf_text("\n".join([
+            "Quotation",
+            "Date: 20-Feb-26",
+            "Quote No.: E_20260220TIME",
+            "Ship to",
+            "Company : TT DOTCOM SDN BHD (TIME)",
+            "Name : Md Fadhil Bin Md Rashid",
+            "Email : md.fadhil@time.com.my",
+            "Contact Person Email Project Payment Terms Currency",
+            "Evelyn Chee evelyn.chee@oneprocloud.com "
+            "Disaster Recovery for Altel Communication S/B_4VMs "
+            "Net45 MYR",
+            "Software",
+            "Item Description Qty List Price/Month Month Price",
+            "1 HyperBDR Backup & DR License @ MR 37.04 per month "
+            "4 MYR 37.04 1 MYR 148.16",
+            "*Agreed Unit price is RM40/month/VM or RM 480/annum/VM "
+            "inclusive of 8% digital tax;",
+            "after tax deduction, the billable amount is RM37.04 or "
+            "RM 444.48",
+            "Software subscription subtotal: MYR 148.16",
+            "Total Amount: MYR 148.16",
+        ]))
+
+        self.assertEqual(len(parsed.quotation.items), 1)
+        item = parsed.quotation.items[0]
+        self.assertEqual(item.qty, Decimal("4"))
+        self.assertEqual(item.list_price, Decimal("37.04"))
+        self.assertEqual(item.extended_price, Decimal("148.16"))
+        self.assertNotIn("Month:", item.description or "")
+        self.assertIn("\n\n*Agreed Unit price", item.description or "")
+
+    def test_discoun_header_fragments_are_not_item_descriptions(self):
+        from quotation.services.document_parsing.pdf_parser import (
+            parse_quotation_pdf_text,
+        )
+
+        parsed = parse_quotation_pdf_text("\n".join([
+            "Quotation",
+            "Software",
+            "Item Description Qty List Price Discoun",
+            "t (%)",
+            "1 HyperBDR Backup & DR License 6 RM 448.48 0% "
+            "RM 448.48 RM 2,690.88",
+            "Software subscription subtotal: RM 2,690.88",
+            "Total Amount: RM 2,690.88",
+        ]))
+
+        self.assertEqual(len(parsed.quotation.items), 1)
+        description = parsed.quotation.items[0].description or ""
+        self.assertNotIn("Discoun", description)
+        self.assertNotIn("t (%)", description)
+
+    def test_pdf_item_description_excludes_units_from_table_header(self):
+        from quotation.services.document_parsing.pdf_parser import (
+            parse_quotation_pdf_text,
+        )
+
+        parsed = parse_quotation_pdf_text("\n".join([
+            "Quotation",
+            "Software",
+            "Item Description Qty List Price Discount (%) Discounted Price Extended Price",
+            "1 (ea) (HKD) (HKD) (HKD) HyperMotion License with a validity period of 3 months 23 HK$820 20% HK$656 HK$15,088",
+            "Software subscription subtotal: HK$15,088",
+            "Total Amount: HK$15,088",
+        ]))
+
+        self.assertEqual(len(parsed.quotation.items), 1)
+        self.assertEqual(
+            parsed.quotation.items[0].description,
+            "HyperMotion License with a validity period of 3 months",
+        )
+
+    def test_pdf_items_start_new_row_after_previous_item_description(self):
+        from quotation.services.document_parsing.pdf_parser import (
+            parse_quotation_pdf_text,
+        )
+
+        parsed = parse_quotation_pdf_text("\n".join([
+            "Quotation",
+            "Others",
+            "Item Description Qty List Price Discount (%) Discounted Price Extended Price",
+            "1 Remote Professional Service for Installation & Deployment (One-time)",
+            "1 HK$30,000 0% HK$30,000 HK$30,000",
+            "2 Remote Product Service-Premium 7*24 (Yearly)",
+            "2 HK$14,000 100% HK$0 HK$0 (Waive for ASL first order)",
+            "Others Subtotal: HK$30,000",
+            "Total Amount: HK$30,000",
+        ]))
+
+        self.assertEqual(len(parsed.quotation.items), 2)
+        self.assertEqual(
+            parsed.quotation.items[0].description,
+            "Remote Professional Service for Installation & Deployment (One-time)",
+        )
+        self.assertEqual(
+            parsed.quotation.items[1].description,
+            "Remote Product Service-Premium 7*24 (Yearly)\n"
+            "(Waive for ASL first order)",
+        )
+        self.assertEqual(parsed.quotation.items[1].list_price, Decimal("14000"))
+        self.assertEqual(parsed.quotation.items[1].discount_percent, Decimal("100"))
+
+    def test_pdf_items_split_description_lines_and_clean_pending_headers(self):
+        from quotation.services.document_parsing.pdf_parser import (
+            parse_quotation_pdf_text,
+        )
+
+        parsed = parse_quotation_pdf_text("\n".join([
+            "Quotation",
+            "Software",
+            "Item Description Qty List Price Discount (%) Discounted Price Extended Price",
+            "(ea) (HKD) (HKD) (HKD)",
+            "HyperMotion License with a validity period of 3 months",
+            "1 23 HK$820 20% HK$656 HK$15,088",
+            "Software subscription subtotal: HK$15,088",
+            "Others",
+            "Item Description Qty List Price Discount (%) Discounted Price Extended Price",
+            "Remote Professional Service for Installation & Deployment (One-time)",
+            "1 HK$30,000 0% HK$30,000 HK$30,000",
+            "Remote Product Service-Premium 7*24 (Yearly)",
+            "2 HK$14,000 100% HK$0 HK$0 (Waive for ASL first order)",
+            "Others Subtotal: HK$30,000",
+            "Total Amount: HK$45,088",
+        ]))
+
+        self.assertEqual(len(parsed.quotation.items), 3)
+        self.assertEqual(
+            parsed.quotation.items[0].description,
+            "HyperMotion License with a validity period of 3 months",
+        )
+        self.assertEqual(
+            parsed.quotation.items[2].description,
+            "Remote Product Service-Premium 7*24 (Yearly)\n"
+            "(Waive for ASL first order)",
+        )
+
+    def test_pdf_keeps_rows_after_early_subtotal_in_same_section(self):
+        from quotation.services.document_parsing.pdf_parser import (
+            parse_quotation_pdf_text,
+        )
+
+        parsed = parse_quotation_pdf_text("\n".join([
+            "Quotation",
+            "Software",
+            "Item Description Qty List Price Discount (%) Discounted Price Extended Price",
+            "1 HyperBDR Backup & DR License 400 $420 15% $357 $142,800",
+            "Software subscription subtotal: $142,800",
+            "2 [Optional] Product Service (24x7) - per annum",
+            "400 $108 0% $108 $43,200",
+            "Others",
+            "Item Description Qty List Price Discount (%) Discounted Price Extended Price",
+            "3 Installation service 1 $500 0% $500 $500",
+            "Others Subtotal: $500",
+            "Total Amount: $186,500",
+        ]))
+
+        self.assertEqual(len(parsed.quotation.items), 3)
+        self.assertEqual(
+            [item.type for item in parsed.quotation.items],
+            ["Software", "Software", "Other"],
+        )
+        self.assertEqual(
+            parsed.quotation.items[1].description,
+            "[Optional] Product Service (24x7) - per annum",
+        )
+
+    def test_pdf_merges_optional_service_when_source_has_one_table(self):
+        from quotation.services.document_parsing.pdf_parser import (
+            parse_quotation_pdf_text,
+        )
+
+        parsed = parse_quotation_pdf_text("\n".join([
+            "Quotation",
+            "Software",
+            "Item Description Qty List Price Discount (%) Discounted Price Extended Price",
+            "1 HyperBDR Backup & DR License 400 $420 15% $357 $142,800",
+            "Others",
+            "Item Description Qty List Price Discount (%) Discounted Price Extended Price",
+            "2 [Optional] Product Service (24x7) - per annum",
+            "400 $108 0% $108 $43,200",
+            "Subtotal before VAT: $186,000",
+            "Total Amount: $186,000",
+        ]))
+
+        self.assertEqual(
+            [item.type for item in parsed.quotation.items],
+            ["Software", "Software"],
+        )
+
+    def test_preserves_bullets_on_the_line_with_item_amounts(self):
+        from quotation.services.document_parsing.pdf_parser import (
+            parse_quotation_pdf_text,
+        )
+
+        parsed = parse_quotation_pdf_text(
+            "\n".join(
+                [
+                    "Quotation",
+                    "Others",
+                    "Item Description Qty List Price Discount (%) Discounted Price Extended Price",
+                    "Landing Zone Design Services",
+                    "• Environment assessment",
+                    "1 • Security auditing design 1 ¥ 75.00 0% ¥ 75.00 ¥ 75.00",
+                    "• Backup strategy design",
+                    "Others Subtotal: ¥ 75.00",
+                    "Total Amount: ¥ 75.00",
+                ]
+            )
+        )
+
+        self.assertEqual(len(parsed.quotation.items), 1)
+        description = parsed.quotation.items[0].description
+        self.assertEqual(
+            description,
+            "Landing Zone Design Services\n"
+            "• Environment assessment\n"
+            "• Security auditing design\n"
+            "• Backup strategy design",
+        )
+
     def test_flexible_pdf_parser_bounds_malformed_long_lines(self):
         from quotation.services.document_parsing.flexible_parser import (
             _pdf_items,
@@ -1106,6 +1506,29 @@ class StandardQuotationPdfParserTests(TestCase):
             "HyperBDR Backup & DR License 1 year subscription",
         )
         self.assertEqual(str(items[0].extended_price), "1785.0")
+
+    def test_flexible_pdf_parser_keeps_split_rows_separate(self):
+        from quotation.services.document_parsing.flexible_parser import (
+            _pdf_items,
+        )
+
+        items = _pdf_items("\n".join([
+            "Others",
+            "Item Description Qty List Price Discount (%) Discounted Price Extended Price",
+            "1 Remote Professional Service",
+            "1 HK$30,000 0% HK$30,000 HK$30,000",
+            "2 Remote Product Service-Premium 7*24",
+            "2 HK$14,000 100% HK$0 HK$0 (Waive for ASL first order)",
+            "Others Subtotal: HK$30,000",
+        ]))
+
+        self.assertEqual(len(items), 2)
+        self.assertEqual(items[0].description, "Remote Professional Service")
+        self.assertEqual(
+            items[1].description,
+            "Remote Product Service-Premium 7*24\n"
+            "(Waive for ASL first order)",
+        )
 
     def test_flexible_pdf_total_supports_business_currencies(self):
         from quotation.services.document_parsing.flexible_parser import (
@@ -1458,7 +1881,7 @@ class DocumentParseEndpointTests(TestCase):
 
         self.assertTrue(reused)
         self.assertNotEqual(new_result.id, old_result.id)
-        self.assertEqual(new_result.parser_version, "2.9.0")
+        self.assertEqual(new_result.parser_version, "2.14.0")
         self.assertEqual(new_result.status, "confirmed")
         self.assertEqual(new_result.quotation_id, quotation.id)
         self.assertEqual(Quotation.objects.count(), 1)

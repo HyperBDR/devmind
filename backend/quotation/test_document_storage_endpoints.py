@@ -491,6 +491,27 @@ class DocumentStorageEndpointTests(TestCase):
         self.assertEqual(len(temporary), 1)
         self.assertEqual(temporary[0]["feishu_folder_path"], path)
 
+    def test_feishu_document_list_returns_more_than_two_hundred_files(self):
+        assets = [
+            DocumentAsset(
+                doc_type=DocumentType.PDF,
+                file_name=f"Quotation {index}.pdf",
+                mime_type="application/pdf",
+                storage_key=f"documents/{index}/file",
+                size_bytes=10,
+                source="feishu",
+                feishu_file_token=f"remote_{index}",
+                created_by_email=self.user.email,
+            )
+            for index in range(205)
+        ]
+        DocumentAsset.objects.bulk_create(assets)
+
+        response = self.api.get("/api/v1/quotation/documents?source=feishu")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 205)
+
     def test_feishu_folder_sync_ignores_client_folder_and_uses_configured_root(
         self,
     ):

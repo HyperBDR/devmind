@@ -11,7 +11,9 @@ def guess_doc_type(file_name: str, mime_type: str | None) -> str:
     mime = (mime_type or "").lower()
     if lower.endswith(".pdf") or "pdf" in mime:
         return DocumentType.PDF
-    return DocumentType.EXCEL
+    if lower.endswith(".xlsx") or "spreadsheet" in mime:
+        return DocumentType.EXCEL
+    return DocumentType.ATTACHMENT
 
 
 def feishu_file_not_found(exc: FeishuAPIError) -> bool:

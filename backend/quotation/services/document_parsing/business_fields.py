@@ -113,6 +113,28 @@ def looks_like_person_name(value: str) -> bool:
     return bool(_PERSON_NAME_RE.fullmatch(text))
 
 
+def normalize_contact_name(value: str) -> str:
+    """Remove OCR punctuation from a contact without guessing a name."""
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    email_match = _FULL_EMAIL_RE.search(text)
+    if email_match:
+        text = text[: email_match.start()]
+    text = re.sub(
+        r"^(?:(?:name|contact\s+person|contact|经办人|联系人)"
+        r"\s*[:：#]?\s*)+",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return text.strip(" \t:：#;；,，|·•")
+
+
+def normalize_contact_email(value: str) -> str:
+    """Return only the email token present in an OCR value."""
+    match = _FULL_EMAIL_RE.search(str(value or ""))
+    return match.group(0).strip(" \t.,;；，") if match else ""
+
+
 def strip_repeated_field_label(value: str, *labels: str) -> str:
     """Remove duplicated leading labels such as ``Title : Title :``."""
     text = str(value or "").strip()
@@ -205,6 +227,12 @@ def parse_quote_date(value: Any) -> date | None:
         raw,
         flags=re.IGNORECASE,
     ).strip(" ,")
+    natural = re.sub(
+        r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.",
+        r"\1 ",
+        natural,
+        flags=re.IGNORECASE,
+    )
     try:
         return date.fromisoformat(natural)
     except ValueError:

@@ -23,8 +23,11 @@ from quotation.services.document_parsing.business_fields import (
     explicit_product_line,
     known_product_line,
     normalize_currency_code,
+    normalize_contact_email,
+    normalize_contact_name,
     parse_quote_date,
     repair_issuer_email,
+    strip_repeated_field_label,
 )
 from quotation.services.document_parsing.schemas import (
     ParsedDocumentData,
@@ -33,7 +36,7 @@ from quotation.services.document_parsing.schemas import (
 )
 
 PARSER_NAME = "devmind_standard_excel"
-PARSER_VERSION = "2.9.0"
+PARSER_VERSION = "2.14.0"
 MONEY_TOLERANCE = Decimal("0.02")
 
 
@@ -223,6 +226,46 @@ def _label_value_aliases(
         if value:
             return value
     return ""
+
+
+def _remarks_value(rows: list[list[Any]]) -> str:
+    """Keep multiline notes instead of dropping everything after row one."""
+    targets = {_compact(label) for label in REMARKS_LABELS}
+    for row_index, row in enumerate(rows):
+        for column, value in enumerate(row):
+            if _compact(value) not in targets:
+                continue
+            values = [
+                _text(item)
+                for item in row[column + 1 :]
+                if _text(item)
+            ]
+            started = bool(values)
+            for following in rows[row_index + 1 : row_index + 32]:
+                following_values = [
+                    _text(item) for item in following if _text(item)
+                ]
+                if not following_values:
+                    if started:
+                        break
+                    continue
+                following_text = " ".join(following_values).casefold()
+                if (
+                    following_text == "t"
+                    or following_text.startswith(
+                        (
+                            "to indicate customer acceptance",
+                            "onepro cloud confidential",
+                            "prepared by",
+                            "signature",
+                        )
+                    )
+                ):
+                    break
+                started = True
+                values.extend(following_values)
+            return "\n".join(values).strip()
+    return _label_value_aliases(rows, REMARKS_LABELS)
 
 
 def _product_line(
@@ -616,22 +659,50 @@ def _parse_excel_rows(rows: list[list[Any]]) -> ParsedDocumentData:
         expire_date=_date(_label_value_aliases(rows, EXPIRE_DATE_LABELS)),
         tax_label=tax_label,
         vat_rate=vat_rate,
-        remarks_disclaimer=_label_value_aliases(rows, REMARKS_LABELS),
+        remarks_disclaimer=_remarks_value(rows),
         issuer_company_name=issuer_company,
-        issuer_contact_name=project.get("issuer_contact_name", ""),
-        issuer_contact_email=project.get("issuer_contact_email", ""),
+        issuer_contact_name=normalize_contact_name(
+            project.get("issuer_contact_name", "")
+        ),
+        issuer_contact_email=normalize_contact_email(
+            project.get("issuer_contact_email", "")
+        ),
         issuer_contact_title=(
-            project.get("issuer_contact_title", "")
-            or _last_prefixed(rows, "Job Title")
-            or _last_prefixed(rows, "Position")
-            or _last_prefixed(rows, "Title")
+            strip_repeated_field_label(
+                project.get("issuer_contact_title", ""),
+                "Job Title",
+                "Position",
+                "Title",
+            )
+            or strip_repeated_field_label(
+                _last_prefixed(rows, "Job Title"),
+                "Job Title",
+                "Position",
+                "Title",
+            )
+            or strip_repeated_field_label(
+                _last_prefixed(rows, "Position"),
+                "Job Title",
+                "Position",
+                "Title",
+            )
+            or strip_repeated_field_label(
+                _last_prefixed(rows, "Title"),
+                "Job Title",
+                "Position",
+                "Title",
+            )
         ),
         client_company=ship_to.get("company", ""),
-        contact_person=ship_to.get("name", ""),
-        email=ship_to.get("email", ""),
+        contact_person=normalize_contact_name(ship_to.get("name", "")),
+        email=normalize_contact_email(ship_to.get("email", "")),
         billing_company=bill_to.get("company", ""),
-        billing_contact=bill_to.get("name", ""),
-        billing_email=bill_to.get("email", ""),
+        billing_contact=normalize_contact_name(
+            bill_to.get("name", "")
+        ),
+        billing_email=normalize_contact_email(
+            bill_to.get("email", "")
+        ),
         items=items,
     )
     errors, warnings = _validate(quotation, source_totals)

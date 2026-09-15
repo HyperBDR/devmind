@@ -530,6 +530,11 @@ class Quotation(TimeStampedModel):
     quote_date = models.DateField()
     expire_date = models.DateField()
     tax_label = models.CharField(max_length=40, default="VAT")
+    tax_calculation_mode = models.CharField(
+        max_length=10,
+        choices=(("add", "Add"), ("subtract", "Subtract")),
+        default="add",
+    )
     vat_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     vat_amount = models.DecimalField(
         max_digits=18, decimal_places=2, default=0
@@ -545,6 +550,20 @@ class Quotation(TimeStampedModel):
     )
     grand_total = models.DecimalField(
         max_digits=18, decimal_places=2, default=0
+    )
+    custom_total_label = models.CharField(
+        max_length=120,
+        blank=True,
+        default="",
+    )
+    custom_total_amount = models.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        default=0,
+    )
+    custom_total_currency = models.CharField(
+        max_length=10,
+        default="USD",
     )
     remarks_disclaimer = models.TextField(blank=True, default="")
 

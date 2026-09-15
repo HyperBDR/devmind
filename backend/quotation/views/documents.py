@@ -71,6 +71,11 @@ class DocumentListView(APIView):
             return queryset.filter(lifecycle_state=lifecycle)
 
         if source == "feishu":
+            raw_limit = request.query_params.get("limit", "5000")
+            try:
+                limit = max(1, min(int(raw_limit), 5000))
+            except (TypeError, ValueError):
+                return Response({"detail": "invalid limit"}, status=400)
             qs = filter_accessible_documents(
                 request.user,
                 apply_lifecycle(
@@ -80,7 +85,7 @@ class DocumentListView(APIView):
             qs = (
                 qs.select_related("quotation")
                 .prefetch_related("parse_results")
-                .order_by("-created_at")[:1000]
+                .order_by("-created_at")[:limit]
             )
             documents = []
             seen_tokens = set()
@@ -90,8 +95,6 @@ class DocumentListView(APIView):
                     continue
                 seen_tokens.add(token)
                 documents.append(document)
-                if len(documents) >= 200:
-                    break
             return Response(
                 DocumentAssetSerializer(
                     documents,

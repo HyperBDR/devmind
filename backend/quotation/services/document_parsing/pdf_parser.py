@@ -4,12 +4,7 @@ import re
 from decimal import Decimal
 from pathlib import Path
 
-from pypdf import PdfReader
-
-try:
-    import pymupdf
-except ImportError:
-    pymupdf = None
+from core.pdf_text import extract_pdf_text, pymupdf
 
 from quotation.services.document_parsing.business_fields import (
     EXPIRE_DATE_LABELS,
@@ -21,6 +16,8 @@ from quotation.services.document_parsing.business_fields import (
     find_issuer_email,
     known_product_line,
     normalize_currency_code,
+    normalize_contact_email,
+    normalize_contact_name,
     split_salesperson_after_email,
     strip_repeated_field_label,
 )
@@ -37,7 +34,8 @@ from quotation.services.document_parsing.schemas import (
 )
 
 PARSER_NAME = "devmind_standard_pdf"
-PARSER_VERSION = "2.10.0"
+PARSER_VERSION = "2.25.0"
+_CURRENCY_TOKEN = r"(?:MYR|HK\$|RM|USD|HKD|CNY|RMB|EUR|GBP|[$¥￥€£])"
 
 
 class QuotationPdfParseError(ValueError):
@@ -46,8 +44,7 @@ class QuotationPdfParseError(ValueError):
 
 def _extract_text_pypdf(path: Path) -> str:
     try:
-        reader = PdfReader(str(path))
-        return "\n".join(page.extract_text() or "" for page in reader.pages)
+        return extract_pdf_text(path, prefer_pymupdf=False)
     except TimeoutError:
         raise
     except Exception as exc:
@@ -60,10 +57,7 @@ def _extract_text_pymupdf(path: Path) -> str:
     if pymupdf is None:
         raise QuotationPdfParseError("PyMuPDF is not installed")
     try:
-        with pymupdf.open(path) as document:
-            return "\n".join(
-                page.get_text("text", sort=True) for page in document
-            )
+        return extract_pdf_text(path, prefer_pymupdf=True)
     except TimeoutError:
         raise
     except Exception as exc:
@@ -238,15 +232,31 @@ def _project_fields(lines: list[str]) -> dict[str, str]:
         if "currency" in lower_line:
             currency = trailing.pop()
         payment_terms = ""
-        if (
-            len(trailing) >= 2
-            and trailing[-2].upper() == "NET"
-            and trailing[-1].isdigit()
-        ):
-            payment_terms = " ".join(trailing[-2:])
-            trailing = trailing[:-2]
-        elif trailing and trailing[-1].upper() == "CIA":
-            payment_terms = trailing.pop()
+        if trailing:
+            payment_match = re.fullmatch(
+                r"(?:NET\s*\d+|CIA|MIXED)",
+                trailing[-1],
+                flags=re.IGNORECASE,
+            )
+            if payment_match:
+                raw_payment = trailing.pop()
+                net_match = re.fullmatch(
+                    r"NET\s*(\d+)",
+                    raw_payment,
+                    flags=re.IGNORECASE,
+                )
+                payment_terms = (
+                    f"NET {net_match.group(1)}"
+                    if net_match
+                    else raw_payment.upper()
+                )
+        if not payment_terms and len(trailing) >= 2:
+            if (
+                trailing[-2].upper() == "NET"
+                and trailing[-1].isdigit()
+            ):
+                payment_terms = " ".join(trailing[-2:])
+                trailing = trailing[:-2]
         if not trailing or not issuer_name:
             continue
         result.update(
@@ -461,35 +471,100 @@ def _parse_currency_item_line(
     line: str,
     pending_description: str,
 ) -> ParsedQuotationItem | None:
-    parts = re.split(r"\s*(?:HK\$|RM|[$¥￥€£])\s*", line)
-    if len(parts) != 4:
+    parts = re.split(rf"\s*{_CURRENCY_TOKEN}\s*", line)
+    if len(parts) not in {3, 4, 5}:
         return None
     prefix = parts[0].strip().split()
-    if not prefix or not prefix[0].isdigit():
+    if not prefix:
         return None
-    price_discount = parts[1].strip().split()
-    if len(price_discount) < 2:
+    price_fields = parts[1].strip().split()
+    if not price_fields:
         return None
-    extended_match = re.match(r"[\d,. ()-]+", parts[3].strip())
+    extended_part = parts[-1].strip()
+    extended_match = re.match(r"[\d,.\s-]+", extended_part)
     if extended_match is None:
         return None
-    prefix_tail = prefix[1:]
-    qty = Decimal("1")
-    if prefix_tail and re.fullmatch(r"[\d,.]+", prefix_tail[-1]):
-        qty = _decimal(prefix_tail.pop())
-    description = " ".join(prefix_tail).strip() or pending_description
+    numeric_indexes = [
+        index
+        for index, token in enumerate(prefix)
+        if re.fullmatch(r"[\d,.]+", token)
+    ]
+    if not numeric_indexes:
+        return None
+    if len(numeric_indexes) == 1 and numeric_indexes[0] == 0:
+        item_index = 0
+        qty_index = None
+        qty = Decimal("1")
+    else:
+        qty_index = numeric_indexes[-1]
+        qty = _decimal(prefix[qty_index])
+        item_index = (
+            numeric_indexes[0]
+            if numeric_indexes[0] < qty_index
+            else None
+        )
+    description_tokens = [
+        token
+        for index, token in enumerate(prefix)
+        if index not in {qty_index, item_index}
+    ]
+    raw_description = _clean_item_description(
+        " ".join(description_tokens).strip()
+    )
+    is_bullet = raw_description.lstrip().startswith(("•", "·", "-", "*"))
+    description = raw_description.lstrip("•·-* ").strip()
+    if is_bullet and description:
+        description = f"• {description}"
+    if pending_description:
+        description = "\n".join(
+            value
+            for value in (
+                _clean_item_description(pending_description.strip()),
+                description,
+            )
+            if value
+        )
+    trailing_text = extended_part[extended_match.end() :].strip()
+    if trailing_text:
+        description = f"{description}\n{trailing_text}"
     if not description:
         return None
+    if len(parts) == 3:
+        if len(price_fields) < 2:
+            return None
+        list_price = _decimal(price_fields[0])
+        discount_percent = Decimal("0")
+        net_unit_price = list_price
+    else:
+        list_price = _decimal(price_fields[0])
+        if len(price_fields) == 1 and len(parts) == 4:
+            discount_percent = Decimal("0")
+        elif len(price_fields) >= 2:
+            discount_percent = _decimal(price_fields[-1])
+        else:
+            return None
+        net_unit_price = _decimal(parts[2])
     return ParsedQuotationItem(
-        line_no=int(prefix[0]),
+        line_no=int(prefix[item_index]) if item_index is not None else 0,
         type="",
         description=description,
         qty=qty,
-        list_price=_decimal(price_discount[0]),
-        discount_percent=_decimal(price_discount[-1]),
-        net_unit_price=_decimal(parts[2]),
+        list_price=list_price,
+        discount_percent=discount_percent,
+        net_unit_price=net_unit_price,
         extended_price=_decimal(extended_match.group(0)),
     )
+
+
+def _clean_item_description(value: str) -> str:
+    """Remove table-unit fragments accidentally emitted by PDF extraction."""
+    value = re.sub(
+        r"\((?:ea|qty|myr|hk\$?|hkd|rm|usd|cny|rmb|eur|gbp|[$¥￥€£])\)",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    )
+    return re.sub(r"\s{2,}", " ", value).strip()
 
 
 def _parse_item_line(line: str) -> ParsedQuotationItem | None:
@@ -498,7 +573,7 @@ def _parse_item_line(line: str) -> ParsedQuotationItem | None:
         return ParsedQuotationItem(
             line_no=int(cells[0]),
             type="",
-            description=cells[1],
+            description=_clean_item_description(cells[1]),
             qty=_decimal(cells[2]),
             list_price=_decimal(cells[3]),
             discount_percent=_decimal(cells[4]),
@@ -507,10 +582,10 @@ def _parse_item_line(line: str) -> ParsedQuotationItem | None:
         )
     match = re.match(
         r"^(\d+)\s+(.+?)\s+([0-9.,]+)\s+"
-        r"((?:HK\$|RM|[$¥￥€£])?[0-9.,]+)\s+"
+        rf"({_CURRENCY_TOKEN}?[0-9.,]+)\s+"
         r"([0-9.]+%?)\s+"
-        r"((?:HK\$|RM|[$¥￥€£])?[0-9.,]+)\s+"
-        r"((?:HK\$|RM|[$¥￥€£])?[0-9.,]+)$",
+        rf"({_CURRENCY_TOKEN}?[0-9.,]+)\s+"
+        rf"({_CURRENCY_TOKEN}?[0-9.,]+)$",
         line,
     )
     if not match:
@@ -518,7 +593,7 @@ def _parse_item_line(line: str) -> ParsedQuotationItem | None:
     return ParsedQuotationItem(
         line_no=int(match.group(1)),
         type="",
-        description=match.group(2).strip(),
+        description=_clean_item_description(match.group(2).strip()),
         qty=_decimal(match.group(3)),
         list_price=_decimal(match.group(4)),
         discount_percent=_decimal(match.group(5)),
@@ -538,15 +613,51 @@ def _line_items(
     if section_index is None:
         return []
     items: list[ParsedQuotationItem] = []
-    pending_description = ""
-    for line in lines[section_index + 1 :]:
+    pending_description: list[str] = []
+    current_item: ParsedQuotationItem | None = None
+    after_item = False
+    section_markers = {"software", "others"}
+    section_lines = lines[section_index + 1 :]
+    for index, line in enumerate(section_lines):
         lower = line.lower()
-        if "subtotal" in lower:
+        if lower in section_markers and lower != section.lower():
             break
+        if "total amount" in lower or "grand total" in lower:
+            break
+        if "subtotal" in lower:
+            continue
+        if (
+            current_item is not None
+            and after_item
+            and not re.search(_CURRENCY_TOKEN, line, flags=re.IGNORECASE)
+            and (
+                re.match(r"^\d+\s+", line)
+                or (
+                    index + 1 < len(section_lines)
+                    and re.match(r"^\d+\s+", section_lines[index + 1])
+                    and re.search(
+                        _CURRENCY_TOKEN,
+                        section_lines[index + 1],
+                        flags=re.IGNORECASE,
+                    )
+                )
+            )
+        ):
+            pending_description = [re.sub(r"^\d+\s+", "", line)]
+            after_item = False
+            continue
         item = _parse_item_line(line)
         if item is None:
-            item = _parse_currency_item_line(line, pending_description)
+            item = _parse_currency_item_line(
+                line,
+                "\n".join(pending_description),
+            )
         if item is None:
+            header_fragment = re.fullmatch(
+                r"[a-z]\s*\(%\)",
+                line.strip(),
+                flags=re.IGNORECASE,
+            )
             if not any(
                 label in lower
                 for label in (
@@ -555,14 +666,35 @@ def _line_items(
                     "qty",
                     "list price",
                     "discount",
+                    "discoun",
                     "extended price",
                 )
-            ) and not re.fullmatch(r"[()A-Z ]+", line):
-                pending_description = line
+            ) and not header_fragment and not re.fullmatch(
+                r"[()A-Z ]+", line
+            ):
+                if (
+                    current_item is not None
+                    and after_item
+                    and not re.fullmatch(r"[\d.,\s]+", line.strip())
+                ):
+                    separator = "\n\n" if line.lstrip().startswith(
+                        ("*", "~")
+                    ) else "\n"
+                    current_item.description = (
+                        f"{current_item.description}"
+                        f"{separator}{line.strip()}"
+                    )
+                else:
+                    pending_description.append(
+                        re.sub(r"^\d+\s+", "", line)
+                    )
+                    after_item = False
             continue
         item.type = item_type
         items.append(item)
-        pending_description = ""
+        current_item = item
+        pending_description = []
+        after_item = True
     return items
 
 
@@ -579,6 +711,40 @@ def _amount_by_label(lines: list[str], label: str) -> Decimal:
             if matches:
                 return _decimal(matches[-1])
     return Decimal("0")
+
+
+def _merge_optional_service_rows(
+    items: list[ParsedQuotationItem], lines: list[str]
+) -> None:
+    """Keep optional service rows with the license table when one table is used.
+
+    The source PDF can expose a visual table break as an ``Others`` marker
+    even when the original document has one continuous item table.
+    """
+    software_subtotal = _amount_by_label(
+        lines,
+        "software subscription subtotal",
+    )
+    others_subtotal = _amount_by_label(lines, "others subtotal")
+    if software_subtotal or others_subtotal:
+        return
+    software_items = [item for item in items if item.type == "Software"]
+    other_items = [item for item in items if item.type == "Other"]
+    if not software_items or not other_items:
+        return
+    if not any(
+        token in software_items[0].description.casefold()
+        for token in ("hyperbdr", "hypermotion")
+    ):
+        return
+    if not all(
+        "product service" in item.description.casefold()
+        and "optional" in item.description.casefold()
+        for item in other_items
+    ):
+        return
+    for item in other_items:
+        item.type = "Software"
 
 
 def _tax_details(lines: list[str]) -> tuple[str, Decimal]:
@@ -612,9 +778,35 @@ def _issuer_company(lines: list[str]) -> str:
 
 def _remarks(lines: list[str]) -> str:
     targets = {label.lower().rstrip(":") for label in REMARKS_LABELS}
-    for index, line in enumerate(lines[:-1]):
-        if line.lower().rstrip(":") in targets:
-            return lines[index + 1]
+    marker_indexes = [
+        index
+        for index, line in enumerate(lines)
+        if line.lower().rstrip(":") in targets
+    ]
+    if marker_indexes:
+        start = marker_indexes[0] + 1
+        values = []
+        stop_markers = (
+            "to indicate customer acceptance",
+            "onepro cloud confidential",
+            "prepared by",
+            "signature",
+        )
+        for value in lines[start:]:
+            normalized = value.casefold().strip()
+            repeated_signature_field = re.match(
+                r"^(?:name|title|position|email|e-mail)\s*:\s*"
+                r"(?:name|title|position|email|e-mail)\s*:",
+                normalized,
+            )
+            if (
+                normalized == "t"
+                or repeated_signature_field
+                or any(normalized.startswith(marker) for marker in stop_markers)
+            ):
+                break
+            values.append(value)
+        return "\n".join(values).strip()
     return _line_value_aliases(lines, REMARKS_LABELS)
 
 
@@ -649,6 +841,7 @@ def parse_quotation_pdf_text(text: str) -> ParsedDocumentData:
     )
     items = _line_items(lines, "Software", "Software")
     items.extend(_line_items(lines, "Others", "Other"))
+    _merge_optional_service_rows(items, lines)
     for line_no, item in enumerate(items, start=1):
         item.line_no = line_no
     product_line_name, product_line = _product_line(lines, items)
@@ -693,15 +886,24 @@ def parse_quotation_pdf_text(text: str) -> ParsedDocumentData:
         vat_rate=vat_rate,
         remarks_disclaimer=_remarks(lines),
         issuer_company_name=_issuer_company(lines),
-        issuer_contact_name=issuer.get("issuer_contact_name", ""),
-        issuer_contact_email=issuer.get("issuer_contact_email", ""),
-        issuer_contact_title=issuer.get("issuer_contact_title", ""),
+        issuer_contact_name=normalize_contact_name(
+            issuer.get("issuer_contact_name", "")
+        ),
+        issuer_contact_email=normalize_contact_email(
+            issuer.get("issuer_contact_email", "")
+        ),
+        issuer_contact_title=strip_repeated_field_label(
+            issuer.get("issuer_contact_title", ""),
+            "Job Title",
+            "Position",
+            "Title",
+        ),
         client_company=ship_to.get("company", ""),
-        contact_person=ship_to.get("name", ""),
-        email=ship_to.get("email", ""),
+        contact_person=normalize_contact_name(ship_to.get("name", "")),
+        email=normalize_contact_email(ship_to.get("email", "")),
         billing_company=bill_to.get("company", ""),
-        billing_contact=bill_to.get("name", ""),
-        billing_email=bill_to.get("email", ""),
+        billing_contact=normalize_contact_name(bill_to.get("name", "")),
+        billing_email=normalize_contact_email(bill_to.get("email", "")),
         items=items,
     )
     errors, warnings = _validate(quotation, source_totals)

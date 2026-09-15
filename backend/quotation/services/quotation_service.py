@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import re
 from datetime import timedelta
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 from typing import Any, Iterable
 
 from django.db import transaction
 from django.utils import timezone
 
+from quotation.services.financials import (
+    calculate_document_totals,
+    round_money,
+)
 from quotation.models import (
     ItemType,
     Quotation,
@@ -28,7 +32,11 @@ QUOTATION_BUSINESS_FIELDS = (
     "quote_date",
     "expire_date",
     "tax_label",
+    "tax_calculation_mode",
     "vat_rate",
+    "custom_total_label",
+    "custom_total_amount",
+    "custom_total_currency",
     "remarks_disclaimer",
     "issuer_company_name",
     "issuer_contact_name",
@@ -73,16 +81,6 @@ class QuotationNotFoundError(ValueError):
     """Raised when a locked quotation disappears during an operation."""
 
 
-def round_money(value: Decimal) -> Decimal:
-    return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-
-def _item_type_value(raw: Any) -> str:
-    if hasattr(raw, "value"):
-        return str(raw.value)
-    return str(raw or "")
-
-
 def _decimal_str(value: Any) -> str:
     return str(Decimal(str(value or 0)))
 
@@ -96,42 +94,16 @@ def _date_iso(value: Any) -> str | None:
 
 
 def calculate_totals(
-    items: Iterable[Any], vat_rate: Decimal
+    items: Iterable[Any],
+    vat_rate: Decimal,
+    tax_mode: str = "add",
 ) -> dict[str, Decimal]:
-    software_subtotal = round_money(
-        sum(
-            (
-                Decimal(str(getattr(item, "extended_price", 0)))
-                for item in items
-                if _item_type_value(getattr(item, "type", ""))
-                == ItemType.SOFTWARE
-            ),
-            Decimal("0"),
-        )
+    return calculate_document_totals(
+        items,
+        vat_rate,
+        software_type=ItemType.SOFTWARE,
+        tax_mode=tax_mode,
     )
-    others_subtotal = round_money(
-        sum(
-            (
-                Decimal(str(getattr(item, "extended_price", 0)))
-                for item in items
-                if _item_type_value(getattr(item, "type", ""))
-                != ItemType.SOFTWARE
-            ),
-            Decimal("0"),
-        )
-    )
-    subtotal_before_vat = round_money(software_subtotal + others_subtotal)
-    vat_amount = round_money(
-        subtotal_before_vat * (Decimal(str(vat_rate)) / Decimal("100"))
-    )
-    grand_total = round_money(subtotal_before_vat + vat_amount)
-    return {
-        "software_subtotal": software_subtotal,
-        "others_subtotal": others_subtotal,
-        "subtotal_before_vat": subtotal_before_vat,
-        "vat_amount": vat_amount,
-        "grand_total": grand_total,
-    }
 
 
 def coerce_item_type(raw_type: str) -> str:
@@ -272,7 +244,11 @@ def build_quotation_snapshot(
         "quote_date": _date_iso(quotation.quote_date),
         "expire_date": _date_iso(quotation.expire_date),
         "tax_label": quotation.tax_label,
+        "tax_calculation_mode": quotation.tax_calculation_mode,
         "vat_rate": _decimal_str(quotation.vat_rate),
+        "custom_total_label": quotation.custom_total_label,
+        "custom_total_amount": _decimal_str(quotation.custom_total_amount),
+        "custom_total_currency": quotation.custom_total_currency,
         "vat_amount": _decimal_str(quotation.vat_amount),
         "software_subtotal": _decimal_str(quotation.software_subtotal),
         "others_subtotal": _decimal_str(quotation.others_subtotal),
@@ -320,6 +296,7 @@ def build_quotation(
     totals = calculate_totals(
         [type("I", (), item)() for item in items_data],
         Decimal(str(data.get("vat_rate", 0))),
+        tax_mode=data.get("tax_calculation_mode") or "add",
     )
     source_totals = data.get("_source_totals") or {}
     for field in ("subtotal_before_vat", "vat_amount", "grand_total"):
@@ -347,7 +324,11 @@ def build_quotation(
         quote_date=data["quote_date"],
         expire_date=data["expire_date"],
         tax_label=data.get("tax_label") or "VAT",
+        tax_calculation_mode=data.get("tax_calculation_mode") or "add",
         vat_rate=data.get("vat_rate") or 0,
+        custom_total_label=data.get("custom_total_label") or "",
+        custom_total_amount=data.get("custom_total_amount") or 0,
+        custom_total_currency=data.get("custom_total_currency") or "USD",
         remarks_disclaimer=data.get("remarks_disclaimer") or "",
         issuer_company_name=data.get("issuer_company_name")
         or "OnePro Cloud Limited",
@@ -550,12 +531,16 @@ def copy_quotation(
         quote_date=copy_date,
         expire_date=copy_date + timedelta(days=30),
         tax_label=quotation.tax_label,
+        tax_calculation_mode=quotation.tax_calculation_mode,
         vat_rate=quotation.vat_rate,
         vat_amount=quotation.vat_amount,
         software_subtotal=quotation.software_subtotal,
         others_subtotal=quotation.others_subtotal,
         subtotal_before_vat=quotation.subtotal_before_vat,
         grand_total=quotation.grand_total,
+        custom_total_label=quotation.custom_total_label,
+        custom_total_amount=quotation.custom_total_amount,
+        custom_total_currency=quotation.custom_total_currency,
         remarks_disclaimer=quotation.remarks_disclaimer,
         issuer_company_name=quotation.issuer_company_name,
         issuer_contact_name=quotation.issuer_contact_name,
@@ -711,7 +696,11 @@ def update_quotation(
         else:
             current_items = list(locked.items.order_by("line_no", "id"))
 
-        if "items" in data or "vat_rate" in data:
+        if (
+            "items" in data
+            or "vat_rate" in data
+            or "tax_calculation_mode" in data
+        ):
             total_items = [
                 item
                 if not isinstance(item, dict)
@@ -721,6 +710,7 @@ def update_quotation(
             totals = calculate_totals(
                 total_items,
                 Decimal(str(locked.vat_rate)),
+                tax_mode=locked.tax_calculation_mode,
             )
             for field, value in totals.items():
                 setattr(locked, field, value)
@@ -802,7 +792,9 @@ def create_version_snapshot(
         locked = Quotation.objects.select_for_update().get(pk=quotation.pk)
         line_items = list(locked.items.all())
         totals = calculate_totals(
-            line_items, Decimal(str(locked.vat_rate or 0))
+            line_items,
+            Decimal(str(locked.vat_rate or 0)),
+            tax_mode=locked.tax_calculation_mode,
         )
         for field in ("subtotal_before_vat", "vat_amount", "grand_total"):
             if source_totals and source_totals.get(field) not in (None, ""):
