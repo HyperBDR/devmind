@@ -86,11 +86,17 @@ def _decimal(value: Any) -> Decimal:
     if isinstance(value, (int, float)):
         return Decimal(str(value))
     raw = _text(value).strip()
+    if not raw:
+        return Decimal("0")
+    if raw == "-":
+        return Decimal("0")
     negative = raw.startswith("(") and raw.endswith(")")
     raw = raw.strip("()").replace(",", "").replace("%", "")
     raw = re.sub(r"[^0-9.\-]", "", raw)
     if not raw:
-        return Decimal("0")
+        raise QuotationExcelParseError(
+            f"Invalid numeric value: {_text(value)}"
+        )
     try:
         parsed = Decimal(raw)
     except InvalidOperation as exc:
