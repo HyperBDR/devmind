@@ -64,7 +64,8 @@ const FEATURE_ALIASES = {
   llm_ops_management: 'llm_ops',
   llm_console: 'admin_console',
   task_management_console: 'admin_console',
-  notification_console: 'admin_console'
+  notification_console: 'admin_console',
+  sales_management: 'quotation_management'
 }
 
 export function normalizeFeatureKeys(values) {
@@ -91,7 +92,12 @@ export function getAccessProfile(user) {
       visible_features: [],
       available_platforms: [],
       preferred_platform: '',
-      landing_path: '/dashboard'
+      landing_path: '/dashboard',
+      invoice_access: {
+        enabled: false,
+        role: null,
+        capabilities: []
+      }
     }
   )
 }
@@ -114,9 +120,31 @@ export function hasFeature(user, featureKey) {
   return visibleFeatures.includes(normalizedFeatureKey)
 }
 
+export function hasQuotationAdminAccess(user) {
+  return Boolean(
+    user?.is_staff === true
+    || user?.is_superuser === true
+    || user?.access_profile?.quotation_role === 'quotation_admin'
+  )
+}
+
+const INVOICE_CAPABILITIES = new Set(['view', 'edit', 'import', 'issue'])
+
+export function hasInvoiceCapability(user, capability) {
+  if (!INVOICE_CAPABILITIES.has(capability)) return false
+  if (hasAdminAccess(user)) return true
+  const invoiceAccess = getAccessProfile(user).invoice_access
+  return Boolean(
+    invoiceAccess?.enabled &&
+    invoiceAccess.capabilities?.includes(capability)
+  )
+}
+
 export function getAvailablePlatforms(user, t) {
   if (hasAdminAccess(user)) {
-    return FEATURE_DEFINITIONS.map((item) => ({
+    return FEATURE_DEFINITIONS.filter(
+      (item) => item.platformVisible !== false
+    ).map((item) => ({
       key: item.key,
       label: t ? t(item.labelKey) : item.key,
       defaultPath: item.defaultPath
@@ -135,9 +163,11 @@ export function getAvailablePlatforms(user, t) {
       platformMap.set(key, { key })
     }
   })
-
+  if (!platformMap.has('workspace')) {
+    platformMap.set('workspace', { key: 'workspace' })
+  }
   return FEATURE_DEFINITIONS.filter(
-    (item) => platformMap.has(item.key) && item.platformVisible !== false
+    (item) => platformMap.has(item.key)
   ).map((item) => {
     const resolved = platformMap.get(item.key)
     return {
@@ -149,14 +179,29 @@ export function getAvailablePlatforms(user, t) {
 }
 
 export function getLandingPath(user) {
-  return getAccessProfile(user).landing_path || '/dashboard'
+  const platforms = getAvailablePlatforms(user)
+  const hasQuotation = platforms.some(
+    (platform) => platform.key === 'quotation_management'
+  )
+  if (!hasQuotation && hasInvoiceCapability(user, 'view')) {
+    return '/quotation/sales/dashboard'
+  }
+
+  const preferredPlatform = getAccessProfile(user).preferred_platform
+  const preferred = platforms.find(
+    (platform) => platform.key === preferredPlatform
+  )
+  if (preferred) return preferred.defaultPath
+
+  return platforms[0]?.defaultPath || '/dashboard'
 }
 
 export function getCurrentPlatformKey(path) {
-  const matched = FEATURE_DEFINITIONS.find((item) =>
-    item.matchers.some((matcher) => path.startsWith(matcher))
-  )
-  return matched?.key || 'workspace'
+  const matched = FEATURE_DEFINITIONS
+    .flatMap((item) => item.matchers.map((matcher) => ({ item, matcher })))
+    .filter(({ matcher }) => path.startsWith(matcher))
+    .sort((left, right) => right.matcher.length - left.matcher.length)[0]
+  return matched?.item.key || 'workspace'
 }
 
 export function getPlatformByKey(platformKey, t) {

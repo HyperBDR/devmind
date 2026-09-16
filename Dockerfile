@@ -190,8 +190,12 @@ RUN apt-get update \
 # The API image intentionally does not contain LibreOffice.
 FROM backend-runtime AS backend
 
-# OCR is intentionally isolated so Tesseract does not increase API and
-# standard parser image sizes.
+# Invoice uploads run the bounded OCR fallback in the API process.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tesseract-ocr \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /root/.cache
+
+# Quotation OCR remains isolated in its dedicated worker image.
 FROM backend-parser AS backend-ocr
 
 RUN apt-get update \

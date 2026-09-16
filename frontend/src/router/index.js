@@ -1,7 +1,11 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useUserStore } from '@/store/user'
 import { adminRoutes } from '@/admin/routes'
-import { getLandingPath, hasFeature } from '@/utils/platformAccess'
+import {
+  getLandingPath,
+  hasFeature,
+  hasInvoiceCapability
+} from '@/utils/platformAccess'
 
 const routes = [
   {
@@ -23,7 +27,7 @@ const routes = [
     path: '/dashboard',
     name: 'Dashboard',
     component: () => import('@/pages/Dashboard.vue'),
-    meta: { requiresAuth: true, requiredFeature: 'workspace' }
+    meta: { requiresAuth: true }
   },
   {
     path: '/settings',
@@ -124,31 +128,86 @@ const routes = [
     path: '/quotation/catalog',
     name: 'QuotationCatalog',
     component: () => import('@/pages/Quotation.vue'),
-    meta: { requiresAuth: true, requiredFeature: 'quotation_management' }
+    meta: {
+      requiresAuth: true,
+      requiredAnyFeatures: ['quotation_management', 'sales_management']
+    }
   },
   {
     path: '/quotation/customers',
     name: 'QuotationCustomers',
     component: () => import('@/pages/Quotation.vue'),
-    meta: { requiresAuth: true, requiredFeature: 'quotation_management' }
+    meta: {
+      requiresAuth: true,
+      requiredAnyFeatures: ['quotation_management', 'sales_management']
+    }
   },
   {
     path: '/quotation/audit',
     name: 'QuotationAudit',
     component: () => import('@/pages/Quotation.vue'),
-    meta: { requiresAuth: true, requiredFeature: 'quotation_management' }
+    meta: {
+      requiresAuth: true,
+      requiredAnyFeatures: ['quotation_management', 'sales_management']
+    }
   },
   {
     path: '/quotation/permissions',
     name: 'QuotationPermissions',
     component: () => import('@/pages/Quotation.vue'),
-    meta: { requiresAuth: true, requiredFeature: 'quotation_management' }
+    meta: {
+      requiresAuth: true,
+      requiredFeature: 'quotation_management',
+      requiredQuotationAdmin: true
+    }
   },
   {
     path: '/quotation/details/:id',
     name: 'QuotationDetails',
     component: () => import('@/pages/Quotation.vue'),
     meta: { requiresAuth: true, requiredFeature: 'quotation_management' }
+  },
+  {
+    path: '/quotation/sales',
+    redirect: '/quotation/sales/dashboard'
+  },
+  {
+    path: '/quotation/sales/dashboard',
+    name: 'QuoteDeskSalesDashboard',
+    component: () => import('@/pages/QuotationSales.vue'),
+    meta: { requiresAuth: true, requiredFeature: 'sales_management' }
+  },
+  {
+    path: '/quotation/sales/invoices',
+    name: 'QuoteDeskInvoiceList',
+    component: () => import('@/pages/QuotationSales.vue'),
+    meta: { requiresAuth: true, requiredFeature: 'sales_management' }
+  },
+  {
+    path: '/quotation/sales/invoices/:invoiceId/edit',
+    name: 'QuoteDeskInvoiceEdit',
+    component: () => import('@/pages/QuotationSales.vue'),
+    meta: {
+      requiresAuth: true,
+      requiredFeature: 'sales_management',
+      requiredInvoiceCapability: 'edit'
+    }
+  },
+  {
+    path: '/quotation/sales/invoices/:invoiceId',
+    name: 'QuoteDeskInvoiceDetail',
+    component: () => import('@/pages/QuotationSales.vue'),
+    meta: { requiresAuth: true, requiredFeature: 'sales_management' }
+  },
+  {
+    path: '/quotation/sales/create',
+    name: 'QuoteDeskInvoiceCreate',
+    component: () => import('@/pages/QuotationSales.vue'),
+    meta: {
+      requiresAuth: true,
+      requiredFeature: 'sales_management',
+      requiredInvoiceCapability: 'edit'
+    }
   },
   {
     path: '/hyperbdr-dashboard',
@@ -423,6 +482,38 @@ router.beforeEach(async (to, from, next) => {
       !hasFeature(userStore.userInfo, to.meta.requiredFeature)
     ) {
       next(getLandingPath(userStore.userInfo))
+      return
+    }
+
+    if (
+      Array.isArray(to.meta.requiredAnyFeatures) &&
+      userStore.userInfo &&
+      !to.meta.requiredAnyFeatures.some((feature) =>
+        hasFeature(userStore.userInfo, feature)
+      )
+    ) {
+      next(getLandingPath(userStore.userInfo))
+      return
+    }
+
+    if (
+      to.meta.requiredQuotationAdmin &&
+      userStore.userInfo &&
+      !userStore.userHasQuotationAdminAccess()
+    ) {
+      next('/quotation/dashboard')
+      return
+    }
+
+    if (
+      to.meta.requiredInvoiceCapability &&
+      userStore.userInfo &&
+      !hasInvoiceCapability(
+        userStore.userInfo,
+        to.meta.requiredInvoiceCapability
+      )
+    ) {
+      next('/quotation/sales/invoices')
       return
     }
 

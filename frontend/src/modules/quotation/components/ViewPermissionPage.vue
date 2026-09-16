@@ -26,11 +26,20 @@ import {
   type UploadPermissionContext,
 } from '../api/uploadPermissions'
 import {
+  getInvoiceAccessContext,
+  grantInvoiceAccess,
+  revokeInvoiceAccess,
+  updateInvoiceAccess,
+  type InvoiceAccessContext,
+  type InvoiceAccessRole,
+} from '../api/invoicePermissions'
+import {
   assignMembership,
   getMembershipContext,
   getViewPermissionContext,
   grantViewPermission,
   revokeViewPermission,
+  revokeMembership,
   updateMembershipRole,
   updateViewPermissionExpiry,
   type QuotationMembershipContext,
@@ -43,6 +52,19 @@ import UserPermissionSection from './UserPermissionSection.vue'
 import ViewGrantSection from './ViewGrantSection.vue'
 
 type GrantPayload = Parameters<typeof grantViewPermission>[0]
+type WorkspaceAccessPayload = {
+  userId: number
+  membershipId: number | null
+  currentRole: QuotationMembershipRole | null
+  role: QuotationMembershipRole | null
+  invoiceEnabled: boolean
+  invoicePermissionId: number | null
+  invoicePermissionStatus: 'active' | 'expired' | null
+  invoiceRole: InvoiceAccessRole
+  currentInvoiceRole: InvoiceAccessRole | null
+  invoiceExpiresAt: string
+  currentInvoiceExpiresAt: string | null
+}
 
 const { t } = useQuotationI18n()
 
@@ -63,10 +85,15 @@ const emptyUploadContext = (): UploadPermissionContext => ({
   folders: [],
   permissions: [],
 })
+const emptyInvoiceAccessContext = (): InvoiceAccessContext => ({
+  users: [],
+  permissions: [],
+})
 
 const accessContext = ref(emptyAccessContext())
 const viewContext = ref(emptyViewContext())
 const uploadContext = ref(emptyUploadContext())
+const invoiceAccessContext = ref(emptyInvoiceAccessContext())
 const membershipContext = ref<QuotationMembershipContext>({
   members: [],
   role_options: [],
@@ -148,19 +175,27 @@ async function load() {
   try {
     accessContext.value = await getAccessRequestContext()
     if (accessContext.value.is_admin) {
-      const [viewPermissions, uploadPermissions, memberships] =
+      const [
+        viewPermissions,
+        uploadPermissions,
+        memberships,
+        invoiceAccess,
+      ] =
         await Promise.all([
           getViewPermissionContext(),
           getUploadPermissionContext(),
           getMembershipContext(),
+          getInvoiceAccessContext(),
         ])
       viewContext.value = viewPermissions
       uploadContext.value = uploadPermissions
       membershipContext.value = memberships
+      invoiceAccessContext.value = invoiceAccess
     } else {
       viewContext.value = emptyViewContext()
       uploadContext.value = emptyUploadContext()
       membershipContext.value = { members: [], role_options: [] }
+      invoiceAccessContext.value = emptyInvoiceAccessContext()
     }
     populateDrafts()
   } catch (err: unknown) {
@@ -192,20 +227,68 @@ async function mutate(
   }
 }
 
-function assignRole(userId: number, role: QuotationMembershipRole) {
-  void mutate(
-    () => assignMembership({ user_id: userId, role }),
-    'quotation.pages.permissions.roleSuccess',
-    'quotation.pages.permissions.roleFailed',
-  )
-}
+async function saveWorkspaceAccess(payload: WorkspaceAccessPayload) {
+  saving.value = true
+  resetFeedback()
+  try {
+    if (payload.currentRole !== payload.role) {
+      if (payload.role === null && payload.membershipId !== null) {
+        await revokeMembership(payload.membershipId)
+      } else if (payload.role !== null && payload.membershipId === null) {
+        await assignMembership({
+          user_id: payload.userId,
+          role: payload.role,
+        })
+      } else if (payload.role !== null && payload.membershipId !== null) {
+        await updateMembershipRole(payload.membershipId, payload.role)
+      }
+    }
 
-function changeRole(id: number, role: QuotationMembershipRole) {
-  void mutate(
-    () => updateMembershipRole(id, role),
-    'quotation.pages.permissions.roleSuccess',
-    'quotation.pages.permissions.roleFailed',
-  )
+    const invoiceWasEnabled = payload.invoicePermissionStatus === 'active'
+    if (payload.invoiceEnabled && !invoiceWasEnabled) {
+      await grantInvoiceAccess({
+        user_id: payload.userId,
+        expires_at: toApiDateTime(payload.invoiceExpiresAt),
+        role: payload.invoiceRole,
+      })
+    } else if (
+        !payload.invoiceEnabled
+        && invoiceWasEnabled
+        && payload.invoicePermissionId !== null
+      ) {
+        await revokeInvoiceAccess(payload.invoicePermissionId)
+    } else if (
+        payload.invoiceEnabled
+        && payload.invoicePermissionId !== null
+      ) {
+        const update: {
+          expires_at?: string | null
+          role?: InvoiceAccessRole
+        } = {}
+        if (
+          toLocalDateTime(payload.currentInvoiceExpiresAt)
+            !== payload.invoiceExpiresAt
+        ) {
+          update.expires_at = toApiDateTime(payload.invoiceExpiresAt)
+      }
+        if (payload.currentInvoiceRole !== payload.invoiceRole) {
+          update.role = payload.invoiceRole
+        }
+        if (Object.keys(update).length > 0) {
+          await updateInvoiceAccess(payload.invoicePermissionId, update)
+        }
+    }
+    message.value = t(
+      'quotation.pages.permissions.workspaceAccessSuccess',
+    )
+    await load()
+  } catch (err: unknown) {
+    error.value = err instanceof Error
+      ? err.message
+      : t('quotation.pages.permissions.workspaceAccessFailed')
+  } finally {
+    saving.value = false
+  }
 }
 
 function grantView(payload: GrantPayload) {
@@ -511,10 +594,10 @@ watch([uploadUserId, uploadFolderToken], () => {
     <template v-if="isAdmin">
       <UserPermissionSection
         :context="membershipContext"
+        :invoice-context="invoiceAccessContext"
         :loading="loading"
         :saving="saving"
-        @assign="assignRole"
-        @change="changeRole"
+        @save="saveWorkspaceAccess"
       />
       <ViewGrantSection
         :context="viewContext"
