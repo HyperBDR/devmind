@@ -530,16 +530,26 @@
 
         <!-- Quote Desk platform navigation -->
         <div
-          v-if="isQuotationPlatform"
+          v-if="
+            isQuotationPlatform &&
+            userStore.userHasFeature('quotation_management')
+          "
           class="menu-group"
           :class="collapsed && !isMobile ? 'menu-group-collapsed' : ''"
         >
           <button
             @click="toggleQuotationMenu"
             class="nav-item nav-item-parent w-full"
-            :class="collapsed && !isMobile ? 'nav-item-collapsed' : ''"
+            :class="[
+              collapsed && !isMobile ? 'nav-item-collapsed' : '',
+              !route.path.startsWith('/quotation/sales') &&
+              !isSharedQuotationRoute(route.path)
+                ? 'quotation-parent-active'
+                : ''
+            ]"
+            :aria-expanded="quotationMenuOpen"
             :title="
-              collapsed && !isMobile ? t('quotation.menuTitle') : undefined
+              collapsed && !isMobile ? t('quotation.quoteSection') : undefined
             "
           >
             <svg
@@ -556,7 +566,7 @@
               />
             </svg>
             <span v-if="isMobile || !collapsed" class="flex-1 text-left">{{
-              t('quotation.menuTitle')
+              t('quotation.quoteSection')
             }}</span>
             <svg
               v-if="isMobile || !collapsed"
@@ -586,7 +596,11 @@
             <div
               v-if="quotationMenuOpen || (collapsed && !isMobile)"
               class="submenu"
+              :class="collapsed && !isMobile ? 'submenu-flyout' : ''"
             >
+              <div v-if="collapsed && !isMobile" class="submenu-flyout-title">
+                {{ t('quotation.quoteSection') }}
+              </div>
               <router-link
                 to="/quotation/dashboard"
                 class="nav-item nav-item-child"
@@ -657,99 +671,237 @@
                 </svg>
                 <span>{{ t('quotation.create') }}</span>
               </router-link>
-              <router-link
-                to="/quotation/customers"
-                class="nav-item nav-item-child"
-                :class="isActive('/quotation/customers') ? 'nav-item-active' : ''"
-                @click="isMobile && $emit('close')"
-                @mouseenter="preloadRoute('/quotation/customers')"
-              >
-                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2m6-6a4 4 0 100-8 4 4 0 000 8zm8-3a4 4 0 100-8 4 4 0 000 8zm0 0v6m3-3h-6" />
-                </svg>
-                <span>{{ t('quotation.customerCenter.menuLabel') }}</span>
-              </router-link>
-              <router-link
-                to="/quotation/catalog"
-                class="nav-item nav-item-child"
-                :class="
-                  isActive('/quotation/catalog') ? 'nav-item-active' : ''
-                "
-                @click="isMobile && $emit('close')"
-                @mouseenter="preloadRoute('/quotation/catalog')"
-              >
-                <svg
-                  class="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-                  />
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                  />
-                </svg>
-                <span>{{ t('quotation.catalog') }}</span>
-              </router-link>
-              <router-link
-                to="/quotation/audit"
-                class="nav-item nav-item-child"
-                :class="
-                  isActive('/quotation/audit') ? 'nav-item-active' : ''
-                "
-                @click="isMobile && $emit('close')"
-                @mouseenter="preloadRoute('/quotation/audit')"
-              >
-                <svg
-                  class="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M9 12h6m-6 4h6M9 8h2m6 13H7a2 2 0 01-2-2V5a2 2 0 012-2h7l5 5v11a2 2 0 01-2 2z"
-                  />
-                </svg>
-                <span>{{ t('quotation.audit') }}</span>
-              </router-link>
-              <router-link
-                to="/quotation/permissions"
-                class="nav-item nav-item-child"
-                :class="
-                  isActive('/quotation/permissions') ? 'nav-item-active' : ''
-                "
-                @click="isMobile && $emit('close')"
-                @mouseenter="preloadRoute('/quotation/permissions')"
-              >
-                <svg
-                  class="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622C17.176 19.29 21 14.591 21 9c0-1.042-.133-2.052-.382-3.016z"
-                  />
-                </svg>
-                <span>{{ t('quotation.pages.permissions.menuLabel') }}</span>
-              </router-link>
             </div>
           </Transition>
         </div>
+
+        <div
+          v-if="
+            isQuotationPlatform &&
+            userStore.userHasFeature('sales_management')
+          "
+          class="menu-group"
+          :class="collapsed && !isMobile ? 'menu-group-collapsed' : ''"
+        >
+          <button
+            type="button"
+            class="nav-item nav-item-parent w-full"
+            :class="[
+              collapsed && !isMobile ? 'nav-item-collapsed' : '',
+              route.path.startsWith('/quotation/sales')
+                ? 'quotation-parent-active'
+                : ''
+            ]"
+            :aria-expanded="salesMenuOpen"
+            :title="
+              collapsed && !isMobile ? t('quotation.salesSection') : undefined
+            "
+            @click="toggleSalesMenu"
+          >
+            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 19V9m5 10V5m5 14v-7m5 7V3" />
+            </svg>
+            <span v-if="isMobile || !collapsed" class="flex-1 text-left">
+              {{ t('quotation.salesSection') }}
+            </span>
+            <svg
+              v-if="isMobile || !collapsed"
+              class="h-4 w-4 transition-transform"
+              :class="salesMenuOpen ? 'rotate-90' : ''"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+            </svg>
+          </button>
+          <Transition
+            enter-active-class="transition-all duration-200 ease-out"
+            enter-from-class="opacity-0 max-h-0"
+            enter-to-class="opacity-100 max-h-96"
+            leave-active-class="transition-all duration-200 ease-in"
+            leave-from-class="opacity-100 max-h-96"
+            leave-to-class="opacity-0 max-h-0"
+          >
+          <div
+            v-if="salesMenuOpen || (collapsed && !isMobile)"
+            class="submenu"
+            :class="collapsed && !isMobile ? 'submenu-flyout' : ''"
+          >
+            <div v-if="collapsed && !isMobile" class="submenu-flyout-title">
+              {{ t('quotation.salesSection') }}
+            </div>
+            <router-link
+              to="/quotation/sales/dashboard"
+              class="nav-item nav-item-child"
+              :class="
+                isActive('/quotation/sales/dashboard')
+                  ? 'nav-item-active'
+                  : ''
+              "
+              @click="isMobile && $emit('close')"
+              @mouseenter="preloadRoute('/quotation/sales/dashboard')"
+            >
+              <span class="quotation-nav-icon" aria-hidden="true">
+                <svg
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M3 3v18h18M7 16l4-5 4 3 5-7"
+                  />
+                </svg>
+              </span>
+              <span>{{ t('quotation.salesDashboard') }}</span>
+            </router-link>
+            <router-link
+              to="/quotation/sales/invoices"
+              class="nav-item nav-item-child"
+              :class="
+                isActive('/quotation/sales/invoices')
+                  ? 'nav-item-active'
+                  : ''
+              "
+              @click="isMobile && $emit('close')"
+              @mouseenter="preloadRoute('/quotation/sales/invoices')"
+            >
+              <span class="quotation-nav-icon" aria-hidden="true">
+                <svg
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M7 3h10a2 2 0 012 2v16l-3-2-4 2-4-2-3 2V5a2 2 0 012-2zm2 5h6m-6 4h6"
+                  />
+                </svg>
+              </span>
+              <span>{{ t('quotation.invoices') }}</span>
+            </router-link>
+            <router-link
+              v-if="userStore.userHasInvoiceCapability('edit')"
+              to="/quotation/sales/create"
+              class="nav-item nav-item-child"
+              :class="
+                isActive('/quotation/sales/create')
+                  ? 'nav-item-active'
+                  : ''
+              "
+              @click="isMobile && $emit('close')"
+              @mouseenter="preloadRoute('/quotation/sales/create')"
+            >
+              <span class="quotation-nav-icon" aria-hidden="true">
+                <svg
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M12 3v18m-9-9h18"
+                  />
+                </svg>
+              </span>
+              <span>{{ t('quotation.createInvoice') }}</span>
+            </router-link>
+          </div>
+          </Transition>
+        </div>
+
+        <template
+          v-if="
+            isQuotationPlatform &&
+            (userStore.userHasFeature('quotation_management') ||
+              userStore.userHasFeature('sales_management'))
+          "
+        >
+          <router-link
+            to="/quotation/customers"
+            class="nav-item quotation-shared-link"
+            :class="[
+              isActive('/quotation/customers') ? 'nav-item-active' : '',
+              collapsed && !isMobile ? 'nav-item-collapsed' : ''
+            ]"
+            :title="
+              collapsed && !isMobile
+                ? t('quotation.customerCenter.menuLabel')
+                : undefined
+            "
+            @click="isMobile && $emit('close')"
+            @mouseenter="preloadRoute('/quotation/customers')"
+          >
+            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2m6-6a4 4 0 100-8 4 4 0 000 8zm8-3a4 4 0 100-8 4 4 0 000 8zm0 0v6m3-3h-6" />
+            </svg>
+            <span v-if="isMobile || !collapsed">
+              {{ t('quotation.customerCenter.menuLabel') }}
+            </span>
+          </router-link>
+          <router-link
+            to="/quotation/catalog"
+            class="nav-item quotation-shared-link"
+            :class="[
+              isActive('/quotation/catalog') ? 'nav-item-active' : '',
+              collapsed && !isMobile ? 'nav-item-collapsed' : ''
+            ]"
+            :title="collapsed && !isMobile ? t('quotation.catalog') : undefined"
+            @click="isMobile && $emit('close')"
+            @mouseenter="preloadRoute('/quotation/catalog')"
+          >
+            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7l8-4 8 4-8 4-8-4zm0 0v10l8 4m0-10v10m8-14v10l-8 4" />
+            </svg>
+            <span v-if="isMobile || !collapsed">{{ t('quotation.catalog') }}</span>
+          </router-link>
+          <router-link
+            to="/quotation/audit"
+            class="nav-item quotation-shared-link"
+            :class="[
+              isActive('/quotation/audit') ? 'nav-item-active' : '',
+              collapsed && !isMobile ? 'nav-item-collapsed' : ''
+            ]"
+            :title="collapsed && !isMobile ? t('quotation.audit') : undefined"
+            @click="isMobile && $emit('close')"
+            @mouseenter="preloadRoute('/quotation/audit')"
+          >
+            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6M9 8h2m6 13H7a2 2 0 01-2-2V5a2 2 0 012-2h7l5 5v11a2 2 0 01-2 2z" />
+            </svg>
+            <span v-if="isMobile || !collapsed">{{ t('quotation.audit') }}</span>
+          </router-link>
+          <router-link
+            v-if="userStore.userHasQuotationAdminAccess()"
+            to="/quotation/permissions"
+            class="nav-item quotation-shared-link"
+            :class="[
+              isActive('/quotation/permissions') ? 'nav-item-active' : '',
+              collapsed && !isMobile ? 'nav-item-collapsed' : ''
+            ]"
+            :title="
+              collapsed && !isMobile
+                ? t('quotation.pages.permissions.menuLabel')
+                : undefined
+            "
+            @click="isMobile && $emit('close')"
+            @mouseenter="preloadRoute('/quotation/permissions')"
+          >
+            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622C17.176 19.29 21 14.591 21 9c0-1.042-.133-2.052-.382-3.016z" />
+            </svg>
+            <span v-if="isMobile || !collapsed">
+              {{ t('quotation.pages.permissions.menuLabel') }}
+            </span>
+          </router-link>
+        </template>
       </div>
 
       <!-- Settings Menu -->
@@ -821,11 +973,15 @@ const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 const isQuotationPlatform = computed(
-  () => getCurrentPlatformKey(route.path) === 'quotation_management'
+  () => ['quotation_management', 'sales_management'].includes(
+    getCurrentPlatformKey(route.path)
+  )
 )
 const homePath = computed(() =>
   isQuotationPlatform.value
-    ? '/quotation/dashboard'
+    ? userStore.userHasFeature('quotation_management')
+      ? '/quotation/dashboard'
+      : '/quotation/sales/dashboard'
     : userStore.getUserLandingPath()
 )
 
@@ -833,6 +989,7 @@ const homePath = computed(() =>
 const cloudBillingMenuOpen = ref(true)
 const dataCollectorMenuOpen = ref(true)
 const quotationMenuOpen = ref(true)
+const salesMenuOpen = ref(true)
 
 // Load expanded state from localStorage
 const loadExpandedState = () => {
@@ -861,6 +1018,14 @@ const loadExpandedState = () => {
       // Ignore parse errors
     }
   }
+  const savedSales = localStorage.getItem('sidebar_sales_expanded')
+  if (savedSales !== null) {
+    try {
+      salesMenuOpen.value = JSON.parse(savedSales)
+    } catch (e) {
+      // Ignore parse errors
+    }
+  }
 }
 
 // Save expanded state to localStorage
@@ -877,6 +1042,10 @@ const saveExpandedState = () => {
   localStorage.setItem(
     'sidebar_quotation_expanded',
     JSON.stringify(quotationMenuOpen.value)
+  )
+  localStorage.setItem(
+    'sidebar_sales_expanded',
+    JSON.stringify(salesMenuOpen.value)
   )
 }
 
@@ -895,6 +1064,14 @@ const isActive = (path) => {
   return route.path === path || route.path.startsWith(path + '/')
 }
 
+const isSharedQuotationRoute = (path) =>
+  [
+    '/quotation/customers',
+    '/quotation/catalog',
+    '/quotation/audit',
+    '/quotation/permissions'
+  ].some((prefix) => path.startsWith(prefix))
+
 const toggleCloudBillingMenu = () => {
   cloudBillingMenuOpen.value = !cloudBillingMenuOpen.value
   saveExpandedState()
@@ -910,6 +1087,11 @@ const toggleQuotationMenu = () => {
   saveExpandedState()
 }
 
+const toggleSalesMenu = () => {
+  salesMenuOpen.value = !salesMenuOpen.value
+  saveExpandedState()
+}
+
 // Auto-expand menu if current route is in that section
 watch(
   () => route.path,
@@ -922,7 +1104,13 @@ watch(
       dataCollectorMenuOpen.value = true
       saveExpandedState()
     }
-    if (newPath.startsWith('/quotation')) {
+    if (newPath.startsWith('/quotation/sales')) {
+      salesMenuOpen.value = true
+      saveExpandedState()
+    } else if (
+      newPath.startsWith('/quotation') &&
+      !isSharedQuotationRoute(newPath)
+    ) {
       quotationMenuOpen.value = true
       saveExpandedState()
     }
@@ -1090,34 +1278,41 @@ onMounted(() => {
 }
 
 .quotation-navigation .menu-group {
-  margin-bottom: 0;
-}
-
-.quotation-navigation .menu-group::before {
-  display: block;
-  padding: 0.25rem 0.75rem 0.5rem;
-  color: #7783a0;
-  content: 'BUSINESS VIEWS';
-  font-size: 0.625rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-}
-
-.quotation-navigation-collapsed .menu-group::before {
-  display: none;
+  margin-bottom: 0.5rem;
 }
 
 .quotation-navigation .nav-item-parent {
-  display: none;
+  display: flex;
+  border-radius: 0.625rem;
+  color: #f8fafc;
+  font-weight: 700;
+}
+
+.quotation-navigation .nav-item-parent:hover,
+.quotation-navigation .nav-item-parent.quotation-parent-active {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
 }
 
 .quotation-navigation .submenu {
-  margin-top: 0;
-  overflow: visible;
+  margin-top: 0.25rem;
+  padding-left: 0.75rem;
+  overflow: hidden;
 }
 
 .quotation-navigation-collapsed .submenu {
   overflow: visible;
+  padding-left: 0;
+}
+
+.quotation-navigation .submenu-flyout {
+  margin-top: 0;
+  border-color: #334155;
+  background: #111827;
+}
+
+.quotation-navigation .submenu-flyout-title {
+  color: #94a3b8;
 }
 
 .quotation-navigation-collapsed .nav-item-child {
@@ -1131,16 +1326,38 @@ onMounted(() => {
   border-radius: 0.5rem;
 }
 
-.quotation-navigation-collapsed .nav-item-child span {
+.quotation-nav-icon {
+  display: flex;
+  flex: 0 0 1rem;
+  width: 1rem;
+  height: 1rem;
+  align-items: center;
+  justify-content: center;
+}
+
+.quotation-nav-icon svg {
+  display: block;
+  width: 1rem;
+  height: 1rem;
+}
+
+.quotation-navigation-collapsed .nav-item-child > span:not(.quotation-nav-icon) {
   display: none;
+}
+
+.quotation-navigation-collapsed
+  .submenu-flyout
+  .nav-item-child
+  > span:not(.quotation-nav-icon) {
+  display: inline;
 }
 
 .quotation-navigation .nav-item-child {
   margin-left: 0;
-  border-radius: 9999px;
-  padding: 0.625rem 0.75rem;
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
   color: #c4cbe0;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .quotation-navigation .nav-item-child::before {
@@ -1153,9 +1370,36 @@ onMounted(() => {
 }
 
 .quotation-navigation .nav-item-child.nav-item-active {
-  background-color: #2563eb;
+  background-color: rgba(37, 99, 235, 0.9);
   color: #ffffff;
   font-weight: 700;
+}
+
+.quotation-navigation .quotation-shared-link {
+  border-radius: 0.625rem;
+  color: #c4cbe0;
+  font-weight: 500;
+}
+
+.quotation-navigation .quotation-shared-link:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+}
+
+.quotation-navigation .quotation-shared-link.nav-item-active {
+  background-color: rgba(37, 99, 235, 0.9);
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.quotation-navigation-collapsed .quotation-shared-link {
+  width: 2.5rem;
+  height: 2.5rem;
+  margin-right: auto;
+  margin-left: auto;
+  justify-content: center;
+  gap: 0;
+  padding: 0;
 }
 
 .quotation-navigation.quotation-navigation-collapsed .nav-item-child {
@@ -1163,6 +1407,16 @@ onMounted(() => {
   margin-left: auto;
   padding: 0;
   border-radius: 0.5rem;
+}
+
+.quotation-navigation.quotation-navigation-collapsed
+  .submenu-flyout
+  .nav-item-child {
+  width: auto;
+  height: auto;
+  justify-content: flex-start;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
 }
 
 .quotation-settings {

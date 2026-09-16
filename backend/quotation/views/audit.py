@@ -12,6 +12,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from invoice.permissions import has_invoice_access
 from quotation.audit import business_audit_events_query, record_audit_event
 from quotation.models import AuditEvent
 from quotation.permissions import is_quotation_platform_admin
@@ -39,6 +40,8 @@ def _pagination(request) -> tuple[int, int]:
 def _audit_queryset(request):
     """Return audit events filtered by the supported query contract."""
     queryset = AuditEvent.objects.select_related("actor").all()
+    if not has_invoice_access(request.user):
+        queryset = queryset.exclude(module="invoice")
     include_internal = (
         request.query_params.get("include_internal", "").lower() == "true"
     )

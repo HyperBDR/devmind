@@ -13,6 +13,7 @@ from quotation.permissions import is_quotation_platform_admin
 from quotation.services.permission_service import (
     find_folder_asset,
     folder_label,
+    invoice_folder_name,
     folder_rows,
     parse_expires_at,
     platform_users,
@@ -74,7 +75,8 @@ class QuotationUploadPermissionView(APIView):
             raise ValidationError({"user_id": "User not found."})
         folder_token = str(request.data.get("folder_token") or "").strip()
         asset = find_folder_asset(folder_token)
-        if asset is None:
+        invoice_name = invoice_folder_name(folder_token)
+        if asset is None and not invoice_name:
             raise ValidationError({"folder_token": "Folder not found."})
         expires_at = parse_expires_at(request.data.get("expires_at"))
         permission = QuotationUploadPermission.objects.filter(
@@ -87,12 +89,20 @@ class QuotationUploadPermissionView(APIView):
             permission = QuotationUploadPermission.objects.create(
                 user=user,
                 folder_token=folder_token,
-                folder_name=folder_label(asset, folder_token),
+                folder_name=(
+                    folder_label(asset, folder_token)
+                    if asset is not None
+                    else invoice_name
+                ),
                 granted_by=request.user,
                 expires_at=expires_at,
             )
         else:
-            permission.folder_name = folder_label(asset, folder_token)
+            permission.folder_name = (
+                folder_label(asset, folder_token)
+                if asset is not None
+                else invoice_name
+            )
             permission.granted_by = request.user
             permission.expires_at = expires_at
             permission.revoked_at = None

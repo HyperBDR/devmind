@@ -82,6 +82,33 @@ def folder_rows() -> list[dict]:
                     "path": path,
                 },
             )
+    from invoice.models import InvoiceDocument
+    from quotation.models import StorageMount
+
+    for mount in StorageMount.objects.filter(
+        scope_key="invoice",
+        enabled=True,
+    ).only("root_folder_token", "root_folder_name"):
+        token = str(mount.root_folder_token or "").strip()
+        if token:
+            rows.setdefault(
+                token,
+                {
+                    "token": token,
+                    "name": mount.root_folder_name or token,
+                    "path": [],
+                },
+            )
+
+    for document in InvoiceDocument.objects.exclude(
+        feishu_folder_token=""
+    ).only("feishu_folder_token"):
+        token = str(document.feishu_folder_token or "").strip()
+        if token:
+            rows.setdefault(
+                token,
+                {"token": token, "name": token, "path": []},
+            )
     return sorted(rows.values(), key=lambda item: item["name"].casefold())
 
 
@@ -108,6 +135,29 @@ def find_folder_asset(folder_token: str):
         if folder_token in tokens:
             return asset
     return None
+
+
+def invoice_folder_name(folder_token: str) -> str:
+    """Return an Invoice folder label absent from Quote assets."""
+    from invoice.models import InvoiceDocument
+    from quotation.models import StorageMount
+
+    token = str(folder_token or "").strip()
+    if not token:
+        return ""
+    document = (
+        InvoiceDocument.objects.filter(feishu_folder_token=token)
+        .only("feishu_folder_token")
+        .first()
+    )
+    if document is not None:
+        return token
+    mount = StorageMount.objects.filter(
+        scope_key="invoice",
+        enabled=True,
+        root_folder_token=token,
+    ).only("root_folder_name").first()
+    return (mount.root_folder_name or token) if mount else ""
 
 
 def folder_label(asset: DocumentAsset, folder_token: str) -> str:

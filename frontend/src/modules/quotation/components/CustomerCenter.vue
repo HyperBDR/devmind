@@ -2,24 +2,26 @@
 import { computed, ref } from 'vue'
 import { Mail, Phone, Plus, RefreshCw, Search, X } from 'lucide-vue-next'
 import type { Quotation } from '../types'
+import type { InvoiceRecord } from '../api/invoices'
 import { useQuotationI18n } from '../composables/useQuotationI18n'
 
 type CustomerContact = {
   name: string
   email: string
   phone: string
-  quoteCount: number
+  recordCount: number
 }
 
 type Customer = {
   company: string
   contacts: CustomerContact[]
-  quoteCount: number
+  recordCount: number
   updatedAt: string
 }
 
 const props = defineProps<{
   quotations: Quotation[]
+  invoices: InvoiceRecord[]
 }>()
 
 const { t } = useQuotationI18n()
@@ -44,37 +46,56 @@ const lastSyncedAt = ref<Date | null>(null)
 
 const customers = computed<Customer[]>(() => {
   const grouped = new Map<string, Customer>()
-  props.quotations.forEach((quote) => {
-    const company = quote.clientCompany?.trim()
+  function addRecord(record: {
+    company?: string
+    contactName?: string
+    email?: string
+    phone?: string
+    updatedAt?: string | null
+  }) {
+    const company = record.company?.trim()
     if (!company) return
     const key = company.toLowerCase()
     const customer = grouped.get(key) || {
       company,
       contacts: [],
-      quoteCount: 0,
-      updatedAt: quote.createdAt || quote.quoteDate || '-',
+      recordCount: 0,
+      updatedAt: record.updatedAt || '-',
     }
-    customer.quoteCount += 1
-    const contactKey = `${quote.contactPerson}|${quote.email}`.toLowerCase()
-    if (quote.contactPerson || quote.email) {
+    customer.recordCount += 1
+    const contactKey = `${record.contactName || ''}|${record.email || ''}`.toLowerCase()
+    if (record.contactName || record.email || record.phone) {
       const existing = customer.contacts.find(
         (contact) => `${contact.name}|${contact.email}`.toLowerCase() === contactKey,
       )
-      if (existing) existing.quoteCount += 1
+      if (existing) existing.recordCount += 1
       else {
         customer.contacts.push({
-          name: quote.contactPerson || '未填写联系人',
-          email: quote.email || '-',
-          phone: '-',
-          quoteCount: 1,
+          name: record.contactName || '未填写联系人',
+          email: record.email || '-',
+          phone: record.phone || '-',
+          recordCount: 1,
         })
       }
     }
-    if (quote.createdAt && quote.createdAt > customer.updatedAt) {
-      customer.updatedAt = quote.createdAt
+    if (record.updatedAt && record.updatedAt > customer.updatedAt) {
+      customer.updatedAt = record.updatedAt
     }
     grouped.set(key, customer)
-  })
+  }
+  props.quotations.forEach((quote) => addRecord({
+    company: quote.clientCompany,
+    contactName: quote.contactPerson,
+    email: quote.email,
+    updatedAt: quote.createdAt || quote.quoteDate,
+  }))
+  props.invoices.forEach((invoice) => addRecord({
+    company: invoice.customer_name,
+    contactName: invoice.customer_contact_person || invoice.contact_person,
+    email: invoice.customer_contact_email || invoice.contact_email,
+    phone: invoice.customer_contact_phone,
+    updatedAt: invoice.updated_at || invoice.created_at || invoice.invoice_date,
+  }))
   return [...grouped.values()]
 })
 
@@ -209,7 +230,7 @@ function saveContact() {
               <th>{{ t('quotation.customerCenter.columns.company') }}</th>
               <th>{{ t('quotation.customerCenter.columns.contacts') }}</th>
               <th>{{ t('quotation.customerCenter.columns.recentContact') }}</th>
-              <th>{{ t('quotation.customerCenter.columns.quotes') }}</th>
+              <th>{{ t('quotation.customerCenter.columns.records') }}</th>
               <th>{{ t('quotation.customerCenter.columns.actions') }}</th>
             </tr>
           </thead>
@@ -241,7 +262,7 @@ function saveContact() {
                   {{ customer.contacts[0]?.email || '-' }}
                 </div>
               </td>
-              <td>{{ customer.quoteCount }}</td>
+              <td>{{ customer.recordCount }}</td>
               <td>
                 <button
                   type="button"
@@ -284,7 +305,7 @@ function saveContact() {
         <button type="button" class="cursor-pointer text-dm-text-tertiary" aria-label="关闭" @click="closePanels"><X class="h-5 w-5" /></button>
       </div>
       <div v-if="showCustomerDetails" class="grid grid-cols-2 gap-3 border-b border-dm-border-light p-5 text-sm">
-        <div class="rounded-dm bg-dm-page p-3"><p class="text-dm-text-tertiary">{{ t('quotation.customerCenter.columns.quotes') }}</p><p class="mt-1 text-lg font-semibold">{{ selectedCustomer.quoteCount }}</p></div>
+        <div class="rounded-dm bg-dm-page p-3"><p class="text-dm-text-tertiary">{{ t('quotation.customerCenter.columns.records') }}</p><p class="mt-1 text-lg font-semibold">{{ selectedCustomer.recordCount }}</p></div>
       </div>
       <div class="flex items-center justify-between px-5 pb-2 pt-5">
         <h4 class="font-semibold text-dm-text">{{ t('quotation.customerCenter.columns.contacts') }}</h4>

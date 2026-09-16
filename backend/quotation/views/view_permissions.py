@@ -4,6 +4,7 @@ from datetime import datetime
 
 from django.contrib.auth.models import User
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
@@ -11,12 +12,14 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.access import get_effective_feature_keys
+from invoice.models import InvoiceAccessGrant, InvoiceDocument
 from quotation.audit import quotation_audit_label, record_audit_event
 from quotation.models import (
     AuditEvent,
     DocumentAsset,
     QuotationViewPermission,
     QuotationViewPermissionTarget,
+    StorageMount,
 )
 from quotation.permissions import is_quotation_platform_admin
 
@@ -71,6 +74,29 @@ def _folder_rows():
                     "path": path,
                 },
             )
+    for document in InvoiceDocument.objects.exclude(
+        feishu_folder_token=""
+    ).only("feishu_folder_token"):
+        token = str(document.feishu_folder_token or "").strip()
+        if token:
+            rows.setdefault(
+                token,
+                {"token": token, "name": token, "path": []},
+            )
+    for mount in StorageMount.objects.filter(
+        scope_key="invoice",
+        enabled=True,
+    ).only("root_folder_token", "root_folder_name"):
+        token = str(mount.root_folder_token or "").strip()
+        if token:
+            rows.setdefault(
+                token,
+                {
+                    "token": token,
+                    "name": mount.root_folder_name or token,
+                    "path": [],
+                },
+            )
     return sorted(rows.values(), key=lambda item: item["name"].casefold())
 
 
@@ -89,6 +115,12 @@ def _folder_asset(folder_token: str):
         if folder_token in tokens:
             return asset
     return None
+
+
+def _invoice_folder_exists(folder_token: str) -> bool:
+    return InvoiceDocument.objects.filter(
+        feishu_folder_token=folder_token,
+    ).exists()
 
 
 def _folder_label(asset: DocumentAsset, folder_token: str) -> str:
@@ -122,10 +154,29 @@ def _document_rows():
             if asset.quotation_id and asset.quotation
             else "",
         }
+    for invoice_document in InvoiceDocument.objects.exclude(
+        feishu_file_token=""
+    ).order_by("-created_at"):
+        key = f"invoice:{invoice_document.id}"
+        rows.setdefault(
+            key,
+            {
+                "id": key,
+                "file_token": invoice_document.feishu_file_token,
+                "file_name": invoice_document.file_name,
+                "folder_token": invoice_document.feishu_folder_token,
+                "folder_name": invoice_document.feishu_folder_token,
+                "quotation_id": None,
+                "quote_no": invoice_document.invoice.invoice_no
+                if invoice_document.invoice_id
+                else "",
+            },
+        )
     return list(rows.values())
 
 
 def _platform_users():
+    now = timezone.now()
     users = []
     for user in User.objects.filter(is_active=True).order_by(
         "username",
@@ -134,8 +185,14 @@ def _platform_users():
         if is_quotation_platform_admin(user):
             continue
         if (
-            "quotation_management"
-            not in get_effective_feature_keys(user)
+            "quotation_management" not in get_effective_feature_keys(user)
+            and not InvoiceAccessGrant.objects.filter(
+                user=user,
+                is_active=True,
+                revoked_at__isnull=True,
+            ).filter(
+                Q(expires_at__isnull=True) | Q(expires_at__gt=now)
+            ).exists()
         ):
             continue
         users.append(
@@ -184,7 +241,17 @@ def _validate_grantee(user: User | None) -> User:
         or user.is_staff
         or user.is_superuser
         or is_quotation_platform_admin(user)
-        or "quotation_management" not in get_effective_feature_keys(user)
+        or (
+            "quotation_management" not in get_effective_feature_keys(user)
+            and not InvoiceAccessGrant.objects.filter(
+                user=user,
+                is_active=True,
+                revoked_at__isnull=True,
+            ).filter(
+                Q(expires_at__isnull=True)
+                | Q(expires_at__gt=timezone.now())
+            ).exists()
+        )
     ):
         raise ValidationError(
             {
@@ -198,10 +265,25 @@ def _validate_grantee(user: User | None) -> User:
 
 
 def _permission_row(permission: QuotationViewPermission):
+    invoice_document = None
+    if (
+        permission.target_type == QuotationViewPermissionTarget.DOCUMENT
+        and permission.folder_token.startswith("invoice-document:")
+    ):
+        invoice_id = permission.folder_token.removeprefix(
+            "invoice-document:"
+        )
+        invoice_document = InvoiceDocument.objects.filter(
+            pk=invoice_id
+        ).first()
     target_id = (
         permission.folder_token
         if permission.target_type == QuotationViewPermissionTarget.FOLDER
-        else permission.document_id
+        else (
+            f"invoice:{invoice_document.id}"
+            if invoice_document is not None
+            else permission.document_id
+        )
     )
     return {
         "id": permission.id,
@@ -211,7 +293,8 @@ def _permission_row(permission: QuotationViewPermission):
         "target_type": permission.target_type,
         "target_id": str(target_id or ""),
         "target_name": permission.folder_name
-        or (permission.document.file_name if permission.document else ""),
+        or (permission.document.file_name if permission.document else "")
+        or (invoice_document.file_name if invoice_document else ""),
         "folder_token": permission.folder_token,
         "document_id": permission.document_id,
         "expires_at": permission.expires_at,
@@ -226,11 +309,19 @@ def _permission_target_summary(
     permission: QuotationViewPermission,
 ) -> dict:
     """Return stable resource details for a view-permission audit event."""
+    invoice_id = permission.folder_token.removeprefix(
+        "invoice-document:"
+    )
+    invoice_document = InvoiceDocument.objects.filter(pk=invoice_id).first()
     target_id = (
         permission.folder_token
         if permission.target_type
         == QuotationViewPermissionTarget.FOLDER
-        else permission.document_id
+        else (
+            f"invoice:{invoice_document.id}"
+            if invoice_document is not None
+            else permission.document_id
+        )
     )
     return {
         "target_type": permission.target_type,
@@ -290,7 +381,7 @@ class QuotationViewPermissionView(APIView):
         }
         if target_type == QuotationViewPermissionTarget.FOLDER:
             asset = _folder_asset(target_id)
-            if asset is None:
+            if asset is None and not _invoice_folder_exists(target_id):
                 raise ValidationError({"target_id": "Folder not found."})
             duplicate = QuotationViewPermission.objects.filter(
                 user=user,
@@ -302,29 +393,59 @@ class QuotationViewPermissionView(APIView):
                 **defaults,
                 "user": user,
                 "folder_token": target_id,
-                "folder_name": _folder_label(asset, target_id),
+                "folder_name": (
+                    _folder_label(asset, target_id)
+                    if asset is not None
+                    else target_id
+                ),
                 "document": None,
             }
         else:
-            document = DocumentAsset.objects.filter(
-                pk=target_id,
-                source="feishu",
-            ).first()
-            if document is None:
-                raise ValidationError({"target_id": "Document not found."})
-            duplicate = QuotationViewPermission.objects.filter(
-                user=user,
-                target_type=target_type,
-                document=document,
-                is_active=True,
-            ).exists()
-            create_fields = {
-                **defaults,
-                "user": user,
-                "document": document,
-                "folder_token": "",
-                "folder_name": "",
-            }
+            if target_id.startswith("invoice:"):
+                invoice_document = InvoiceDocument.objects.filter(
+                    pk=target_id.removeprefix("invoice:"),
+                    feishu_file_token__gt="",
+                ).first()
+                if invoice_document is None:
+                    raise ValidationError(
+                        {"target_id": "Document not found."}
+                    )
+                marker = f"invoice-document:{invoice_document.id}"
+                duplicate = QuotationViewPermission.objects.filter(
+                    user=user,
+                    target_type=target_type,
+                    folder_token=marker,
+                    is_active=True,
+                ).exists()
+                create_fields = {
+                    **defaults,
+                    "user": user,
+                    "document": None,
+                    "folder_token": marker,
+                    "folder_name": invoice_document.file_name,
+                }
+            else:
+                document = DocumentAsset.objects.filter(
+                    pk=target_id,
+                    source="feishu",
+                ).first()
+                if document is None:
+                    raise ValidationError(
+                        {"target_id": "Document not found."}
+                    )
+                duplicate = QuotationViewPermission.objects.filter(
+                    user=user,
+                    target_type=target_type,
+                    document=document,
+                    is_active=True,
+                ).exists()
+                create_fields = {
+                    **defaults,
+                    "user": user,
+                    "document": document,
+                    "folder_token": "",
+                    "folder_name": "",
+                }
         if duplicate:
             raise ValidationError(
                 "An active view permission already exists."

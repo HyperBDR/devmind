@@ -73,12 +73,17 @@ FEATURE_ALIASES = {
     'llm_console': 'admin_console',
     'task_management_console': 'admin_console',
     'notification_console': 'admin_console',
+    'sales_management': 'quotation_management',
 }
 
 LEGACY_DEFAULT_FEATURES = (
     'workspace',
-    'admin_console',
     'operations_console',
+    'hyperbdr_dashboard',
+    'llm_ops',
+    'data_ops',
+    'admin_console',
+    'sales_work_orders',
 )
 
 
@@ -214,11 +219,12 @@ def get_effective_feature_keys(
         feature_keys.extend(normalize_feature_keys(role.visible_features))
 
     normalized_features = normalize_feature_keys(feature_keys)
-    if 'admin_console' in normalized_features:
-        return list(FEATURE_KEYS)
-
+    has_admin_role = 'admin_console' in normalized_features
     if not normalized_features:
         normalized_features = list(LEGACY_DEFAULT_FEATURES)
+
+    if has_admin_role:
+        return list(FEATURE_KEYS)
 
     return normalized_features
 
@@ -279,11 +285,20 @@ def get_access_profile(
         user,
         effective_roles=resolved_roles,
     )
+    from invoice.permissions import get_invoice_access_profile
+
+    invoice_access = get_invoice_access_profile(user)
+    if invoice_access['enabled']:
+        feature_keys = normalize_feature_keys(
+            [*feature_keys, 'quotation_management']
+        )
     preferred_platform = get_preferred_platform(
         user,
         effective_roles=resolved_roles,
         feature_keys=feature_keys,
     )
+    from quotation.permissions import get_quotation_platform_role
+
     available_platforms = serialize_platforms(feature_keys)
     landing_path = PLATFORM_DEFAULT_PATHS.get(
         preferred_platform,
@@ -294,4 +309,6 @@ def get_access_profile(
         'available_platforms': available_platforms,
         'preferred_platform': preferred_platform,
         'landing_path': landing_path,
+        'invoice_access': invoice_access,
+        'quotation_role': get_quotation_platform_role(user),
     }

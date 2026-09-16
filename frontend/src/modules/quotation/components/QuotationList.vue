@@ -42,6 +42,10 @@ import { FORM_SELECT_COMPACT_TRIGGER_CLASS } from '../utils/formFieldClasses'
 import { clearedFeishuFields } from '../utils/feishuLinkState'
 import { buildQuotationExportFileName } from '../utils/quotationFileName'
 import {
+  loadVisibleColumns,
+  saveVisibleColumns,
+} from '../utils/visibleColumnStorage'
+import {
   getCurrencyShortLabel,
   getCurrencySymbol,
 } from '../utils/quotationPreviewModel'
@@ -56,6 +60,7 @@ const props = defineProps<{
   quotations: Quotation[]
   productLines: string[]
   currencies?: string[]
+  salespeople?: string[]
   loading?: boolean
   page: number
   pageSize: 10 | 20 | 50
@@ -64,6 +69,8 @@ const props = defineProps<{
   initialCreatedFrom?: string
   initialCreatedTo?: string
   initialCurrency?: string
+  initialSalesperson?: string
+  initialSource?: 'manual' | 'document_import'
   currentUser?: {
     name: string
     title: string
@@ -95,15 +102,6 @@ const productLineFilterOptions = computed(() => [
   })),
 ])
 
-const sourceFilterOptions = computed(() => [
-  { value: 'ALL', label: t('quotation.pages.list.sourceAll') },
-  { value: 'manual', label: t('quotation.pages.list.sourceLocalCreated') },
-  {
-    value: 'document_import',
-    label: t('quotation.pages.list.sourceDocumentImport'),
-  },
-])
-
 const currencyFilterOptions = computed(() => [
   { value: 'ALL', label: t('quotation.pages.list.currencyAll') },
   ...Array.from(new Set(
@@ -115,6 +113,23 @@ const currencyFilterOptions = computed(() => [
       value: currency,
       label: getCurrencyShortLabel(currency),
     })),
+])
+
+const salespersonFilterOptions = computed(() => [
+  { value: 'ALL', label: t('quotation.pages.list.salespersonAll') },
+  ...(props.salespeople || []).map((salesperson) => ({
+    value: salesperson,
+    label: salesperson,
+  })),
+])
+
+const sourceFilterOptions = computed(() => [
+  { value: 'ALL', label: t('quotation.pages.list.sourceAll') },
+  { value: 'manual', label: t('quotation.pages.list.sourceLocalCreated') },
+  {
+    value: 'document_import',
+    label: t('quotation.pages.list.sourceDocumentImport'),
+  },
 ])
 
 const pageSizeOptions = [10, 20, 50].map((value) => ({
@@ -131,9 +146,9 @@ const columnConfig = {
     align: 'left',
   },
   project: {
-    defaultWidth: 360,
+    defaultWidth: 420,
     minWidth: 180,
-    maxWidth: 720,
+    maxWidth: 960,
     labelKey: 'quotation.pages.list.tableProjectName',
     align: 'left',
   },
@@ -219,7 +234,13 @@ const defaultColumnKeys: ResizableColumnKey[] = [
   'customer',
   'total',
 ]
-const visibleColumnKeys = ref<ResizableColumnKey[]>([...defaultColumnKeys])
+const visibleColumnKeys = ref<ResizableColumnKey[]>(
+  loadVisibleColumns(
+    'quote',
+    Object.keys(columnConfig) as ResizableColumnKey[],
+    defaultColumnKeys,
+  ),
+)
 const columnsOpen = ref(false)
 const visibleColumns = computed(() =>
   resizableColumns.value.filter((column) =>
@@ -233,8 +254,21 @@ const visibleTableWidth = computed(
       ACTIONS_COLUMN_WIDTH,
     ),
 )
+const hasCustomColumnWidth = computed(() =>
+  (Object.keys(columnConfig) as ResizableColumnKey[]).some(
+    (key) => columnWidths.value[key] !== columnConfig[key].defaultWidth,
+  ),
+)
 const tableUsesHorizontalScroll = computed(
-  () => visibleColumnKeys.value.length > defaultColumnKeys.length,
+  () =>
+    visibleColumnKeys.value.length > defaultColumnKeys.length
+    || hasCustomColumnWidth.value,
+)
+
+watch(
+  visibleColumnKeys,
+  (columns) => saveVisibleColumns('quote', columns),
+  { deep: true },
 )
 
 function tableColumnWidth(key: ResizableColumnKey | 'actions'): string {
@@ -258,8 +292,9 @@ let activeColumnResize: {
 
 const searchText = ref('')
 const selectedProductLine = ref('ALL')
-const selectedSource = ref('ALL')
 const selectedCurrency = ref(props.initialCurrency || 'ALL')
+const selectedSalesperson = ref(props.initialSalesperson || 'ALL')
+const selectedSource = ref(props.initialSource || 'ALL')
 const createdFrom = ref(props.initialCreatedFrom || '')
 const createdTo = ref(props.initialCreatedTo || '')
 const uploadAccessLoading = ref(false)
@@ -303,15 +338,21 @@ watch(
     props.initialCreatedFrom,
     props.initialCreatedTo,
     props.initialCurrency,
+    props.initialSalesperson,
+    props.initialSource,
   ] as const,
-  async ([nextFrom, nextTo, nextCurrency]) => {
+  async ([nextFrom, nextTo, nextCurrency, nextSalesperson, nextSource]) => {
     const createdFromValue = nextFrom || ''
     const createdToValue = nextTo || ''
     const currencyValue = nextCurrency || 'ALL'
+    const salespersonValue = nextSalesperson || 'ALL'
+    const sourceValue = nextSource || 'ALL'
     if (
       createdFrom.value === createdFromValue
       && createdTo.value === createdToValue
       && selectedCurrency.value === currencyValue
+      && selectedSalesperson.value === salespersonValue
+      && selectedSource.value === sourceValue
     ) {
       return
     }
@@ -319,6 +360,8 @@ watch(
     createdFrom.value = createdFromValue
     createdTo.value = createdToValue
     selectedCurrency.value = currencyValue
+    selectedSalesperson.value = salespersonValue
+    selectedSource.value = sourceValue
     await nextTick()
     suppressFilterWatch = false
   },
@@ -497,7 +540,7 @@ function handleColumnResize(event: PointerEvent) {
   if (!resize || event.pointerId !== resize.pointerId) return
   setColumnWidth(
     resize.key,
-    resize.startWidth + event.clientX - resize.startX,
+    resize.startWidth + (event.clientX - resize.startX) * 1.2,
   )
 }
 
@@ -903,11 +946,15 @@ function listQuery(
       selectedProductLine.value === 'ALL'
         ? undefined
         : selectedProductLine.value,
+    currency: selectedCurrency.value === 'ALL' ? undefined : selectedCurrency.value,
+    salesperson:
+      selectedSalesperson.value === 'ALL'
+        ? undefined
+        : selectedSalesperson.value,
     sourceType:
       selectedSource.value === 'ALL'
         ? undefined
-        : (selectedSource.value as 'manual' | 'document_import'),
-    currency: selectedCurrency.value === 'ALL' ? undefined : selectedCurrency.value,
+        : selectedSource.value as 'manual' | 'document_import',
     createdFrom: createdFrom.value || undefined,
     createdTo: createdTo.value || undefined,
   }
@@ -928,8 +975,9 @@ async function handleResetFilters() {
   suppressFilterWatch = true
   searchText.value = ''
   selectedProductLine.value = 'ALL'
-  selectedSource.value = 'ALL'
   selectedCurrency.value = 'ALL'
+  selectedSalesperson.value = 'ALL'
+  selectedSource.value = 'ALL'
   createdFrom.value = ''
   createdTo.value = ''
   await nextTick()
@@ -948,8 +996,9 @@ watch(searchText, () => {
   watch(
   [
     selectedProductLine,
-    selectedSource,
     selectedCurrency,
+    selectedSalesperson,
+    selectedSource,
     createdFrom,
     createdTo,
   ],
@@ -963,8 +1012,9 @@ const hasActiveFilters = computed(
   () =>
     searchText.value.trim() !== '' ||
     selectedProductLine.value !== 'ALL' ||
-    selectedSource.value !== 'ALL' ||
     selectedCurrency.value !== 'ALL' ||
+    selectedSalesperson.value !== 'ALL' ||
+    selectedSource.value !== 'ALL' ||
     createdFrom.value !== '' ||
     createdTo.value !== '',
 )
@@ -1020,7 +1070,7 @@ function displayQuoteDate(quote: Quotation): string {
       aria-label="Quote filters"
       class="rounded-xl border border-dm-border-light bg-white p-2 shadow-xs"
     >
-      <div class="grid grid-cols-1 items-end gap-2 md:grid-cols-2 xl:grid-cols-[minmax(0,1.35fr)_repeat(3,minmax(0,.7fr))_minmax(0,1.4fr)]">
+      <div class="grid grid-cols-1 items-end gap-2 md:grid-cols-2 xl:grid-cols-[minmax(0,1.2fr)_repeat(4,minmax(0,.65fr))_minmax(0,1.3fr)]">
           <div class="min-w-0">
             <label class="mb-1 block truncate text-xs font-medium text-dm-text-tertiary">
               {{ t('quotation.pages.list.keywordLabel') }}
@@ -1058,18 +1108,6 @@ function displayQuoteDate(quote: Quotation): string {
             />
           </div>
 
-          <div class="min-w-0">
-            <label class="mb-1 block truncate text-xs font-medium text-dm-text-tertiary">
-              {{ t('quotation.pages.list.sourceLabel') }}
-            </label>
-            <FormSelect
-              v-model="selectedSource"
-              class-name="w-full"
-              :trigger-class-name="`${FORM_SELECT_COMPACT_TRIGGER_CLASS} rounded-lg border-dm-border-light bg-white focus:border-blue-300 focus:ring-2 focus:ring-blue-100`"
-              :options="sourceFilterOptions"
-            />
-          </div>
-
           <div class="min-w-0" data-currency-filter>
             <label class="mb-1 block truncate text-xs font-medium text-dm-text-tertiary">
               {{ t('quotation.pages.list.currencyLabel') }}
@@ -1079,6 +1117,30 @@ function displayQuoteDate(quote: Quotation): string {
               class-name="w-full"
               :trigger-class-name="`${FORM_SELECT_COMPACT_TRIGGER_CLASS} rounded-lg border-dm-border-light bg-white focus:border-blue-300 focus:ring-2 focus:ring-blue-100`"
               :options="currencyFilterOptions"
+            />
+          </div>
+
+          <div class="min-w-0" data-salesperson-filter>
+            <label class="mb-1 block truncate text-xs font-medium text-dm-text-tertiary">
+              {{ t('quotation.pages.list.salespersonLabel') }}
+            </label>
+            <FormSelect
+              v-model="selectedSalesperson"
+              class-name="w-full"
+              :trigger-class-name="`${FORM_SELECT_COMPACT_TRIGGER_CLASS} rounded-lg border-dm-border-light bg-white focus:border-blue-300 focus:ring-2 focus:ring-blue-100`"
+              :options="salespersonFilterOptions"
+            />
+          </div>
+
+          <div class="min-w-0" data-source-filter>
+            <label class="mb-1 block truncate text-xs font-medium text-dm-text-tertiary">
+              {{ t('quotation.pages.list.sourceLabel') }}
+            </label>
+            <FormSelect
+              v-model="selectedSource"
+              class-name="w-full"
+              :trigger-class-name="`${FORM_SELECT_COMPACT_TRIGGER_CLASS} rounded-lg border-dm-border-light bg-white focus:border-blue-300 focus:ring-2 focus:ring-blue-100`"
+              :options="sourceFilterOptions"
             />
           </div>
 
@@ -1164,18 +1226,21 @@ function displayQuoteDate(quote: Quotation): string {
       id="table-panel"
       class="flex flex-1 flex-col rounded-xl border border-dm-border-light bg-white shadow-xs"
     >
-      <div class="flex flex-1 overflow-hidden rounded-t-xl">
+      <div class="min-w-0 flex flex-1 overflow-hidden rounded-t-xl">
         <div
-          class="flex-1"
+          class="min-w-0 flex-1"
           :class="tableUsesHorizontalScroll ? 'overflow-x-auto' : 'overflow-hidden'"
           data-quotation-table-scroller
         >
         <table
-          class="w-full table-fixed border-collapse text-left"
+          class="min-w-full table-fixed border-collapse text-left"
           :class="{ 'h-full': pageSize === 10 && quotations.length === 10 }"
           :style="tableUsesHorizontalScroll
-            ? { width: `${visibleTableWidth}px`, minWidth: `${visibleTableWidth}px` }
-            : { width: '100%' }"
+            ? {
+                width: `max(100%, ${visibleTableWidth}px)`,
+                minWidth: '100%',
+              }
+            : { width: '100%', minWidth: '100%' }"
         >
           <colgroup>
             <col
@@ -1188,7 +1253,7 @@ function displayQuoteDate(quote: Quotation): string {
           </colgroup>
           <thead>
             <tr
-              class="bg-[#fafafa] border-b border-dm-border-light text-dm-text-tertiary text-xs font-bold tracking-wider"
+              class="bg-[#fafafa] border-b border-dm-border-light text-dm-text-tertiary text-xs font-semibold"
             >
               <th
                 v-for="column in visibleColumns"
@@ -1236,7 +1301,12 @@ function displayQuoteDate(quote: Quotation): string {
                   />
                 </span>
               </th>
-              <th class="px-3 py-1.5 text-center">
+              <th
+                class="bg-[#fafafa] px-3 py-1.5 text-center"
+                :class="tableUsesHorizontalScroll
+                  ? 'sticky right-0 z-20 shadow-[-6px_0_8px_-8px_rgba(15,23,42,0.35)]'
+                  : ''"
+              >
                 {{ t('quotation.pages.list.tableActions') }}
               </th>
             </tr>
@@ -1278,7 +1348,7 @@ function displayQuoteDate(quote: Quotation): string {
             >
               <td v-if="visibleColumnKeys.includes('quoteNo')" class="px-3 py-1">
                 <p
-                  class="block truncate whitespace-nowrap font-mono font-semibold text-slate-700 transition group-hover:text-blue-700"
+                  class="block truncate whitespace-nowrap font-medium text-dm-text transition group-hover:text-blue-700"
                   :title="quote.quoteNo"
                 >
                   <span>{{ quote.quoteNo }}</span>
@@ -1299,17 +1369,10 @@ function displayQuoteDate(quote: Quotation): string {
               <td v-if="visibleColumnKeys.includes('project')" class="px-3 py-1">
                 <div class="min-w-0">
                   <p
-                    class="truncate whitespace-nowrap font-semibold text-dm-text"
+                    class="truncate whitespace-nowrap font-medium text-dm-text"
                     :title="quote.projectName"
                   >
                     {{ quote.projectName }}
-                  </p>
-                  <p class="mt-0.5 truncate whitespace-nowrap font-mono text-xs text-dm-text-tertiary">
-                    {{
-                      t('quotation.common.lineItemCount', {
-                        count: quote.itemCount ?? quote.items.length,
-                      })
-                    }}
                   </p>
                 </div>
               </td>
@@ -1338,13 +1401,13 @@ function displayQuoteDate(quote: Quotation): string {
               </td>
               <td
                 v-if="visibleColumnKeys.includes('total')"
-                class="px-3 py-1 text-right font-bold text-dm-text font-mono"
+                class="px-3 py-1 text-right font-medium tabular-nums text-dm-text"
               >
                 {{ displayTotal(quote) }}
               </td>
               <td
                 v-if="visibleColumnKeys.includes('currency')"
-                class="px-3 py-1 text-center font-mono text-xs font-semibold text-dm-text-secondary"
+                class="px-3 py-1 text-center text-sm text-dm-text-secondary"
               >
                 {{ getCurrencyShortLabel(quote.currency) }}
               </td>
@@ -1367,11 +1430,16 @@ function displayQuoteDate(quote: Quotation): string {
               </td>
               <td
                 v-if="visibleColumnKeys.includes('quoteDate')"
-                class="whitespace-nowrap px-3 py-1 font-mono text-dm-text-tertiary"
+                class="whitespace-nowrap px-3 py-1 text-dm-text-tertiary"
               >
                 {{ displayQuoteDate(quote) }}
               </td>
-              <td class="px-3 py-1">
+              <td
+                class="px-3 py-1"
+                :class="tableUsesHorizontalScroll
+                  ? 'sticky right-0 z-10 bg-white shadow-[-6px_0_8px_-8px_rgba(15,23,42,0.25)] group-hover:bg-[#fafafa]'
+                  : ''"
+              >
                 <div class="flex items-center justify-center gap-1.5">
                   <button
                     v-if="quote.sourceType !== 'document_import'"

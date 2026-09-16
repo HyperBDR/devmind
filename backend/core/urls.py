@@ -68,6 +68,9 @@ urlpatterns = [
     # Quotation management routes
     path('api/v1/quotation/', include('quotation.urls')),
 
+    # Invoice and sales records routes
+    path('api/v1/invoice/', include('invoice.urls')),
+
     # Task management routes (agentcore-task)
     path('api/v1/tasks/', include('agentcore_task.adapters.django.urls')),
 

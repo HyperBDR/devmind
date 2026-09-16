@@ -301,7 +301,8 @@ class FeishuStorageProvider:
     ) -> list[dict]:
         files = []
         page_token = None
-        for _ in range(20):
+        visited_page_tokens: set[str] = set()
+        while True:
             data = self.client.list_folder_files(
                 access_token,
                 folder_token,
@@ -311,9 +312,10 @@ class FeishuStorageProvider:
             files.extend(data.get("files") or [])
             if not data.get("has_more"):
                 break
-            page_token = data.get("next_page_token")
-            if not page_token:
+            page_token = str(data.get("next_page_token") or "").strip()
+            if not page_token or page_token in visited_page_tokens:
                 break
+            visited_page_tokens.add(page_token)
         return files
 
     def download(self, replica: DocumentReplica) -> tuple[bytes, str | None]:
@@ -380,12 +382,12 @@ class StorageRouter:
         )
 
 
-def configured_drive_context():
+def configured_drive_context(*, scope_key: str = ""):
     """Return a database route, or None while compatibility mode is active."""
     if not settings.QUOTATION_STORAGE_ROUTER_ENABLED:
         return None
     try:
-        route = StorageRouter().resolve()
+        route = StorageRouter().resolve(scope_key=scope_key)
         return (
             route.provider.client,
             route.provider.access_token(),
@@ -889,7 +891,20 @@ def delete_remote_file_if_unreferenced(
         legacy_reference_exists = DocumentAsset.objects.filter(
             feishu_file_token=cleanup.remote_file_token,
         ).exists()
-        if surviving_replica is not None or legacy_reference_exists:
+        invoice_reference_exists = False
+        try:
+            from invoice.models import InvoiceDocument
+
+            invoice_reference_exists = InvoiceDocument.objects.filter(
+                feishu_file_token=cleanup.remote_file_token,
+            ).exists()
+        except LookupError:
+            invoice_reference_exists = False
+        if (
+            surviving_replica is not None
+            or legacy_reference_exists
+            or invoice_reference_exists
+        ):
             if surviving_replica is not None:
                 metadata = dict(surviving_replica.metadata or {})
                 metadata["remote_file_owned"] = True
