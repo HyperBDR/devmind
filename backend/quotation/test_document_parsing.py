@@ -1881,7 +1881,7 @@ class DocumentParseEndpointTests(TestCase):
 
         self.assertTrue(reused)
         self.assertNotEqual(new_result.id, old_result.id)
-        self.assertEqual(new_result.parser_version, "2.14.0")
+        self.assertEqual(new_result.parser_version, "2.15.0")
         self.assertEqual(new_result.status, "confirmed")
         self.assertEqual(new_result.quotation_id, quotation.id)
         self.assertEqual(Quotation.objects.count(), 1)

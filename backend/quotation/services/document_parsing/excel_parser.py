@@ -27,6 +27,7 @@ from quotation.services.document_parsing.business_fields import (
     normalize_contact_name,
     parse_quote_date,
     repair_issuer_email,
+    section_type,
     strip_repeated_field_label,
 )
 from quotation.services.document_parsing.schemas import (
@@ -36,7 +37,7 @@ from quotation.services.document_parsing.schemas import (
 )
 
 PARSER_NAME = "devmind_standard_excel"
-PARSER_VERSION = "2.14.0"
+PARSER_VERSION = "2.15.0"
 MONEY_TOLERANCE = Decimal("0.02")
 
 
@@ -375,77 +376,70 @@ def _project_fields(rows: list[list[Any]]) -> dict[str, str]:
 def _line_items(
     rows: list[list[Any]], section: str, item_type: str
 ) -> list[ParsedQuotationItem]:
-    section_row = None
-    for index, row in enumerate(rows):
-        section_aliases = {
-            "Software": ("Software", "Software Subscription"),
-            "Others": ("Others", "Other"),
-        }.get(section, (section,))
-        if any(
-            _label_matches(value, *section_aliases)
-            for value in row
-        ):
-            section_row = index
-            break
-    if section_row is None:
-        return []
-    header_row = None
-    for index in range(section_row + 1, min(section_row + 5, len(rows))):
-        normalized = [_compact(value) for value in rows[index]]
-        if "description" in normalized and any(
-            value == "qty"
-            or value.startswith("qty")
-            or value.startswith("quantity")
-            for value in normalized
-        ):
-            header_row = index
-            break
-    if header_row is None:
-        return []
-    headers = [_compact(value) for value in rows[header_row]]
-
-    def column_for(*labels: str) -> int | None:
-        for column, header in enumerate(headers):
-            if any(
-                header == _compact(label)
-                or header.startswith(_compact(label))
-                for label in labels
-            ):
-                return column
-        return None
-
-    description_column = column_for("description")
-    qty_column = column_for("qty", "quantity")
-    list_price_column = column_for("list price")
-    discount_column = column_for("discount (%)", "discount")
-    net_price_column = column_for("discounted price", "net price")
-    extended_column = column_for("extended price", "amount")
-    if description_column is None:
-        return []
-
-    def row_value(row: list[Any], column: int | None) -> Any:
-        if column is None or column >= len(row):
-            return None
-        return row[column]
-
-    def discount_value(value: Any) -> Decimal:
-        parsed = _decimal(value)
-        if isinstance(value, (int, float, Decimal)) and Decimal(
-            "0"
-        ) <= parsed <= Decimal("1"):
-            return parsed * Decimal("100")
-        return parsed
-
+    section_rows = [
+        index
+        for index, row in enumerate(rows)
+        if any(section_type(value) == section for value in row)
+    ]
     items = []
-    for row in rows[header_row + 1 :]:
-        normalized = " ".join(_normalized(value) for value in row)
-        if "subtotal" in normalized:
-            break
-        description = _text(row_value(row, description_column))
-        if not description:
+    for section_row in section_rows:
+        header_row = None
+        for index in range(section_row + 1, min(section_row + 5, len(rows))):
+            normalized = [_compact(value) for value in rows[index]]
+            if "description" in normalized and any(
+                value == "qty"
+                or value.startswith("qty")
+                or value.startswith("quantity")
+                for value in normalized
+            ):
+                header_row = index
+                break
+        if header_row is None:
             continue
-        if (
-            any(
+        headers = [_compact(value) for value in rows[header_row]]
+
+        def column_for(*labels: str) -> int | None:
+            for column, header in enumerate(headers):
+                if any(
+                    header == _compact(label)
+                    or header.startswith(_compact(label))
+                    for label in labels
+                ):
+                    return column
+            return None
+
+        description_column = column_for("description")
+        qty_column = column_for("qty", "quantity")
+        list_price_column = column_for("list price")
+        discount_column = column_for("discount (%)", "discount")
+        net_price_column = column_for("discounted price", "net price")
+        extended_column = column_for("extended price", "amount")
+        if description_column is None:
+            continue
+
+        def row_value(row: list[Any], column: int | None) -> Any:
+            if column is None or column >= len(row):
+                return None
+            return row[column]
+
+        def discount_value(value: Any) -> Decimal:
+            parsed = _decimal(value)
+            if isinstance(value, (int, float, Decimal)) and Decimal(
+                "0"
+            ) <= parsed <= Decimal("1"):
+                return parsed * Decimal("100")
+            return parsed
+
+        next_section = section_rows[section_rows.index(section_row) + 1 :]
+        stop_at = min(next_section) if next_section else len(rows)
+        for row in rows[header_row + 1 : stop_at]:
+            normalized = " ".join(_normalized(value) for value in row)
+            if "subtotal" in normalized:
+                break
+            description = _text(row_value(row, description_column))
+            if not description or description in {"1", "2", "3", "4"}:
+                continue
+            if any(
                 marker in normalized
                 for marker in (
                     "grand total",
@@ -454,28 +448,28 @@ def _line_items(
                     "vat amount",
                     "tax amount",
                 )
+            ) and not _text(row_value(row, list_price_column)):
+                break
+            qty_raw = row_value(row, qty_column)
+            qty = _decimal(qty_raw) if _text(qty_raw) else Decimal("1")
+            items.append(
+                ParsedQuotationItem(
+                    line_no=len(items) + 1,
+                    type=item_type,
+                    description=description,
+                    qty=qty,
+                    list_price=_decimal(row_value(row, list_price_column)),
+                    discount_percent=discount_value(
+                        row_value(row, discount_column)
+                    ),
+                    net_unit_price=_decimal(
+                        row_value(row, net_price_column)
+                    ),
+                    extended_price=_decimal(
+                        row_value(row, extended_column)
+                    ),
+                )
             )
-            and not _text(row_value(row, list_price_column))
-        ):
-            break
-        qty_raw = row_value(row, qty_column)
-        qty = _decimal(qty_raw) if _text(qty_raw) else Decimal("1")
-        list_price = _decimal(row_value(row, list_price_column))
-        discount = discount_value(row_value(row, discount_column))
-        net_price = _decimal(row_value(row, net_price_column))
-        extended = _decimal(row_value(row, extended_column))
-        items.append(
-            ParsedQuotationItem(
-                line_no=len(items) + 1,
-                type=item_type,
-                description=description,
-                qty=qty,
-                list_price=list_price,
-                discount_percent=discount,
-                net_unit_price=net_price,
-                extended_price=extended,
-            )
-        )
     return items
 
 
@@ -613,21 +607,43 @@ def _parse_excel_rows(rows: list[list[Any]]) -> ParsedDocumentData:
         total_amount = _amount_by_label(rows, "total price vat not included")
     subtotal_before_vat = _amount_by_label(rows, "subtotal before")
     grand_total = _amount_by_label(rows, "grand total")
-    if not grand_total:
-        grand_total = total_amount
+    item_total = sum(
+        (item.extended_price for item in items),
+        Decimal("0"),
+    )
     if not subtotal_before_vat:
-        subtotal_before_vat = sum(
-            (item.extended_price for item in items),
-            Decimal("0"),
-        )
+        subtotal_before_vat = item_total
+    if not grand_total:
+        grand_total = total_amount or subtotal_before_vat
     if not subtotal_before_vat and not items:
         subtotal_before_vat = total_amount
     source_totals = {
         "software_subtotal": _decimal_string(
             _amount_by_label(rows, "software subscription subtotal")
+            or _amount_by_label(rows, "subscription items subtotal")
+            or _amount_by_label(rows, "subscriptions items subtotal")
+            or sum(
+                (
+                    item.extended_price
+                    for item in items
+                    if item.type == "Software"
+                ),
+                Decimal("0"),
+            )
         ),
         "others_subtotal": _decimal_string(
             _amount_by_label(rows, "others subtotal")
+            or _amount_by_label(rows, "one-time items subtotal")
+            or _amount_by_label(rows, "one time items subtotal")
+            or _amount_by_label(rows, "optional items subtotal")
+            or sum(
+                (
+                    item.extended_price
+                    for item in items
+                    if item.type == "Other"
+                ),
+                Decimal("0"),
+            )
         ),
         "subtotal_before_vat": _decimal_string(subtotal_before_vat),
         "vat_amount": _decimal_string(_amount_by_label(rows, "amount (")),
@@ -724,7 +740,8 @@ def _parse_excel_rows(rows: list[list[Any]]) -> ParsedDocumentData:
     }
     field_confidence["items"] = 1.0 if items else 0.0
     confidence = Decimal(
-        str(sum(field_confidence.values()) / len(field_confidence))
+        str((sum(field_confidence.values()) + field_confidence["items"] * 3)
+            / (len(field_confidence) + 3))
     ).quantize(Decimal("0.0001"))
     return ParsedDocumentData(
         quotation=quotation,
