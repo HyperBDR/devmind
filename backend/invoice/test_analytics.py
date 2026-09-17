@@ -83,20 +83,20 @@ class SalesDashboardTests(TestCase):
         )
 
         self.assertEqual(result["series"][0]["period"], "2026-Q1")
-        self.assertEqual(result["series"][1]["amount"], "250.00")
-        self.assertEqual(result["quarter_to_date"][0]["amount"], "250.00")
-        self.assertEqual(result["year_to_date"][0]["amount"], "350.00")
+        self.assertEqual(result["series"][1]["amount"], "6249.00")
+        self.assertEqual(result["quarter_to_date"][0]["amount"], "6249.00")
+        self.assertEqual(result["year_to_date"][0]["amount"], "6349.00")
         self.assertEqual(result["top_customers"][0]["name"], "Beta")
         self.assertEqual(result["by_product"][0]["name"], "Migration")
 
-    def test_dashboard_excludes_non_sales_document_types(self):
+    def test_dashboard_includes_non_refund_document_types_and_drafts(self):
         result = sales_dashboard(
             as_of=date(2026, 4, 30),
             currency="USD",
         )
 
         total = sum(Decimal(row["amount"]) for row in result["series"])
-        self.assertEqual(total, Decimal("350.00"))
+        self.assertEqual(total, Decimal("6349.00"))
 
     def test_dashboard_rejects_unknown_granularity(self):
         with self.assertRaises(ValueError):
@@ -114,7 +114,7 @@ class SalesDashboardTests(TestCase):
         )
 
         self.assertEqual(len(result["series"]), 1)
-        self.assertEqual(result["series"][0]["amount"], "250.00")
+        self.assertEqual(result["series"][0]["amount"], "6249.00")
         self.assertEqual(result["start_date"], "2026-04-01")
         self.assertEqual(result["end_date"], "2026-04-30")
 
@@ -263,6 +263,28 @@ class SalesDashboardTests(TestCase):
         self.assertEqual(result["comparison"][0]["year"], 2025)
         self.assertEqual(result["comparison"][0]["series"][0]["amount"], "80.00")
 
+    def test_dashboard_comparison_series_includes_full_prior_year(self):
+        Invoice.objects.create(
+            invoice_no="INV-2025-DEC",
+            invoice_date=date(2025, 12, 8),
+            customer_name="Prior December",
+            currency="USD",
+            status=InvoiceStatus.ISSUED,
+            total_amount=Decimal("120"),
+        )
+
+        result = sales_dashboard(
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 9, 30),
+            currency="USD",
+            comparison_years=1,
+        )
+
+        periods = {
+            row["period"] for row in result["comparison"][0]["series"]
+        }
+        self.assertIn("2025-12", periods)
+
     def test_dashboard_filters_amounts_and_lists_available_currencies(self):
         usd = sales_dashboard(
             start_date=date(2026, 1, 1),
@@ -277,7 +299,7 @@ class SalesDashboardTests(TestCase):
 
         self.assertEqual(
             sum(Decimal(row["amount"]) for row in usd["series"]),
-            Decimal("350.00"),
+            Decimal("6349.00"),
         )
         self.assertEqual(myr["series"][0]["amount"], "480.00")
         self.assertEqual(usd["available_currencies"], ["MYR", "USD"])

@@ -25,6 +25,7 @@ import {
 import worldMap from '../../assets/sales-dashboard/world-map.png'
 import FormSelect, { type FormSelectOption } from '../FormSelect.vue'
 import { useQuotationI18n } from '../../composables/useQuotationI18n'
+import { bindClickOutside } from '../useClickOutside'
 import {
   getSalesDashboard,
   type SalesDashboardData,
@@ -49,8 +50,10 @@ const { locale, t } = useQuotationI18n()
 
 const today = new Date()
 const currentYear = today.getFullYear()
-const startDate = ref(`${currentYear}-01-01`)
-const endDate = ref(today.toISOString().slice(0, 10))
+const startDate = ref(`${currentYear}-01`)
+const endDate = ref(
+  `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`,
+)
 const currency = ref('USD')
 const comparisonYears = ref<1 | 2>(2)
 const granularity = ref<Granularity>('month')
@@ -67,8 +70,13 @@ const customerYear = ref(currentYear)
 const regionRows = ref<SalesDimensionRow[]>([])
 const productRows = ref<SalesDimensionRow[]>([])
 const customerRows = ref<SalesDimensionRow[]>([])
+const dateRangeControlRef = ref<HTMLElement | null>(null)
 let loadTimer: ReturnType<typeof setTimeout> | undefined
 let requestSequence = 0
+
+bindClickOutside(dateRangeControlRef, () => {
+  showDatePicker.value = false
+})
 
 const dateLocale = computed(() =>
   String(locale.value).startsWith('zh') ? 'zh-CN' : 'en-US',
@@ -114,10 +122,11 @@ function formatCompactMoney(value: number | string): string {
 }
 
 function formatDateLabel(value: string): string {
+  const monthValue = value.length === 7 ? `${value}-01` : value
   return new Intl.DateTimeFormat(dateLocale.value, {
     month: 'short',
     year: 'numeric',
-  }).format(new Date(`${value}T00:00:00`))
+  }).format(new Date(`${monthValue}T00:00:00`))
 }
 
 function formatMonthLabel(value: string): string {
@@ -129,6 +138,12 @@ function formatMonthLabel(value: string): string {
 function formatChange(value: number | null): string {
   if (value === null) return '—'
   return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`
+}
+
+function monthEndDate(value: string): string {
+  const [year, month] = value.split('-').map(Number)
+  const lastDay = new Date(year, month, 0).getDate()
+  return `${value}-${String(lastDay).padStart(2, '0')}`
 }
 
 function rowWidth(row: SalesDimensionRow, rows: SalesDimensionRow[]) {
@@ -163,6 +178,29 @@ function productDisplayName(value?: string): string {
   return result || name.slice(0, maxCharacters)
 }
 
+function rowsForYear(rows: SalesPeriodRow[], year: number): SalesPeriodRow[] {
+  return rows.filter((row) => Number(row.period.slice(0, 4)) === year)
+}
+
+function chartMonthBounds() {
+  const startYear = Number(startDate.value.slice(0, 4))
+  const startMonth = startYear === selectedYear.value
+    ? Number(startDate.value.slice(5, 7))
+    : 1
+  return { startMonth, endMonth: Number(endDate.value.slice(5, 7)) }
+}
+
+function rowsForSelectedMonths(
+  rows: SalesPeriodRow[],
+  year: number,
+): SalesPeriodRow[] {
+  const { startMonth, endMonth } = chartMonthBounds()
+  return rowsForYear(rows, year).filter((row) => {
+    const month = Number(row.period.slice(5, 7))
+    return month >= startMonth && month <= endMonth
+  })
+}
+
 function chartLabels(value: Granularity): string[] {
   if (value === 'quarter') return quarterLabels.value
   if (value === 'year') return [String(selectedYear.value)]
@@ -183,11 +221,7 @@ function valuesFor(
   value: Granularity,
 ): Array<number | null> {
   const values: Array<number | null> = chartLabels(value).map(() => null)
-  const startYear = Number(startDate.value.slice(0, 4))
-  const startMonth = startYear === selectedYear.value
-    ? Number(startDate.value.slice(5, 7))
-    : 1
-  const endMonth = Number(endDate.value.slice(5, 7))
+  const { startMonth, endMonth } = chartMonthBounds()
   if (value === 'year') values[0] = 0
   if (value === 'month') {
     for (let month = startMonth; month <= endMonth; month += 1) {
@@ -210,7 +244,9 @@ function valuesFor(
 }
 
 const dateRangeLabel = computed(
-  () => `${formatDateLabel(startDate.value)} – ${formatDateLabel(endDate.value)}`,
+  () => `${formatDateLabel(startDate.value)} – ${formatDateLabel(
+    endDate.value,
+  )}`,
 )
 const selectedYear = computed(() => Number(endDate.value.slice(0, 4)))
 const selectedQuarter = computed(
@@ -248,7 +284,10 @@ const totalSales = computed(() => sumRows(data.value?.series))
 const qtd = computed(() => sumRows(data.value?.quarter_to_date))
 const ytd = computed(() => sumRows(data.value?.year_to_date))
 const priorTotal = computed(
-  () => sumRows(data.value?.comparison[0]?.series),
+  () => sumRows(rowsForSelectedMonths(
+    data.value?.comparison[0]?.series || [],
+    data.value?.comparison[0]?.year || selectedYear.value - 1,
+  )),
 )
 const totalChange = computed(() =>
   percentChange(totalSales.value, priorTotal.value),
@@ -292,13 +331,14 @@ const yearlyTrendData = computed(() => {
   const points = [
     ...(result?.comparison || []).map((comparison) => ({
       year: comparison.year,
-      value: sumRows(comparison.series),
-      hasData: comparison.series.length > 0,
+      value: sumRows(rowsForYear(comparison.series, comparison.year)),
+      hasData: rowsForYear(comparison.series, comparison.year).length > 0,
     })),
     {
       year: selectedYear.value,
-      value: sumRows(result?.series),
-      hasData: Boolean(result?.series.length),
+      value: sumRows(rowsForYear(result?.series || [], selectedYear.value)),
+      hasData: rowsForYear(result?.series || [], selectedYear.value).length
+        > 0,
     },
   ]
     .filter((point) => point.hasData)
@@ -311,7 +351,7 @@ const yearlyTrendData = computed(() => {
 
 const trendData = computed<ChartData<'line'>>(() => {
   const colors = ['#1677ff', '#32b497', '#98abc7']
-  const rows = data.value?.series || []
+  const rows = rowsForYear(data.value?.series || [], selectedYear.value)
   const comparisons = data.value?.comparison || []
   if (granularity.value === 'year') {
     return {
@@ -346,7 +386,10 @@ const trendData = computed<ChartData<'line'>>(() => {
       },
       ...comparisons.map((comparison, index) => ({
         label: String(comparison.year),
-        data: valuesFor(comparison.series, granularity.value),
+        data: valuesFor(
+          rowsForYear(comparison.series, comparison.year),
+          granularity.value,
+        ),
         borderColor: colors[index + 1],
         backgroundColor: colors[index + 1],
         pointBackgroundColor: colors[index + 1],
@@ -432,7 +475,7 @@ const periodData = computed<ChartData<'bar'>>(() => {
       {
         label: String(selectedYear.value),
         data: valuesFor(
-          source?.series || [],
+          rowsForYear(source?.series || [], selectedYear.value),
           comparisonGranularity.value,
         ),
         backgroundColor: colors[0],
@@ -441,7 +484,7 @@ const periodData = computed<ChartData<'bar'>>(() => {
       ...(source?.comparison || []).map((comparison, index) => ({
         label: String(comparison.year),
         data: valuesFor(
-          comparison.series,
+          rowsForYear(comparison.series, comparison.year),
           comparisonGranularity.value,
         ),
         backgroundColor: colors[index + 1],
@@ -556,8 +599,8 @@ async function loadDashboard() {
   try {
     const params = {
       currency: currency.value,
-      start_date: startDate.value,
-      end_date: endDate.value,
+      start_date: `${startDate.value}-01`,
+      end_date: monthEndDate(endDate.value),
       comparison_years: comparisonYears.value,
     }
     const [trendResult, comparisonResult] = await Promise.all([
@@ -661,7 +704,7 @@ onMounted(loadDashboard)
         </div>
 
         <div class="dashboard-filters">
-          <div class="date-range-control">
+          <div ref="dateRangeControlRef" class="date-range-control">
             <button
               class="filter-control date-range-button"
               type="button"
@@ -671,14 +714,26 @@ onMounted(loadDashboard)
               <span>{{ dateRangeLabel }}</span>
               <ChevronDown :size="15" />
             </button>
-            <div v-if="showDatePicker" class="date-range-popover">
+            <div
+              v-if="showDatePicker"
+              class="date-range-popover"
+              @click.stop
+            >
               <label>
                 <span>{{ t('quotation.sales.dateFrom') }}</span>
-                <input v-model="startDate" type="date">
+                <input
+                  v-model="startDate"
+                  type="month"
+                  @change="showDatePicker = false"
+                >
               </label>
               <label>
                 <span>{{ t('quotation.sales.dateTo') }}</span>
-                <input v-model="endDate" type="date">
+                <input
+                  v-model="endDate"
+                  type="month"
+                  @change="showDatePicker = false"
+                >
               </label>
             </div>
           </div>
@@ -799,25 +854,27 @@ onMounted(loadDashboard)
               @update:model-value="setBreakdownYear('region', $event)"
             />
           </div>
-          <img
-            :src="worldMap"
-            class="world-map"
-            :alt="t('quotation.sales.worldMapAlt')"
-          >
-          <div class="rank-list region-list">
-            <div
-              v-for="row in regionRows.slice(0, 4)"
-              :key="row.name"
-              class="rank-row"
+          <div class="region-breakdown-content">
+            <img
+              :src="worldMap"
+              class="world-map"
+              :alt="t('quotation.sales.worldMapAlt')"
             >
-              <span class="rank-name">{{ displayName(row.name) }}</span>
-              <span class="rank-bar">
-                <i :style="{ width: rowWidth(row, regionRows) }" />
-              </span>
-              <span class="rank-value">
-                <strong>{{ formatMoney(row.amount) }}</strong>
-                <small>{{ rowShare(row, regionRows) }}</small>
-              </span>
+            <div class="rank-list region-list">
+              <div
+                v-for="row in regionRows.slice(0, 4)"
+                :key="row.name"
+                class="rank-row"
+              >
+                <span class="rank-name">{{ displayName(row.name) }}</span>
+                <span class="rank-bar">
+                  <i :style="{ width: rowWidth(row, regionRows) }" />
+                </span>
+                <span class="rank-value">
+                  <strong>{{ formatMoney(row.amount) }}</strong>
+                  <small>{{ rowShare(row, regionRows) }}</small>
+                </span>
+              </div>
             </div>
           </div>
         </article>
@@ -1241,13 +1298,15 @@ onMounted(loadDashboard)
 
 .dashboard-breakdown-grid {
   display: grid;
-  grid-template-columns: minmax(300px, 0.93fr) minmax(300px, 0.93fr)
-    minmax(430px, 1.35fr);
-  gap: 11px;
+  grid-template-columns: minmax(280px, 0.71fr) minmax(280px, 0.71fr)
+    minmax(340px, 1fr);
+  column-gap: 7px;
   margin-top: 12px;
 }
 
 .breakdown-card {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   height: 382px;
   padding: 12px 18px 13px;
@@ -1255,10 +1314,20 @@ onMounted(loadDashboard)
 
 .world-map {
   display: block;
-  width: 100%;
-  height: 155px;
-  margin: 4px auto 6px;
+  width: min(100%, 260px);
+  height: 85px;
+  margin: 8px auto 8px;
   object-fit: contain;
+}
+
+.region-breakdown-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  justify-content: space-between;
+  margin-top: 12px;
+  margin-bottom: 20px;
 }
 
 .rank-list {
@@ -1266,17 +1335,29 @@ onMounted(loadDashboard)
 }
 
 .region-list {
-  gap: 10px;
+  gap: 15px;
+  margin-top: 0;
+  margin-bottom: 0;
 }
 
 .region-list .rank-row {
-  grid-template-columns: minmax(0, 0.9fr) minmax(80px, 1fr)
-    minmax(104px, 1.15fr);
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: 20px 12px;
+  column-gap: 10px;
+  row-gap: 4px;
 }
 
 .product-list {
   gap: 15px;
-  margin-top: 20px;
+  flex: 1;
+  align-content: space-between;
+  margin-top: 12px;
+  margin-bottom: 20px;
+  margin-right: -7px;
+}
+
+.product-card {
+  margin-right: 7px;
 }
 
 .rank-row {
@@ -1288,11 +1369,15 @@ onMounted(loadDashboard)
 }
 
 .product-list .rank-row {
-  grid-template-columns: minmax(110px, 1.1fr) minmax(70px, 1.35fr) 84px;
-  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: 20px 12px;
+  column-gap: 10px;
+  row-gap: 4px;
 }
 
 .rank-name {
+  grid-column: 1;
+  grid-row: 1;
   overflow: hidden;
   color: #294c84;
   font-size: 12px;
@@ -1304,6 +1389,8 @@ onMounted(loadDashboard)
 }
 
 .rank-bar {
+  grid-column: 1 / -1;
+  grid-row: 2;
   display: block;
   height: 20px;
   overflow: hidden;
@@ -1319,21 +1406,24 @@ onMounted(loadDashboard)
 }
 
 .rank-value {
-  display: grid;
-  justify-items: end;
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 6px;
   min-width: 0;
+  white-space: nowrap;
 }
 
 .rank-value strong {
   display: block;
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
+  width: auto;
+  min-width: max-content;
+  max-width: none;
   color: #0d2550;
   font-size: 11px;
   font-weight: 700;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -1350,14 +1440,14 @@ onMounted(loadDashboard)
 }
 
 .customer-table-wrap {
-  min-height: 0;
-  flex: 1;
+  flex: 0 0 auto;
   overflow: hidden;
-  margin-top: 4px;
+  margin-top: 12px;
 }
 
 .customer-table {
   width: 100%;
+  height: 292px;
   border-collapse: collapse;
   table-layout: fixed;
   color: #375987;
@@ -1366,7 +1456,7 @@ onMounted(loadDashboard)
 
 .customer-table th,
 .customer-table td {
-  height: 22px;
+  height: 26px;
   overflow: hidden;
   border-bottom: 1px solid #e3eaf4;
   padding: 0 6px;
@@ -1376,7 +1466,7 @@ onMounted(loadDashboard)
 }
 
 .customer-table th {
-  height: 24px;
+  height: 28px;
   background: #f4f7fb;
   color: #375987;
   font-size: 12px;
@@ -1414,7 +1504,8 @@ onMounted(loadDashboard)
 
 .view-all-link {
   align-self: flex-end;
-  margin-top: 8px;
+  margin-top: auto;
+  margin-bottom: 20px;
   color: #0876f9;
   font-size: 12px;
   font-weight: 600;

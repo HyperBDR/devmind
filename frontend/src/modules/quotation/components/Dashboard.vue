@@ -814,8 +814,13 @@ onMounted(async () => {
           <p class="text-sm font-semibold text-dm-text-secondary">
             {{ t('quotation.pages.dashboard.quotedValue') }}
           </p>
-          <p class="mt-4 truncate font-mono text-3xl font-bold text-dm-text">
-            {{ summaryLoading ? '—' : formatDashboardAmount(summary?.monthQuoteAmount || 0) }}
+          <p
+            class="dashboard-amount mt-4 break-all whitespace-normal font-sans
+              text-3xl font-bold leading-tight tracking-tight text-dm-text"
+          >
+            {{ summaryLoading ? '—' : formatDashboardAmount(
+              summary?.monthQuoteAmount || 0
+            ) }}
           </p>
           <p class="mt-2 text-xs text-dm-text-tertiary">{{ selectedDateRangeLabel }}</p>
         </div>
@@ -826,8 +831,13 @@ onMounted(async () => {
           <p class="text-sm font-semibold text-dm-text-secondary">
             {{ t('quotation.pages.dashboard.previousYearValue') }}
           </p>
-          <p class="mt-4 truncate font-mono text-3xl font-bold text-dm-text">
-            {{ summaryLoading ? '—' : formatDashboardAmount(summary?.previousYearQuoteAmount || 0) }}
+          <p
+            class="dashboard-amount mt-4 break-all whitespace-normal font-sans
+              text-3xl font-bold leading-tight tracking-tight text-dm-text"
+          >
+            {{ summaryLoading ? '—' : formatDashboardAmount(
+              summary?.previousYearQuoteAmount || 0
+            ) }}
           </p>
           <p class="mt-2 text-xs text-dm-text-tertiary">{{ t('quotation.pages.dashboard.samePeriodLastYear') }}</p>
         </div>
@@ -836,11 +846,16 @@ onMounted(async () => {
           <p class="text-sm font-semibold text-dm-text-secondary">
             {{ t('quotation.pages.dashboard.yearOverYearChange') }}
           </p>
-          <p class="mt-4 truncate font-mono text-3xl font-bold text-dm-text">
+          <p
+            class="dashboard-amount mt-4 break-all whitespace-normal font-sans
+              text-3xl font-bold leading-tight tracking-tight text-dm-text"
+          >
             {{
               summaryLoading || yearOverYearChange == null
                 ? '—'
-                : `${yearOverYearChange >= 0 ? '+' : ''}${yearOverYearChange.toFixed(1)}%`
+                : `${yearOverYearChange >= 0 ? '+' : ''}${
+                  yearOverYearChange.toFixed(1)
+                }%`
             }}
           </p>
           <p class="mt-2 text-xs text-dm-text-tertiary">

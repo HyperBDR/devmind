@@ -200,6 +200,27 @@ class QuotationDashboardTests(TestCase):
             "2026-06",
         ]
 
+    def test_summary_compares_selected_range_with_matching_prior_year(self):
+        self._quote(
+            "Q-CURRENT-RANGE",
+            amount="120.00",
+            quote_date="2026-04-15",
+        )
+        self._quote(
+            "Q-PRIOR-RANGE",
+            amount="30.00",
+            quote_date="2025-04-15",
+        )
+
+        response = self.api.get(
+            "/api/v1/quotation/dashboard/summary"
+            "?currency=USD&date_from=2026-04&date_to=2026-09"
+        )
+
+        assert response.status_code == 200
+        assert response.data["month_quote_amount"] == "120.00"
+        assert response.data["previous_year_quote_amount"] == "30.00"
+
     def test_summary_month_stats_ignore_currency(self):
         self._quote(
             "Q-CNY-JULY",
