@@ -17,7 +17,7 @@ from invoice.permissions import invoice_visibility_filter
 from invoice.services.regions import derive_customer_region
 
 
-ACTIVE_STATUSES = (InvoiceStatus.ISSUED, InvoiceStatus.PAID)
+INCLUDED_STATUSES = (InvoiceStatus.ISSUED, InvoiceStatus.PAID)
 
 
 def _is_dashboard_excluded_product(value: str | None) -> bool:
@@ -52,9 +52,10 @@ def _invoice_queryset(
     user=None,
 ):
     queryset = Invoice.objects.filter(
-        document_kind=InvoiceDocumentKind.INVOICE,
         invoice_date__isnull=False,
-        status__in=ACTIVE_STATUSES,
+        status__in=INCLUDED_STATUSES,
+    ).exclude(
+        document_kind=InvoiceDocumentKind.REFUND,
     )
     if currency:
         queryset = queryset.filter(currency=currency.upper())
@@ -160,7 +161,7 @@ def sales_dashboard(
     comparison_years: int = 2,
     user=None,
 ) -> dict:
-    """Build dashboard aggregates for issued and paid sales invoices."""
+    """Build aggregates for issued and paid non-refund documents."""
     if granularity not in {"month", "quarter", "year"}:
         raise ValueError("granularity must be month, quarter, or year")
     if comparison_years not in {1, 2}:
@@ -203,8 +204,10 @@ def sales_dashboard(
     ]
     comparison = []
     for year_offset in range(1, max(0, comparison_years) + 1):
-        comparison_start = _shift_year(start_date, -year_offset)
-        comparison_end = _shift_year(end_date, -year_offset)
+        comparison_year = end_date.year - year_offset
+        comparison_start = date(comparison_year, 1, 1)
+        comparison_end = date(comparison_year, 12, 31)
+        selected_comparison_end = _shift_year(end_date, -year_offset)
         year_invoices = list(
             _invoice_queryset(
                 currency,
@@ -225,7 +228,7 @@ def sales_dashboard(
             _invoice_queryset(
                 currency,
                 comparison_quarter_start,
-                comparison_end,
+                selected_comparison_end,
                 user,
             )
         )
@@ -233,13 +236,13 @@ def sales_dashboard(
             _invoice_queryset(
                 currency,
                 comparison_year_start,
-                comparison_end,
+                selected_comparison_end,
                 user,
             )
         )
         comparison.append(
             {
-                "year": end_date.year - year_offset,
+                "year": comparison_year,
                 "series": _amount_series(year_invoices, granularity),
                 "quarter_to_date_amount": (
                     f"{_total_amount(comparison_qtd):.2f}"

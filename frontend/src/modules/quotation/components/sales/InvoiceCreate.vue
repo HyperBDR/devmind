@@ -209,10 +209,11 @@ function uniqueHistory<T>(records: T[], key: (record: T) => string): T[] {
 }
 
 function normalizePaymentTerm(value: string): string {
-  const normalized = value.replace(/\s+/g, '').toUpperCase()
-  return paymentTermOptions.some((option) => option.value === normalized)
-    ? normalized
-    : 'CIA'
+  const normalized = value.trim()
+  const compact = normalized.replace(/\s+/g, '').toUpperCase()
+  return paymentTermOptions.some((option) => option.value === compact)
+    ? compact
+    : normalized || 'CIA'
 }
 
 const customerOptions = computed(() =>
@@ -1171,8 +1172,9 @@ onMounted(initializeForm)
             </label>
             <label class="invoice-field sm:col-span-2">
               <span>{{ t('quotation.sales.create.paymentTerms') }}</span>
-              <FormSelect
+              <HistoryTextInput
                 v-model="form.paymentTerms"
+                test-id="invoice-payment-terms"
                 :options="paymentTermOptions"
               />
             </label>

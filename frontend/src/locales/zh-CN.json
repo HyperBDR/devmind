@@ -760,8 +760,8 @@
     "invoices": "发票",
     "createInvoice": "新建发票",
     "dashboard": "报价看板",
-    "list": "报价查询中心",
-    "create": "在线创建报价单",
+    "list": "报价",
+    "create": "新建报价",
     "catalog": "目录配置",
     "audit": "操作审计"
   },
