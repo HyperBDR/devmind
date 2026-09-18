@@ -381,6 +381,11 @@ def _line_items(
         for index, row in enumerate(rows)
         if any(section_type(value) == section for value in row)
     ]
+    all_section_rows = [
+        index
+        for index, row in enumerate(rows)
+        if any(section_type(value) for value in row)
+    ]
     items = []
     for section_row in section_rows:
         header_row = None
@@ -430,14 +435,18 @@ def _line_items(
                 return parsed * Decimal("100")
             return parsed
 
-        next_section = section_rows[section_rows.index(section_row) + 1 :]
+        next_section = [
+            index
+            for index in all_section_rows
+            if index > section_row
+        ]
         stop_at = min(next_section) if next_section else len(rows)
         for row in rows[header_row + 1 : stop_at]:
             normalized = " ".join(_normalized(value) for value in row)
             if "subtotal" in normalized:
                 break
             description = _text(row_value(row, description_column))
-            if not description or description in {"1", "2", "3", "4"}:
+            if not description or re.fullmatch(r"\d+", description):
                 continue
             if any(
                 marker in normalized

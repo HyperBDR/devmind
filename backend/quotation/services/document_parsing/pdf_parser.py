@@ -8,11 +8,11 @@ from core.pdf_text import extract_pdf_text, pymupdf
 
 from quotation.services.document_parsing.business_fields import (
     EXPIRE_DATE_LABELS,
-    SECTION_ALIASES,
     PRODUCT_LINE_LABELS,
     QUOTE_DATE_LABELS,
     QUOTE_NO_LABELS,
     REMARKS_LABELS,
+    SECTION_ALIASES,
     explicit_product_line,
     find_issuer_email,
     known_product_line,
@@ -607,12 +607,15 @@ def _parse_item_line(line: str) -> ParsedQuotationItem | None:
 def _line_items(
     lines: list[str], section: str, item_type: str
 ) -> list[ParsedQuotationItem]:
+    section_aliases = SECTION_ALIASES.get(
+        section,
+        frozenset({normalize_section_name(section)}),
+    )
     section_index = None
     for index, line in enumerate(lines):
-        if normalize_section_name(line) in SECTION_ALIASES.get(
-            section, ()
-        ):
+        if normalize_section_name(line) in section_aliases:
             section_index = index
+            break
     if section_index is None:
         return []
     items: list[ParsedQuotationItem] = []
@@ -627,7 +630,7 @@ def _line_items(
     section_lines = lines[section_index + 1 :]
     for index, line in enumerate(section_lines):
         lower = normalize_section_name(line)
-        if lower in section_markers and lower != section.lower():
+        if lower in section_markers and lower not in section_aliases:
             break
         if any(
             marker in lower
@@ -855,8 +858,10 @@ def parse_quotation_pdf_text(text: str) -> ParsedDocumentData:
         excluded_emails,
     )
     items = []
-    items = _line_items(lines, "Software", "Software")
-    items.extend(_line_items(lines, "Others", "Other"))
+    for alias in SECTION_ALIASES["Software"]:
+        items.extend(_line_items(lines, alias, "Software"))
+    for alias in SECTION_ALIASES["Others"]:
+        items.extend(_line_items(lines, alias, "Other"))
     _merge_optional_service_rows(items, lines)
     for line_no, item in enumerate(items, start=1):
         item.line_no = line_no

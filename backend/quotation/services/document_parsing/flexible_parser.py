@@ -110,15 +110,7 @@ def _pdf_items(layout: str) -> list[ParsedQuotationItem]:
 
     items = []
     pending_description = ""
-    section_markers = {
-        alias
-        for aliases in SECTION_ALIASES.values()
-        for alias in aliases
-    }
-    has_section = any(
-        line.strip().lower() in section_markers
-        for line in layout.splitlines()
-    )
+    has_section = any(section_type(line) for line in layout.splitlines())
     in_section = not has_section
     last_item = None
     for line in layout.splitlines():
@@ -162,8 +154,10 @@ def _pdf_items(layout: str) -> list[ParsedQuotationItem]:
             )
             if item is not None:
                 item.line_no = len(items) + 1
-                item.type = section_item_type if has_section else (
-                    "Software" if not items else "Other"
+                item.type = (
+                    section_item_type
+                    if has_section
+                    else ("Software" if not items else "Other")
                 )
                 items.append(item)
                 last_item = item

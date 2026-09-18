@@ -27,8 +27,12 @@ from quotation.models import (
 )
 from quotation.services.document_parsing.excel_parser import (
     QuotationExcelParseError,
+    _line_items,
     _rows_openpyxl,
     parse_standard_quotation_excel,
+)
+from quotation.services.document_parsing.pdf_parser import (
+    _line_items as _pdf_line_items,
 )
 from quotation.services.storage import document_storage_key, write_document
 
@@ -401,6 +405,118 @@ class ExcelParserResourceLimitTests(SimpleTestCase):
 
 
 class StandardQuotationExcelParserTests(TestCase):
+    def test_parses_subscription_one_time_and_optional_sections(self):
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "Quotation"
+        headers = (
+            "Item",
+            "Description",
+            "Qty",
+            "List Price",
+            "Discount (%)",
+            "Discounted Price",
+            "Extended Price",
+        )
+        sheet.append(["Subscription Items"])
+        sheet.append(headers)
+        sheet.append([1, None, None, None, None, None, None])
+        sheet.append(["Subscription Items Subtotal:", 0])
+        sheet.append(["One-Time Items"])
+        sheet.append(headers)
+        sheet.append([1, None, None, None, None, None, None])
+        sheet.append(["One-Time Items Subtotal:", 0])
+        sheet.append(["Optional Items"])
+        sheet.append(headers)
+        sheet.append([1, "Failback License", 256, 14.9, "0%", 14.9, 3814.4])
+        sheet.append(
+            [
+                2,
+                "Failback Configuration Fee",
+                1,
+                3000,
+                "100%",
+                0,
+                0,
+            ]
+        )
+        sheet.append(["Optional Items Subtotal:", 3814.4])
+        sheet.append(["Subtotal before VAT:", 3814.4])
+        sheet.append(["Grand Total:", 3814.4])
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "optional.xlsx"
+            workbook.save(path)
+            workbook.close()
+            parsed = parse_standard_quotation_excel(path)
+
+        self.assertEqual([item.type for item in parsed.quotation.items], [
+            "Other",
+            "Other",
+        ])
+        self.assertEqual(parsed.quotation.items[0].qty, Decimal("256"))
+        self.assertEqual(
+            parsed.quotation.items[0].extended_price,
+            Decimal("3814.4"),
+        )
+        self.assertEqual(parsed.source_totals["others_subtotal"], "3814.4")
+        self.assertEqual(parsed.source_totals["subtotal_before_vat"], "3814.4")
+
+    def test_excel_section_without_subtotal_stops_at_other_section(self):
+        rows = [
+            ["Software"],
+            [
+                "Item",
+                "Description",
+                "Qty",
+                "List Price",
+                "Discount (%)",
+                "Discounted Price",
+                "Extended Price",
+            ],
+            [1, "Alpha", 1, 100, "0%", 100, 100],
+            ["Others"],
+            [
+                "Item",
+                "Description",
+                "Qty",
+                "List Price",
+                "Discount (%)",
+                "Discounted Price",
+                "Extended Price",
+            ],
+            [1, "Beta", 1, 50, "0%", 50, 50],
+        ]
+
+        items = _line_items(rows, "Software", "Software")
+
+        self.assertEqual([item.description for item in items], ["Alpha"])
+
+
+class StandardQuotationPdfParserTests(TestCase):
+    def test_pdf_repeated_section_title_keeps_prior_items(self):
+        lines = [
+            "Software Subscription",
+            "Item Description Qty List Price Discount (%) Discounted Price "
+            "Extended Price",
+            "1 Alpha 1 $10 0% $10 $10",
+            "Software Subscription",
+            "Item Description Qty List Price Discount (%) Discounted Price "
+            "Extended Price",
+            "2 Beta 1 $20 0% $20 $20",
+            "Others",
+            "Item Description Qty List Price Discount (%) Discounted Price "
+            "Extended Price",
+            "1 Delta 1 $30 0% $30 $30",
+        ]
+
+        items = _pdf_line_items(lines, "Software Subscription", "Software")
+
+        self.assertEqual(
+            [item.description for item in items],
+            ["Alpha", "Beta"],
+        )
+
     def test_parses_common_excel_template_variants(self):
         workbook = Workbook()
         sheet = workbook.active
@@ -1600,6 +1716,28 @@ class DocumentParseEndpointTests(TestCase):
             source="feishu",
             created_by_email=self.user.email,
         )
+
+    def test_review_required_parse_is_not_auto_confirmed(self):
+        from quotation.services.document_parsing.service import (
+            parse_and_create_quotation,
+        )
+
+        result = SimpleNamespace(
+            status="review_required",
+            quotation_id=None,
+        )
+        with patch(
+            "quotation.services.document_parsing.service.parse_document_asset",
+            return_value=(result, False),
+        ):
+            parsed, reused = parse_and_create_quotation(
+                self.asset,
+                actor=self.user,
+            )
+
+        self.assertIs(parsed, result)
+        self.assertFalse(reused)
+        self.assertFalse(Quotation.objects.exists())
 
     def test_parse_is_auto_created_and_idempotent(self):
         url = f"/api/v1/quotation/documents/{self.asset.id}/parse"

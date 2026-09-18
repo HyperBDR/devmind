@@ -377,6 +377,8 @@ def parse_and_create_quotation(
     if result.status == DocumentParseStatus.NOT_QUOTATION:
         discard_non_quotation_import(result)
         return result, reused_parse
+    if result.status == DocumentParseStatus.REVIEW_REQUIRED:
+        return result, reused_parse
     warning_codes = {
         warning.get("code")
         for warning in result.validation_warnings_json
