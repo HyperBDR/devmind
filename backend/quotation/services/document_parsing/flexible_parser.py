@@ -6,16 +6,18 @@ from decimal import Decimal
 from pathlib import Path
 from zipfile import BadZipFile
 
+from core.pdf_text import extract_pdf_text
 from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
-from core.pdf_text import extract_pdf_text
 
 from quotation.models import DocumentAsset
 from quotation.services.document_parsing.business_fields import (
     EXPIRE_DATE_LABELS,
     PRODUCT_LINE_LABELS,
+    SECTION_ALIASES,
     known_product_line,
     parse_quote_date,
+    section_type,
 )
 from quotation.services.document_parsing.excel_parser import (
     _decimal,
@@ -108,19 +110,17 @@ def _pdf_items(layout: str) -> list[ParsedQuotationItem]:
 
     items = []
     pending_description = ""
-    section_markers = {"software", "others"}
-    has_section = any(
-        line.strip().lower() in section_markers
-        for line in layout.splitlines()
-    )
+    has_section = any(section_type(line) for line in layout.splitlines())
     in_section = not has_section
     last_item = None
     for line in layout.splitlines():
         stripped = line.strip()
         if len(stripped) > 1000:
             continue
-        if stripped.lower() in section_markers:
+        current_type = section_type(stripped)
+        if current_type:
             in_section = True
+            section_item_type = current_type
             pending_description = ""
             continue
         if in_section and "subtotal" in stripped.lower():
@@ -154,7 +154,11 @@ def _pdf_items(layout: str) -> list[ParsedQuotationItem]:
             )
             if item is not None:
                 item.line_no = len(items) + 1
-                item.type = "Software" if not items else "Other"
+                item.type = (
+                    section_item_type
+                    if has_section
+                    else ("Software" if not items else "Other")
+                )
                 items.append(item)
                 last_item = item
                 pending_description = ""

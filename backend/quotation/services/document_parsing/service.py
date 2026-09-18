@@ -166,6 +166,17 @@ def parse_document_asset(
         parse_duration_ms = round((perf_counter() - parse_started) * 1000)
         if parsed.document_kind == "not_quotation":
             status = DocumentParseStatus.NOT_QUOTATION
+        elif (
+            not parsed.quotation.items
+            or parsed.field_confidence.get("items") == 0
+            or any(
+                error.get("field") == "items"
+                and error.get("code") == "required"
+                for error in parsed.validation_errors
+                if isinstance(error, dict)
+            )
+        ):
+            status = DocumentParseStatus.REVIEW_REQUIRED
         else:
             status = DocumentParseStatus.READY
         with transaction.atomic():
@@ -365,6 +376,8 @@ def parse_and_create_quotation(
         return result, True
     if result.status == DocumentParseStatus.NOT_QUOTATION:
         discard_non_quotation_import(result)
+        return result, reused_parse
+    if result.status == DocumentParseStatus.REVIEW_REQUIRED:
         return result, reused_parse
     warning_codes = {
         warning.get("code")
