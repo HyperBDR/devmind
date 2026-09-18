@@ -122,6 +122,7 @@ function formatCompactMoney(value: number | string): string {
 }
 
 function formatDateLabel(value: string): string {
+  if (!value) return '—'
   const monthValue = value.length === 7 ? `${value}-01` : value
   return new Intl.DateTimeFormat(dateLocale.value, {
     month: 'short',
@@ -141,6 +142,7 @@ function formatChange(value: number | null): string {
 }
 
 function monthEndDate(value: string): string {
+  if (!/^\d{4}-\d{2}$/.test(value)) return ''
   const [year, month] = value.split('-').map(Number)
   const lastDay = new Date(year, month, 0).getDate()
   return `${value}-${String(lastDay).padStart(2, '0')}`
@@ -183,6 +185,9 @@ function rowsForYear(rows: SalesPeriodRow[], year: number): SalesPeriodRow[] {
 }
 
 function chartMonthBounds() {
+  if (!startDate.value || !endDate.value) {
+    return { startMonth: 1, endMonth: 12 }
+  }
   const startYear = Number(startDate.value.slice(0, 4))
   const startMonth = startYear === selectedYear.value
     ? Number(startDate.value.slice(5, 7))
@@ -248,9 +253,11 @@ const dateRangeLabel = computed(
     endDate.value,
   )}`,
 )
-const selectedYear = computed(() => Number(endDate.value.slice(0, 4)))
+const selectedYear = computed(
+  () => Number(endDate.value.slice(0, 4)) || currentYear,
+)
 const selectedQuarter = computed(
-  () => Math.ceil(Number(endDate.value.slice(5, 7)) / 3),
+  () => Math.ceil(Number(endDate.value.slice(5, 7) || 1) / 3),
 )
 const yearOptions = computed<FormSelectOption[]>(() =>
   Array.from(
@@ -331,13 +338,20 @@ const yearlyTrendData = computed(() => {
   const points = [
     ...(result?.comparison || []).map((comparison) => ({
       year: comparison.year,
-      value: sumRows(rowsForYear(comparison.series, comparison.year)),
-      hasData: rowsForYear(comparison.series, comparison.year).length > 0,
+      value: sumRows(rowsForSelectedMonths(comparison.series, comparison.year)),
+      hasData: rowsForSelectedMonths(comparison.series, comparison.year).length
+        > 0,
     })),
     {
       year: selectedYear.value,
-      value: sumRows(rowsForYear(result?.series || [], selectedYear.value)),
-      hasData: rowsForYear(result?.series || [], selectedYear.value).length
+      value: sumRows(rowsForSelectedMonths(
+        result?.series || [],
+        selectedYear.value,
+      )),
+      hasData: rowsForSelectedMonths(
+        result?.series || [],
+        selectedYear.value,
+      ).length
         > 0,
     },
   ]
@@ -351,7 +365,10 @@ const yearlyTrendData = computed(() => {
 
 const trendData = computed<ChartData<'line'>>(() => {
   const colors = ['#1677ff', '#32b497', '#98abc7']
-  const rows = rowsForYear(data.value?.series || [], selectedYear.value)
+  const rows = rowsForSelectedMonths(
+    data.value?.series || [],
+    selectedYear.value,
+  )
   const comparisons = data.value?.comparison || []
   if (granularity.value === 'year') {
     return {
@@ -387,7 +404,7 @@ const trendData = computed<ChartData<'line'>>(() => {
       ...comparisons.map((comparison, index) => ({
         label: String(comparison.year),
         data: valuesFor(
-          rowsForYear(comparison.series, comparison.year),
+          rowsForSelectedMonths(comparison.series, comparison.year),
           granularity.value,
         ),
         borderColor: colors[index + 1],
@@ -475,7 +492,10 @@ const periodData = computed<ChartData<'bar'>>(() => {
       {
         label: String(selectedYear.value),
         data: valuesFor(
-          rowsForYear(source?.series || [], selectedYear.value),
+          rowsForSelectedMonths(
+            source?.series || [],
+            selectedYear.value,
+          ),
           comparisonGranularity.value,
         ),
         backgroundColor: colors[0],
@@ -484,7 +504,7 @@ const periodData = computed<ChartData<'bar'>>(() => {
       ...(source?.comparison || []).map((comparison, index) => ({
         label: String(comparison.year),
         data: valuesFor(
-          rowsForYear(comparison.series, comparison.year),
+          rowsForSelectedMonths(comparison.series, comparison.year),
           comparisonGranularity.value,
         ),
         backgroundColor: colors[index + 1],
@@ -589,6 +609,10 @@ const kpis = computed(() => [
 ])
 
 async function loadDashboard() {
+  if (!startDate.value || !endDate.value) {
+    loading.value = false
+    return
+  }
   if (startDate.value > endDate.value) {
     error.value = t('quotation.sales.invalidDateRange')
     return

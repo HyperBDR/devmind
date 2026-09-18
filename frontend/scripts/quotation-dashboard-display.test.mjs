@@ -15,8 +15,14 @@ test('sales dashboard uses month filters and year-specific comparison series', (
   assert.match(salesDashboard, /v-model="startDate"[\s\S]*type="month"/)
   assert.match(salesDashboard, /v-model="endDate"[\s\S]*type="month"/)
   assert.match(salesDashboard, /function rowsForYear\(/)
-  assert.match(salesDashboard, /rowsForYear\(source\?\.series \|\| \[\], selectedYear\.value\)/)
-  assert.match(salesDashboard, /rowsForYear\(comparison\.series, comparison\.year\)/)
+  assert.match(
+    salesDashboard,
+    /rowsForSelectedMonths\(\s*source\?\.series \|\| \[\],\s*selectedYear\.value,/,
+  )
+  assert.match(
+    salesDashboard,
+    /rowsForSelectedMonths\(comparison\.series, comparison\.year\)/,
+  )
   assert.match(salesDashboard, /function rowsForSelectedMonths\(/)
   assert.match(salesDashboard, /return monthLabels\.value/)
   assert.match(salesDashboard, /values\[month - 1\] = 0/)

@@ -83,20 +83,20 @@ class SalesDashboardTests(TestCase):
         )
 
         self.assertEqual(result["series"][0]["period"], "2026-Q1")
-        self.assertEqual(result["series"][1]["amount"], "6249.00")
-        self.assertEqual(result["quarter_to_date"][0]["amount"], "6249.00")
-        self.assertEqual(result["year_to_date"][0]["amount"], "6349.00")
+        self.assertEqual(result["series"][1]["amount"], "5250.00")
+        self.assertEqual(result["quarter_to_date"][0]["amount"], "5250.00")
+        self.assertEqual(result["year_to_date"][0]["amount"], "5350.00")
         self.assertEqual(result["top_customers"][0]["name"], "Beta")
         self.assertEqual(result["by_product"][0]["name"], "Migration")
 
-    def test_dashboard_includes_non_refund_document_types_and_drafts(self):
+    def test_dashboard_includes_non_refund_document_types_without_drafts(self):
         result = sales_dashboard(
             as_of=date(2026, 4, 30),
             currency="USD",
         )
 
         total = sum(Decimal(row["amount"]) for row in result["series"])
-        self.assertEqual(total, Decimal("6349.00"))
+        self.assertEqual(total, Decimal("5350.00"))
 
     def test_dashboard_rejects_unknown_granularity(self):
         with self.assertRaises(ValueError):
@@ -114,7 +114,7 @@ class SalesDashboardTests(TestCase):
         )
 
         self.assertEqual(len(result["series"]), 1)
-        self.assertEqual(result["series"][0]["amount"], "6249.00")
+        self.assertEqual(result["series"][0]["amount"], "5250.00")
         self.assertEqual(result["start_date"], "2026-04-01")
         self.assertEqual(result["end_date"], "2026-04-30")
 
@@ -299,7 +299,7 @@ class SalesDashboardTests(TestCase):
 
         self.assertEqual(
             sum(Decimal(row["amount"]) for row in usd["series"]),
-            Decimal("6349.00"),
+            Decimal("5350.00"),
         )
         self.assertEqual(myr["series"][0]["amount"], "480.00")
         self.assertEqual(usd["available_currencies"], ["MYR", "USD"])

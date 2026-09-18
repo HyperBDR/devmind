@@ -89,6 +89,10 @@ test('Quotation secondary navigation uses concise labels', () => {
     ),
     /"list": "报价",[\s\S]*"create": "新建报价"/,
   )
+  assert.doesNotMatch(
+    JSON.stringify(zh),
+    /在线创建报价单|报价查询中心/,
+  )
 })
 
 test('Sales product labels clip without an ellipsis', () => {
@@ -151,6 +155,19 @@ test('Yearly trend connects totals across the parsed invoice years', () => {
   assert.match(dashboard, /filter\(\(point\) => point\.hasData\)/)
   assert.match(dashboard, /labels: yearlyTrendData\.value\.labels/)
   assert.match(dashboard, /data: yearlyTrendData\.value\.values/)
+})
+
+test('Comparison charts stay inside the selected month range', () => {
+  assert.match(
+    dashboard,
+    /value: sumRows\(rowsForSelectedMonths\(comparison\.series, comparison\.year\)\)/,
+  )
+  assert.match(
+    dashboard,
+    /data: valuesFor\(\s*rowsForSelectedMonths\(\s*comparison\.series,/,
+  )
+  assert.match(dashboard, /if \(!startDate\.value \|\| !endDate\.value\)/)
+  assert.match(dashboard, /if \(!value\) return '—'/)
 })
 
 test('Sales KPI values share one aligned single-line title row', () => {

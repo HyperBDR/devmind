@@ -17,11 +17,7 @@ from invoice.permissions import invoice_visibility_filter
 from invoice.services.regions import derive_customer_region
 
 
-INCLUDED_STATUSES = (
-    InvoiceStatus.DRAFT,
-    InvoiceStatus.ISSUED,
-    InvoiceStatus.PAID,
-)
+INCLUDED_STATUSES = (InvoiceStatus.ISSUED, InvoiceStatus.PAID)
 
 
 def _is_dashboard_excluded_product(value: str | None) -> bool:
@@ -165,7 +161,7 @@ def sales_dashboard(
     comparison_years: int = 2,
     user=None,
 ) -> dict:
-    """Build dashboard aggregates for issued and paid sales invoices."""
+    """Build aggregates for issued and paid non-refund documents."""
     if granularity not in {"month", "quarter", "year"}:
         raise ValueError("granularity must be month, quarter, or year")
     if comparison_years not in {1, 2}:
