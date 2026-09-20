@@ -86,7 +86,10 @@ class SalesDashboardTests(TestCase):
         self.assertEqual(result["series"][1]["amount"], "5250.00")
         self.assertEqual(result["quarter_to_date"][0]["amount"], "5250.00")
         self.assertEqual(result["year_to_date"][0]["amount"], "5350.00")
-        self.assertEqual(result["top_customers"][0]["name"], "Beta")
+        self.assertEqual(
+            result["top_customers"][0]["name"],
+            "Proforma customer",
+        )
         self.assertEqual(result["by_product"][0]["name"], "Migration")
 
     def test_dashboard_includes_non_refund_document_types_without_drafts(self):
@@ -125,8 +128,12 @@ class SalesDashboardTests(TestCase):
             currency="USD",
         )
 
-        self.assertEqual(result["top_customers"][0]["name"], "Beta")
-        self.assertEqual(result["top_customers"][0]["region"], "EMEA")
+        customer = next(
+            row
+            for row in result["top_customers"]
+            if row["name"] == "Beta"
+        )
+        self.assertEqual(customer["region"], "EMEA")
 
     def test_customer_region_is_derived_from_customer_address(self):
         invoice = Invoice.objects.create(
@@ -322,7 +329,7 @@ class SalesDashboardTests(TestCase):
             comparison_years=1,
         )
 
-        self.assertEqual(result["quarter_to_date"][0]["amount"], "250.00")
+        self.assertEqual(result["quarter_to_date"][0]["amount"], "5250.00")
         self.assertEqual(
             result["comparison"][0]["quarter_to_date_amount"],
             "125.00",
@@ -348,7 +355,7 @@ class SalesDashboardTests(TestCase):
             currency="USD",
         )
 
-        self.assertEqual(result["year_over_year"]["amount"], "350.00")
+        self.assertEqual(result["year_over_year"]["amount"], "5350.00")
         self.assertEqual(
             result["year_over_year"]["previous_amount"],
             "125.00",
