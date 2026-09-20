@@ -191,6 +191,40 @@ class QuotationExportApiTests(QuotationExportFixture):
         self.assertEqual(ExportJob.objects.count(), 1)
         apply_async.assert_called_once()
 
+    @patch("quotation.tasks.render_quotation_export_task.apply_async")
+    def test_repeated_request_rerenders_when_asset_is_missing(
+        self,
+        apply_async,
+    ):
+        apply_async.return_value.id = "celery-task-id"
+        payload = {
+            "formats": ["pdf"],
+            "quotation_version": 1,
+            "archive_to_feishu": False,
+        }
+
+        with self.captureOnCommitCallbacks(execute=True):
+            first = self.client.post(
+                f"/api/v1/quotation/quotations/{self.quotation.id}/exports",
+                payload,
+                format="json",
+            )
+        ExportJob.objects.filter(pk=first.data["job_id"]).update(
+            status=ExportJobStatus.COMPLETED
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            second = self.client.post(
+                f"/api/v1/quotation/quotations/{self.quotation.id}/exports",
+                payload,
+                format="json",
+            )
+
+        self.assertEqual(second.data["job_id"], first.data["job_id"])
+        self.assertEqual(second.data["status"], ExportJobStatus.QUEUED)
+        self.assertEqual(ExportJob.objects.count(), 1)
+        self.assertEqual(apply_async.call_count, 2)
+
     @patch(
         "quotation.tasks.render_quotation_export_task.apply_async",
         side_effect=RuntimeError("broker unavailable"),
