@@ -1643,13 +1643,19 @@ import {
 } from '@/mock/cloudBillingOverview'
 import { extractErrorMessage, extractResponseData } from '@/utils/api'
 import {
+  cloudBillingAccountMatchesQuery
+} from '@/utils/cloudBillingAccountSearch'
+import {
   cloudBillingAccountAttentionReasons,
   compareCloudBillingAccounts,
   hasCloudBillingBalance,
   isCloudBillingAccountCritical,
   selectCloudBillingTrendAccounts
 } from '@/utils/cloudBillingOverviewRisk'
-import { getLocalizedProviderDisplayName } from '@/utils/providerDisplay'
+import {
+  getLocalizedProviderDisplayName,
+  getProviderTypeSearchTerms
+} from '@/utils/providerDisplay'
 import { useToast } from '@/composables/useToast'
 
 const props = defineProps({
@@ -2472,19 +2478,19 @@ const currencyChartOptions = {
 }
 
 const filteredAccounts = computed(() => {
-  const query = searchQuery.value.trim().toLowerCase()
+  const query = searchQuery.value.trim()
+  const accounts = overview.value.accounts || []
   if (!query) {
-    return overview.value.accounts || []
+    return accounts
   }
-  return (overview.value.accounts || []).filter((item) => {
-    return (
-      localizedAccountName(item).toLowerCase().includes(query) ||
-      localizedProviderLabel(item).toLowerCase().includes(query) ||
-      String(item.account_id || '')
-        .toLowerCase()
-        .includes(query)
-    )
-  })
+  return accounts.filter((item) =>
+    cloudBillingAccountMatchesQuery(item, query, {
+      accountLabel: localizedAccountName(item),
+      providerLabel: localizedProviderLabel(item),
+      paymentTypeLabel: paymentTypeLabel(item.type),
+      providerAliases: getProviderTypeSearchTerms(item.provider_type)
+    })
+  )
 })
 
 function sumUniqueProviderBalances(accounts) {
@@ -2758,7 +2764,6 @@ function accountAttentionLabel(account) {
     account_overdrawn: 'cloudBilling.billing.overviewAccountOverdrawn',
     account_unavailable: 'cloudBilling.billing.overviewAccountUnavailable',
     collection_failed: 'cloudBilling.billing.overviewCollectionFailed',
-    data_expired: 'cloudBilling.billing.overviewDataExpired',
     high_risk: 'cloudBilling.billing.overviewRiskHigh'
   }
   return cloudBillingAccountAttentionReasons(account)

@@ -48,8 +48,6 @@ export function cloudBillingAccountAttentionReasons(account) {
   const reasons = []
   if (account?.stale_reason === 'collection_failed') {
     reasons.push('collection_failed')
-  } else if (account?.is_data_stale) {
-    reasons.push('data_expired')
   }
   if (isKnownUnavailable(account)) reasons.push('account_unavailable')
   if (isKnownOverdrawn(account)) reasons.push('account_overdrawn')
