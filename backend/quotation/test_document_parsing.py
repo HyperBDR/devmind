@@ -492,6 +492,23 @@ class StandardQuotationExcelParserTests(TestCase):
 
         self.assertEqual([item.description for item in items], ["Alpha"])
 
+    def test_excel_skips_numeric_placeholder_descriptions(self):
+        rows = [
+            ["Optional Items"],
+            [
+                "Item",
+                "Description",
+                "Qty",
+                "List Price",
+                "Discount (%)",
+                "Discounted Price",
+                "Extended Price",
+            ],
+            [5, "5", 1, 0, "0%", 0, 0],
+        ]
+
+        self.assertEqual(_line_items(rows, "Others", "Other"), [])
+
 
 class StandardQuotationPdfParserTests(TestCase):
     def test_pdf_repeated_section_title_keeps_prior_items(self):
@@ -1645,6 +1662,23 @@ class StandardQuotationPdfParserTests(TestCase):
             "Remote Product Service-Premium 7*24\n"
             "(Waive for ASL first order)",
         )
+
+    def test_flexible_pdf_parser_normalizes_colon_section_aliases(self):
+        from quotation.services.document_parsing.flexible_parser import (
+            _pdf_items,
+        )
+
+        items = _pdf_items(
+            "\n".join(
+                [
+                    "Services:",
+                    "1 Managed Service 1 USD 100 0% USD 100 USD 100",
+                ]
+            )
+        )
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].type, "Others")
 
     def test_flexible_pdf_total_supports_business_currencies(self):
         from quotation.services.document_parsing.flexible_parser import (
