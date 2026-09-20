@@ -44,6 +44,8 @@ function highlightCellClass(changed: boolean): string {
 const model = computed(() => buildQuotationPreviewModel(props.quote, { currentUser: props.currentUser }))
 const totalsLabelSpan = computed(() => {
   const labels = [
+    'Software subscription subtotal:',
+    'Others Subtotal:',
     `Subtotal before ${model.value.taxLabel}:`,
     `${model.value.taxLabel} Amount (${model.value.vatRate}%):`,
     model.value.customTotalLabel
@@ -136,7 +138,7 @@ const headerCellClass =
           <td colspan="7" class="px-1.5 py-1 align-middle" />
         </tr>
         <tr>
-          <td colspan="7" class="px-1.5 py-1 text-center text-[18px] font-semibold align-middle">
+          <td colspan="7" class="break-words px-1.5 py-1 text-center text-[18px] font-semibold align-middle">
             {{ model.issuerCompanyName }}
           </td>
         </tr>
@@ -174,7 +176,7 @@ const headerCellClass =
             Quote No.:
           </td>
           <td
-            class="whitespace-nowrap border-b border-slate-900 px-1.5 py-1 pb-0.5 text-right font-mono align-middle"
+            class="whitespace-normal break-all border-b border-slate-900 px-1.5 py-1 pb-0.5 text-right font-mono leading-tight align-middle"
           >
             {{ model.quoteNo }}
           </td>
@@ -289,7 +291,7 @@ const headerCellClass =
           </td>
         </tr>
         <tr>
-          <td class="whitespace-nowrap border border-slate-300 px-1.5 py-1 align-middle">
+          <td class="whitespace-normal break-words border border-slate-300 px-1.5 py-1 align-middle">
             {{ model.signer.name }}
           </td>
           <td class="break-all border border-slate-300 px-1.5 py-1 align-middle">
@@ -458,10 +460,10 @@ const headerCellClass =
           </td>
         </tr>
         <tr>
-          <td colspan="4" class="px-1.5 py-1 align-middle" />
+          <td :colspan="totalsSpacerSpan" class="px-1.5 py-1 align-middle" />
           <td
-            colspan="2"
-            class="whitespace-nowrap border border-slate-300 px-1.5 py-1 text-right font-semibold align-middle"
+            :colspan="totalsLabelSpan"
+            class="whitespace-normal break-words border border-slate-300 px-1.5 py-1 text-right font-semibold leading-tight align-middle"
           >
             Others Subtotal:
           </td>
