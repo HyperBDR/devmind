@@ -34,6 +34,26 @@ test('quotation preview lets long English table headings wrap inside fixed colum
   assert.match(preview, /props\.scale === 'compact' \? 'text-\[9px\]' : 'text-\[11px\]'/)
 })
 
+test('quotation preview expands subtotal labels with their content', () => {
+  assert.match(preview, /'Software subscription subtotal:',/)
+  assert.match(preview, /'Others Subtotal:',/)
+  assert.match(
+    preview,
+    /:colspan="totalsLabelSpan"\s*class="whitespace-normal break-words[^>]+>\s*Others Subtotal:/,
+  )
+})
+
+test('quotation preview wraps variable header values', () => {
+  assert.match(
+    preview,
+    /class="whitespace-normal break-all[^>]+>\s*\{\{ model\.quoteNo \}\}/,
+  )
+  assert.match(
+    preview,
+    /class="whitespace-normal break-words[^>]+>\s*\{\{ model\.signer\.name \}\}/,
+  )
+})
+
 test('quotation line items respond to the available form pane width', () => {
   assert.match(createPage, /container: quotation-line-items \/ inline-size/)
   assert.match(createPage, /@container quotation-line-items \(min-width: 400px\)/)
