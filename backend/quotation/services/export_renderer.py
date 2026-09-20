@@ -770,7 +770,23 @@ def render_quotation_xlsx(
     sheet = workbook.active
     sheet.title = DEFAULT_WORKSHEET
     sheet.sheet_view.showGridLines = False
-    widths = (12, 24, 8, 12, 10, 17, 17)
+    items = list(snapshot.get("items") or [])
+    completed_items = [
+        item
+        for item in items
+        if item.get("description")
+        or item.get("name")
+        or Decimal(str(item.get("list_price") or 0)) > 0
+    ]
+    show_discount = not completed_items or any(
+        Decimal(str(item.get("discount_percent") or 0)) != 0
+        for item in completed_items
+    )
+    widths = (
+        (12, 24, 8, 12, 10, 17, 17)
+        if show_discount
+        else (12, 32, 8, 8, 8, 9, 23)
+    )
     for index, width in enumerate(widths, 1):
         sheet.column_dimensions[get_column_letter(index)].width = width
 
@@ -1074,7 +1090,6 @@ def render_quotation_xlsx(
     merged(20, 1, 7, "")
     sheet.row_dimensions[20].height = 15
 
-    items = list(snapshot.get("items") or [])
     groups = (
         (
             "Software",
@@ -1117,6 +1132,8 @@ def render_quotation_xlsx(
         row += 1
         for column, header in enumerate(headers, 1):
             sheet.cell(row, column, header)
+        if not show_discount:
+            sheet.merge_cells(start_row=row, start_column=4, end_row=row, end_column=6)
         style_range(
             row,
             font=bold,
@@ -1134,6 +1151,8 @@ def render_quotation_xlsx(
         ]
         for index, item in enumerate(rows, 1):
             description = item.get("description") or item.get("name") or ""
+            discount_value = item.get("discount_percent") or 0
+            has_item_discount = Decimal(str(discount_value)) != 0
             values = [
                 index if description else "",
                 description,
@@ -1144,7 +1163,7 @@ def render_quotation_xlsx(
                         item.get("discount_percent") or 0,
                         decimal_places=4,
                     )
-                    if description
+                    if description and show_discount and has_item_discount
                     else None
                 ),
                 money(item.get("net_unit_price")) if description else None,
@@ -1152,6 +1171,13 @@ def render_quotation_xlsx(
             ]
             for column, content in enumerate(values, 1):
                 sheet.cell(row, column, content)
+            if not show_discount:
+                sheet.merge_cells(
+                    start_row=row,
+                    start_column=4,
+                    end_row=row,
+                    end_column=6,
+                )
             style_range(row, border=cell_border)
             sheet.row_dimensions[row].height = _description_row_height(
                 description,
@@ -1165,11 +1191,12 @@ def render_quotation_xlsx(
             sheet.cell(row, 3).number_format = numeric_format(
                 item.get("qty"),
             )
-            sheet.cell(row, 5).number_format = numeric_format(
-                item.get("discount_percent"),
-                decimal_places=4,
-                suffix="%",
-            )
+            if show_discount and has_item_discount:
+                sheet.cell(row, 5).number_format = numeric_format(
+                    discount_value,
+                    decimal_places=4,
+                    suffix="%",
+                )
             for column in (4, 6, 7):
                 sheet.cell(row, column).alignment = Alignment(
                     horizontal="right",
