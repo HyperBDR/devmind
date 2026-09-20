@@ -887,7 +887,7 @@ class QuotationExportTaskTests(QuotationExportFixture):
         sheet = workbook["Quotation"]
         self.assertEqual(
             [sheet.column_dimensions[column].width for column in "ABCDEFG"],
-            [12, 24, 8, 12, 10, 17, 17],
+            [12, 32, 8, 8, 8, 9, 23],
         )
         self.assertEqual(sheet["A1"].value, None)
         self.assertEqual(sheet["A2"].value, "OnePro Cloud Limited")
@@ -906,8 +906,8 @@ class QuotationExportTaskTests(QuotationExportFixture):
         self.assertEqual(sheet["C23"].number_format, "0")
         self.assertEqual(sheet["D23"].value, 60000)
         self.assertEqual(sheet["D23"].number_format, "#,##0")
-        self.assertEqual(sheet["E23"].value, 0)
-        self.assertEqual(sheet["E23"].number_format, '0"%"')
+        self.assertEqual(sheet["E22"].value, None)
+        self.assertEqual(sheet["E23"].value, None)
         self.assertEqual(sheet["E27"].value, "Software subscription subtotal:")
         self.assertEqual(sheet["A29"].value, "Others")
         self.assertEqual(sheet["A30"].value, "Item")

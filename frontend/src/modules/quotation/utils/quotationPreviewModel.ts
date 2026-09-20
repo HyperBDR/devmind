@@ -41,6 +41,7 @@ export interface QuotationPreviewModel {
   othersItems: PreviewLineItem[];
   softwareRows: PreviewLineItem[];
   othersRows: PreviewLineItem[];
+  showDiscount: boolean;
   softwareSubtotal: number;
   othersSubtotal: number;
   subtotalBeforeVat: number;
@@ -159,8 +160,18 @@ export function buildQuotationPreviewModel(quote: Quotation, options: BuildOptio
   const validTill = quote.expireDate || formatDate(new Date(today.getTime() + 30 * DAY_MS));
   const signer = resolveIssuerSigner(quote, options.currentUser);
 
-  const softwareItems = withLineNumbers(quote.items.filter(item => item.type === 'Software'));
-  const othersItems = withLineNumbers(quote.items.filter(item => item.type !== 'Software'));
+  const softwareItems = withLineNumbers(
+    quote.items.filter(item => item.type === 'Software'),
+  );
+  const othersItems = withLineNumbers(
+    quote.items.filter(item => item.type !== 'Software'),
+  );
+  const completedItems = quote.items.filter(
+    item => item.name || item.description || Number(item.listPrice) > 0,
+  );
+  const showDiscount =
+    completedItems.length === 0 ||
+    completedItems.some(item => Number(item.discountPercent) > 0);
 
   return {
     quoteNo: quote.quoteNo,
@@ -181,9 +192,11 @@ export function buildQuotationPreviewModel(quote: Quotation, options: BuildOptio
     othersItems,
     softwareRows: fitTemplateRows(softwareItems, 1, 'Software'),
     othersRows: fitTemplateRows(othersItems, 1, 'Other'),
+    showDiscount,
     softwareSubtotal: quote.softwareSubtotal,
     othersSubtotal: quote.othersSubtotal,
-    subtotalBeforeVat: quote.subtotalBeforeVat ?? quote.softwareSubtotal + quote.othersSubtotal,
+    subtotalBeforeVat:
+      quote.subtotalBeforeVat ?? quote.softwareSubtotal + quote.othersSubtotal,
     taxLabel: resolveTaxLabel(quote.taxLabel),
     taxCalculationMode: quote.taxCalculationMode || 'add',
     vatRate: quote.vatRate ?? 0,
