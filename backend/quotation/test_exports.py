@@ -908,7 +908,7 @@ class QuotationExportTaskTests(QuotationExportFixture):
         self.assertEqual(sheet["D23"].number_format, "#,##0")
         self.assertEqual(sheet["E22"].value, None)
         self.assertEqual(sheet["E23"].value, None)
-        self.assertEqual(sheet["E27"].value, "Software subscription subtotal:")
+        self.assertEqual(sheet["D27"].value, "Software subscription subtotal:")
         self.assertEqual(sheet["A29"].value, "Others")
         self.assertEqual(sheet["A30"].value, "Item")
         self.assertEqual(
