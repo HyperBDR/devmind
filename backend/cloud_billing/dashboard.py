@@ -33,7 +33,6 @@ EXCHANGE_RATE_CACHE_PREFIX = 'cloud_billing:exchange_rate'
 EXCHANGE_RATE_CACHE_TTL = 60 * 60 * 24
 RECENT_BURN_WINDOW_DAYS = 30
 MIN_DAYS_REMAINING_REFERENCE_DAYS = 7
-DEFAULT_DATA_FRESHNESS_MINUTES = 30
 DATA_FRESHNESS_FAILURE_THRESHOLD = 2
 PROVIDER_PAYMENT_TYPES = {
     'aws': 'postpaid',
@@ -582,18 +581,7 @@ def _account_sort_key(account: dict[str, object]):
     )
 
 
-def _data_freshness_minutes() -> int:
-    raw_value = os.getenv(
-        'CLOUD_BILLING_DATA_FRESHNESS_MINUTES',
-        str(DEFAULT_DATA_FRESHNESS_MINUTES),
-    )
-    try:
-        return max(int(raw_value), 1)
-    except (TypeError, ValueError):
-        return DEFAULT_DATA_FRESHNESS_MINUTES
-
-
-def _collection_health(billing, provider, now) -> dict[str, object]:
+def _collection_health(billing, provider) -> dict[str, object]:
     last_success = getattr(billing, 'collected_at', None)
     last_attempt = getattr(provider, 'last_collection_attempt_at', None)
     status = str(
@@ -606,17 +594,8 @@ def _collection_health(billing, provider, now) -> dict[str, object]:
         status == 'failed'
         and failures >= DATA_FRESHNESS_FAILURE_THRESHOLD
     )
-    expired = False
-    if last_success is not None:
-        expired = now - last_success > timedelta(
-            minutes=_data_freshness_minutes(),
-        )
 
-    stale_reason = ''
-    if repeated_failure:
-        stale_reason = 'collection_failed'
-    elif expired:
-        stale_reason = 'data_expired'
+    stale_reason = 'collection_failed' if repeated_failure else ''
 
     return {
         'collection_status': status,
@@ -972,7 +951,7 @@ def _build_accounts(
             balance_info['supported'],
         )
         funds = _normalize_account_funds(provider, billing, payment_type)
-        collection_health = _collection_health(billing, provider, now)
+        collection_health = _collection_health(billing, provider)
         is_available = getattr(billing, 'is_available', None)
         display_funds = float(funds['display_funds'])
         if not has_days_remaining_reference:

@@ -16,7 +16,8 @@ test('keeps Data Ops available without showing it in the app sidebar', () => {
   assert.match(routerSource, /path:\s*'\/data-ops'/)
 })
 
-test('shows LLM Ops in the workspace sidebar when authorized', () => {
-  assert.match(sidebarSource, /userHasFeature\('llm_ops'\)/)
-  assert.match(sidebarSource, /to="\/llm-ops"/)
+test('keeps LLM Ops available without showing it in the app sidebar', () => {
+  assert.doesNotMatch(sidebarSource, /to="\/llm-ops"/)
+  assert.doesNotMatch(sidebarSource, /userHasFeature\('llm_ops'\)/)
+  assert.match(routerSource, /path:\s*'\/llm-ops'/)
 })

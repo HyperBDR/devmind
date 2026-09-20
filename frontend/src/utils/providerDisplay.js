@@ -32,6 +32,26 @@ export function getProviderTypeLabel(type, t) {
   return key ? t(key) : type
 }
 
+export function getProviderTypeSearchTerms(type) {
+  const providerType = String(type || '').trim()
+  if (!providerType) {
+    return []
+  }
+
+  const terms = new Set([normalizeValue(providerType)])
+  const labelKey = PROVIDER_TYPE_LABEL_KEYS[providerType]
+  if (labelKey) {
+    LOCALE_MESSAGES.forEach((messages) => {
+      const candidate = getMessageByPath(messages, labelKey)
+      if (candidate) {
+        terms.add(normalizeValue(candidate))
+      }
+    })
+  }
+
+  return Array.from(terms).filter(Boolean)
+}
+
 export function appendProviderNotesLabel(baseLabel, notes) {
   const label = String(baseLabel || '').trim()
   const noteText = String(notes || '').trim()

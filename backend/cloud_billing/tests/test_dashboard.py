@@ -460,11 +460,11 @@ class AccountFundsTests(SimpleTestCase):
         self.assertEqual(account['risk'], 'high')
 
     @patch('cloud_billing.dashboard.get_balance_support_info')
-    def test_expired_successful_snapshot_is_marked_stale(
+    def test_old_successful_snapshot_is_not_marked_stale(
         self,
         mock_balance_support,
     ):
-        """Mark an old successful snapshot stale after the freshness window."""
+        """An old successful snapshot is not flagged stale by data age."""
         mock_balance_support.return_value = {'supported': True}
         now = datetime(2026, 7, 27, 2, 30, tzinfo=dt_timezone.utc)
         last_success = datetime(
@@ -509,9 +509,8 @@ class AccountFundsTests(SimpleTestCase):
             now=now,
         )[0]
 
-        self.assertTrue(account['is_data_stale'])
-        self.assertEqual(account['stale_reason'], 'data_expired')
-        self.assertEqual(account['risk'], 'high')
+        self.assertFalse(account['is_data_stale'])
+        self.assertEqual(account['stale_reason'], '')
 
     def test_financial_health_prioritizes_high_risk_without_reference(self):
         """Keep known critical accounts in risk summaries without 7 days."""
