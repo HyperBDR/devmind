@@ -12,12 +12,14 @@ from quotation.services.document_parsing.business_fields import (
     QUOTE_DATE_LABELS,
     QUOTE_NO_LABELS,
     REMARKS_LABELS,
+    SECTION_ALIASES,
     explicit_product_line,
     find_issuer_email,
     known_product_line,
     normalize_currency_code,
     normalize_contact_email,
     normalize_contact_name,
+    normalize_section_name,
     split_salesperson_after_email,
     strip_repeated_field_label,
 )
@@ -34,7 +36,7 @@ from quotation.services.document_parsing.schemas import (
 )
 
 PARSER_NAME = "devmind_standard_pdf"
-PARSER_VERSION = "2.25.0"
+PARSER_VERSION = "2.26.0"
 _CURRENCY_TOKEN = r"(?:MYR|HK\$|RM|USD|HKD|CNY|RMB|EUR|GBP|[$¥￥€£])"
 
 
@@ -605,9 +607,13 @@ def _parse_item_line(line: str) -> ParsedQuotationItem | None:
 def _line_items(
     lines: list[str], section: str, item_type: str
 ) -> list[ParsedQuotationItem]:
+    section_aliases = SECTION_ALIASES.get(
+        section,
+        frozenset({normalize_section_name(section)}),
+    )
     section_index = None
     for index, line in enumerate(lines):
-        if line.lower() == section.lower():
+        if normalize_section_name(line) in section_aliases:
             section_index = index
             break
     if section_index is None:
@@ -616,13 +622,25 @@ def _line_items(
     pending_description: list[str] = []
     current_item: ParsedQuotationItem | None = None
     after_item = False
-    section_markers = {"software", "others"}
+    section_markers = {
+        alias
+        for aliases in SECTION_ALIASES.values()
+        for alias in aliases
+    }
     section_lines = lines[section_index + 1 :]
     for index, line in enumerate(section_lines):
-        lower = line.lower()
-        if lower in section_markers and lower != section.lower():
+        lower = normalize_section_name(line)
+        if lower in section_markers and lower not in section_aliases:
             break
-        if "total amount" in lower or "grand total" in lower:
+        if any(
+            marker in lower
+            for marker in (
+                "total amount",
+                "grand total",
+                "vat amount",
+                "tax amount",
+            )
+        ):
             break
         if "subtotal" in lower:
             continue
@@ -839,8 +857,11 @@ def parse_quotation_pdf_text(text: str) -> ParsedDocumentData:
         excluded_names,
         excluded_emails,
     )
-    items = _line_items(lines, "Software", "Software")
-    items.extend(_line_items(lines, "Others", "Other"))
+    items = []
+    for alias in SECTION_ALIASES["Software"]:
+        items.extend(_line_items(lines, alias, "Software"))
+    for alias in SECTION_ALIASES["Others"]:
+        items.extend(_line_items(lines, alias, "Other"))
     _merge_optional_service_rows(items, lines)
     for line_no, item in enumerate(items, start=1):
         item.line_no = line_no
@@ -849,24 +870,42 @@ def parse_quotation_pdf_text(text: str) -> ParsedDocumentData:
     tax_label, vat_rate = _tax_details(lines)
     total_amount = _amount_by_label(lines, "total amount")
     subtotal_before_vat = _amount_by_label(lines, "subtotal before")
+    item_total = sum(
+        (item.extended_price for item in items),
+        Decimal("0"),
+    )
     if not subtotal_before_vat:
-        subtotal_before_vat = total_amount or _amount_by_label(
-            lines,
-            "subtotal",
-        )
+        subtotal_before_vat = item_total or total_amount
     grand_total = _amount_by_label(lines, "grand total")
     if not subtotal_before_vat:
         subtotal_before_vat = total_amount
     if not grand_total:
-        grand_total = total_amount
+        grand_total = total_amount or subtotal_before_vat
     vat_amount = _amount_by_label(lines, "amount (")
     if not vat_amount and vat_rate:
         vat_amount = _amount_by_label(lines, tax_label)
     source_totals = {
         "software_subtotal": str(
             _amount_by_label(lines, "software subscription subtotal")
+            or _amount_by_label(lines, "subscription items subtotal")
+            or _amount_by_label(lines, "subscriptions items subtotal")
+            or sum(
+                (item.extended_price for item in items
+                 if item.type == "Software"),
+                Decimal("0"),
+            )
         ),
-        "others_subtotal": str(_amount_by_label(lines, "others subtotal")),
+        "others_subtotal": str(
+            _amount_by_label(lines, "others subtotal")
+            or _amount_by_label(lines, "one-time items subtotal")
+            or _amount_by_label(lines, "one time items subtotal")
+            or _amount_by_label(lines, "optional items subtotal")
+            or sum(
+                (item.extended_price for item in items
+                 if item.type == "Other"),
+                Decimal("0"),
+            )
+        ),
         "subtotal_before_vat": str(subtotal_before_vat),
         "vat_amount": str(vat_amount),
         "grand_total": str(grand_total),
@@ -925,7 +964,8 @@ def parse_quotation_pdf_text(text: str) -> ParsedDocumentData:
     }
     field_confidence["items"] = 1.0 if items else 0.0
     confidence = Decimal(
-        str(sum(field_confidence.values()) / len(field_confidence))
+        str((sum(field_confidence.values()) + field_confidence["items"] * 3)
+            / (len(field_confidence) + 3))
     ).quantize(Decimal("0.0001"))
     return ParsedDocumentData(
         quotation=quotation,
