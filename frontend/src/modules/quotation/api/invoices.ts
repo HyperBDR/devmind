@@ -216,6 +216,7 @@ export interface SalesDashboardData {
   comparison: Array<{
     year: number
     series: SalesPeriodRow[]
+    period_amount: string
     quarter_to_date_amount: string
     year_to_date_amount: string
   }>

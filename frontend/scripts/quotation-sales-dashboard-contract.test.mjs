@@ -59,6 +59,7 @@ test('Sales dashboard keeps the primary controls actionable', () => {
   assert.match(dashboard, /available_currencies/)
   assert.match(dashboard, /quarter_to_date_amount/)
   assert.match(dashboard, /year_to_date_amount/)
+  assert.match(dashboard, /period_amount/)
   assert.match(dashboard, /year_over_year/)
 })
 
@@ -185,6 +186,13 @@ test('Historical comparisons use full years', () => {
   )
   assert.match(dashboard, /if \(!startDate\.value \|\| !endDate\.value\)/)
   assert.match(dashboard, /if \(!value\) return '—'/)
+})
+
+test('Total comparison uses the exact historical date range', () => {
+  assert.match(
+    dashboard,
+    /Number\(data\.value\?\.comparison\[0\]\?\.period_amount \|\| 0\)/,
+  )
 })
 
 test('Sales KPI values share one aligned single-line title row', () => {

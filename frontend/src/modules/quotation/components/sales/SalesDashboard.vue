@@ -336,11 +336,8 @@ const granularitySelectOptions = computed<FormSelectOption[]>(() => [
 const totalSales = computed(() => sumRows(data.value?.series))
 const qtd = computed(() => sumRows(data.value?.quarter_to_date))
 const ytd = computed(() => sumRows(data.value?.year_to_date))
-const priorTotal = computed(
-  () => sumRows(rowsForSelectedMonths(
-    data.value?.comparison[0]?.series || [],
-    data.value?.comparison[0]?.year || selectedYear.value - 1,
-  )),
+const priorTotal = computed(() =>
+  Number(data.value?.comparison[0]?.period_amount || 0),
 )
 const totalChange = computed(() =>
   percentChange(totalSales.value, priorTotal.value),
