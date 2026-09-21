@@ -6,6 +6,13 @@ const preview = readFileSync(
   new URL('../src/modules/quotation/components/QuotationPreview.vue', import.meta.url),
   'utf8',
 )
+const sectionTable = readFileSync(
+  new URL(
+    '../src/modules/quotation/components/QuotationSectionTable.vue',
+    import.meta.url,
+  ),
+  'utf8',
+)
 const createPage = readFileSync(
   new URL(
     '../src/modules/quotation/components/QuotationCreate.vue',
@@ -27,19 +34,19 @@ const historyInput = readFileSync(
 )
 
 test('quotation preview lets long English table headings wrap inside fixed columns', () => {
-  assert.match(preview, /const headerCellClass =\s*\n\s*'whitespace-normal break-normal/)
-  assert.doesNotMatch(preview, /const headerCellClass =\s*\n\s*'whitespace-nowrap/)
+  assert.match(sectionTable, /const headerCellClass =\s*\n\s*'whitespace-normal break-normal/)
+  assert.doesNotMatch(sectionTable, /const headerCellClass =\s*\n\s*'whitespace-nowrap/)
   assert.match(preview, /class="whitespace-normal break-normal border border-slate-300 px-1\.5 py-1 align-middle">\s*Contact Person/)
   assert.match(preview, /class="whitespace-normal break-normal border border-slate-300 px-1\.5 py-1 align-middle">\s*Payment Terms/)
   assert.match(preview, /props\.scale === 'compact' \? 'text-\[9px\]' : 'text-\[11px\]'/)
 })
 
 test('quotation preview expands subtotal labels with their content', () => {
-  assert.match(preview, /'Software subscription subtotal:',/)
-  assert.match(preview, /'Others Subtotal:',/)
+  assert.match(sectionTable, /Software subscription subtotal:/)
+  assert.match(sectionTable, /Others Subtotal:/)
   assert.match(
-    preview,
-    /:colspan="totalsLabelSpan"\s*class="whitespace-normal break-words[^>]+>\s*Others Subtotal:/,
+    sectionTable,
+    /:colspan="totalsLabelSpan"\s*class="whitespace-normal break-words[^>]+>/,
   )
 })
 

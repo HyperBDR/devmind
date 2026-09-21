@@ -78,6 +78,8 @@ services:
         condition: service_completed_successfully
       postgresql:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     command: init-runtime
 
   backend-api-blue:

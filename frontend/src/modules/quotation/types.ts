@@ -76,6 +76,7 @@ export interface QuoteVersion {
   customTotalCurrency?: string;
   excelGeneratedAt?: string;
   excelFileName?: string;
+  snapshotLoaded?: boolean;
 }
 
 export interface Quotation {

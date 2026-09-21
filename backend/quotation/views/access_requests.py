@@ -7,10 +7,14 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from quotation.access import can_access_document
+from quotation.access import (
+    can_access_document,
+    filter_accessible_documents,
+)
 from quotation.audit import record_audit_event
 from quotation.models import (
     AuditEvent,
+    DocumentAsset,
     QuotationAccessRequest,
     QuotationAccessRequestStatus,
     QuotationAccessRequestType,
@@ -33,11 +37,27 @@ DECISION_SUMMARIES = {
 }
 
 
-def _request_row(access_request: QuotationAccessRequest, user) -> dict:
-    is_admin = is_quotation_platform_admin(user)
+def _request_row(
+    access_request: QuotationAccessRequest,
+    user,
+    accessible_document_ids: set[str] | None = None,
+    is_admin: bool | None = None,
+) -> dict:
+    if is_admin is None:
+        is_admin = is_quotation_platform_admin(user)
     document_name_allowed = bool(
-        access_request.document
-        and (is_admin or can_access_document(user, access_request.document))
+        access_request.document_id
+        and (
+            is_admin
+            or (
+                accessible_document_ids is not None
+                and access_request.document_id in accessible_document_ids
+            )
+            or (
+                accessible_document_ids is None
+                and can_access_document(user, access_request.document)
+            )
+        )
     )
     if access_request.request_type == QuotationAccessRequestType.DOCUMENT_VIEW:
         target_id = access_request.document_id_snapshot
@@ -117,21 +137,66 @@ class QuotationAccessRequestView(APIView):
 
     def get(self, request):
         is_admin = is_quotation_platform_admin(request.user)
+        if request.query_params.get("compact") in {"1", "true"}:
+            return Response({"is_admin": is_admin})
         requests = QuotationAccessRequest.objects.select_related(
             "applicant",
-            "document",
             "reviewed_by",
+        ).only(
+            "id",
+            "applicant_id",
+            "request_type",
+            "folder_token",
+            "folder_name",
+            "document_id",
+            "document_id_snapshot",
+            "document_name",
+            "reason",
+            "status",
+            "reviewed_by_id",
+            "review_note",
+            "expires_at",
+            "created_at",
+            "updated_at",
+            "reviewed_at",
+            "revoked_at",
+            "expired_at",
+            "applicant__first_name",
+            "applicant__last_name",
+            "applicant__username",
+            "reviewed_by__first_name",
+            "reviewed_by__last_name",
+            "reviewed_by__username",
         )
         if not is_admin:
             requests = requests.filter(applicant=request.user)
+        request_rows = list(requests)
+        accessible_document_ids = None
+        if not is_admin:
+            document_ids = {
+                access_request.document_id
+                for access_request in request_rows
+                if access_request.document_id
+            }
+            accessible_document_ids = set(
+                filter_accessible_documents(
+                    request.user,
+                    DocumentAsset.objects.filter(pk__in=document_ids),
+                ).values_list("id", flat=True)
+            )
         return Response(
             {
                 "is_admin": is_admin,
                 "folders": safe_folder_rows(),
                 "documents": document_rows() if is_admin else [],
                 "requests": [
-                    _request_row(access_request, request.user)
-                    for access_request in requests
+                    _request_row(
+                        access_request,
+                        request.user,
+                        accessible_document_ids,
+                        is_admin,
+                    )
+                    for access_request in request_rows
                 ],
             }
         )

@@ -471,6 +471,44 @@ class QuotationVersionSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class QuotationVersionMetaSerializer(serializers.ModelSerializer):
+    """Serialize version metadata without the full snapshot payload."""
+
+    currency = serializers.SerializerMethodField()
+    grand_total = serializers.SerializerMethodField()
+
+    class Meta:
+        model = QuotationVersion
+        fields = [
+            "id",
+            "version_no",
+            "status",
+            "notes",
+            "operator_email",
+            "created_at",
+            "currency",
+            "grand_total",
+        ]
+        read_only_fields = fields
+
+    def _snapshot(self, obj):
+        return obj.snapshot_json or {}
+
+    def get_currency(self, obj):
+        currency = getattr(obj, "snapshot_currency", None)
+        if currency is not None:
+            return currency
+        snapshot = self._snapshot(obj)
+        return snapshot.get("currency") or snapshot.get("currency_code") or ""
+
+    def get_grand_total(self, obj):
+        grand_total = getattr(obj, "snapshot_grand_total", None)
+        if grand_total is not None:
+            return grand_total
+        snapshot = self._snapshot(obj)
+        return snapshot.get("grand_total") or snapshot.get("grandTotal") or 0
+
+
 class QuotationListDocumentSerializer(serializers.Serializer):
     """Serialize the original document behind an imported quotation."""
 
@@ -837,6 +875,12 @@ class QuotationSerializer(serializers.ModelSerializer):
             "items",
             "versions",
         ]
+
+
+class QuotationDetailSerializer(QuotationSerializer):
+    """Serialize the initial detail payload without version snapshots."""
+
+    versions = QuotationVersionMetaSerializer(many=True, read_only=True)
 
 
 class QuotationCreateSerializer(serializers.Serializer):

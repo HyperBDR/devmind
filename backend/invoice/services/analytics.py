@@ -208,11 +208,20 @@ def sales_dashboard(
         comparison_start = date(comparison_year, 1, 1)
         comparison_end = date(comparison_year, 12, 31)
         selected_comparison_end = _shift_year(end_date, -year_offset)
+        selected_comparison_start = _shift_year(start_date, -year_offset)
         year_invoices = list(
             _invoice_queryset(
                 currency,
                 comparison_start,
                 comparison_end,
+                user,
+            )
+        )
+        comparison_period = list(
+            _invoice_queryset(
+                currency,
+                selected_comparison_start,
+                selected_comparison_end,
                 user,
             )
         )
@@ -244,6 +253,9 @@ def sales_dashboard(
             {
                 "year": comparison_year,
                 "series": _amount_series(year_invoices, granularity),
+                "period_amount": (
+                    f"{_total_amount(comparison_period):.2f}"
+                ),
                 "quarter_to_date_amount": (
                     f"{_total_amount(comparison_qtd):.2f}"
                 ),

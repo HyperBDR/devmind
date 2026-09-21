@@ -216,6 +216,7 @@ export interface SalesDashboardData {
   comparison: Array<{
     year: number
     series: SalesPeriodRow[]
+    period_amount: string
     quarter_to_date_amount: string
     year_to_date_amount: string
   }>
@@ -414,6 +415,7 @@ export async function getSalesDashboard(params: {
   start_date?: string
   end_date?: string
   comparison_years?: 1 | 2
+  dimension?: 'region' | 'product' | 'customer'
 }): Promise<SalesDashboardData> {
   const response = await apiClient.get('/v1/invoice/dashboard/analytics', {
     params,

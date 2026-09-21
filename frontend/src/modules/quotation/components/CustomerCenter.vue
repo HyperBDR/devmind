@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { Mail, Phone, Plus, RefreshCw, Search, X } from 'lucide-vue-next'
-import type { Quotation } from '../types'
-import type { InvoiceRecord } from '../api/invoices'
 import { useQuotationI18n } from '../composables/useQuotationI18n'
 
 type CustomerContact = {
@@ -19,10 +17,7 @@ type Customer = {
   updatedAt: string
 }
 
-const props = defineProps<{
-  quotations: Quotation[]
-  invoices: InvoiceRecord[]
-}>()
+const props = defineProps<{ customers: Customer[] }>()
 
 const { t } = useQuotationI18n()
 
@@ -44,60 +39,7 @@ const contactRole = ref('')
 const refreshing = ref(false)
 const lastSyncedAt = ref<Date | null>(null)
 
-const customers = computed<Customer[]>(() => {
-  const grouped = new Map<string, Customer>()
-  function addRecord(record: {
-    company?: string
-    contactName?: string
-    email?: string
-    phone?: string
-    updatedAt?: string | null
-  }) {
-    const company = record.company?.trim()
-    if (!company) return
-    const key = company.toLowerCase()
-    const customer = grouped.get(key) || {
-      company,
-      contacts: [],
-      recordCount: 0,
-      updatedAt: record.updatedAt || '-',
-    }
-    customer.recordCount += 1
-    const contactKey = `${record.contactName || ''}|${record.email || ''}`.toLowerCase()
-    if (record.contactName || record.email || record.phone) {
-      const existing = customer.contacts.find(
-        (contact) => `${contact.name}|${contact.email}`.toLowerCase() === contactKey,
-      )
-      if (existing) existing.recordCount += 1
-      else {
-        customer.contacts.push({
-          name: record.contactName || '未填写联系人',
-          email: record.email || '-',
-          phone: record.phone || '-',
-          recordCount: 1,
-        })
-      }
-    }
-    if (record.updatedAt && record.updatedAt > customer.updatedAt) {
-      customer.updatedAt = record.updatedAt
-    }
-    grouped.set(key, customer)
-  }
-  props.quotations.forEach((quote) => addRecord({
-    company: quote.clientCompany,
-    contactName: quote.contactPerson,
-    email: quote.email,
-    updatedAt: quote.createdAt || quote.quoteDate,
-  }))
-  props.invoices.forEach((invoice) => addRecord({
-    company: invoice.customer_name,
-    contactName: invoice.customer_contact_person || invoice.contact_person,
-    email: invoice.customer_contact_email || invoice.contact_email,
-    phone: invoice.customer_contact_phone,
-    updatedAt: invoice.updated_at || invoice.created_at || invoice.invoice_date,
-  }))
-  return [...grouped.values()]
-})
+const customers = computed<Customer[]>(() => props.customers)
 
 function formatLastSynced() {
   if (!lastSyncedAt.value) return t('quotation.customerCenter.notSynced')

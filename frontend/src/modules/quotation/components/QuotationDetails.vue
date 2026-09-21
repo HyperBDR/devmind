@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   ArrowLeft,
   Ban,
@@ -16,6 +16,7 @@ import {
 } from 'lucide-vue-next'
 import type { Quotation, QuoteStatus, QuoteVersion } from '../types'
 import { listAuditEvents, type AuditEvent } from '../api/audit'
+import { getQuotationVersion } from '../api/quotations'
 import {
   exportQuotationFile,
   type QuotationExportFormat,
@@ -52,6 +53,10 @@ const selectedVersionForModal = ref<QuoteVersion | null>(null)
 const activityEvents = ref<AuditEvent[]>([])
 const exportingFormat = ref<QuotationExportFormat | null>(null)
 const activeExportStatus = ref<QuotationExportStatus | null>(null)
+const versionLoadingId = ref<string | null>(null)
+const loadedVersionRevision = ref(0)
+const loadedVersions = new Map<string, QuoteVersion>()
+let activityLoadTimer: number | undefined
 
 const activeExportStatusLabel = computed(() =>
   activeExportStatus.value
@@ -86,8 +91,14 @@ function activityTime(value: string) {
   }).format(date)
 }
 
-watch(() => props.quote.id, () => void loadActivity())
-onMounted(() => void loadActivity())
+function scheduleActivityLoad() {
+  window.clearTimeout(activityLoadTimer)
+  activityLoadTimer = window.setTimeout(() => void loadActivity(), 0)
+}
+
+watch(() => props.quote.id, scheduleActivityLoad)
+onMounted(scheduleActivityLoad)
+onBeforeUnmount(() => window.clearTimeout(activityLoadTimer))
 
 const currencySymbol = computed(() => getCurrencySymbol(props.quote.currency))
 
@@ -206,6 +217,25 @@ function getVersionDiff(version: QuoteVersion): VersionDiffResult {
   return diffVersionAgainstCurrent(version, props.quote)
 }
 
+async function openVersion(version: QuoteVersion) {
+  const loaded = loadedVersions.get(version.id)
+  if (loaded) {
+    selectedVersionForModal.value = loaded
+    return
+  }
+  versionLoadingId.value = version.id
+  try {
+    const detail = await getQuotationVersion(props.quote.id, version.id)
+    loadedVersions.set(version.id, detail)
+    loadedVersionRevision.value += 1
+    selectedVersionForModal.value = detail
+  } catch {
+    selectedVersionForModal.value = null
+  } finally {
+    if (versionLoadingId.value === version.id) versionLoadingId.value = null
+  }
+}
+
 const activeVersionDiff = computed(() => {
   const ver = selectedVersionForModal.value
   if (!ver) return null
@@ -227,9 +257,12 @@ const activeDiffSummaryLabels = computed(() => {
 })
 
 const versionDiffChips = computed(() => {
+  loadedVersionRevision.value
   const map = new Map<string, string>()
   ;(props.quote.versions || []).forEach((version) => {
-    const chip = diffChipForVersion(version)
+    const loaded = loadedVersions.get(version.id)
+    if (!loaded) return
+    const chip = diffChipForVersion(loaded)
     if (chip) map.set(version.id, chip)
   })
   return map
@@ -740,10 +773,15 @@ function setStatus(status: QuoteStatus) {
               <button
                 type="button"
                 class="mt-1.5 flex w-full cursor-pointer items-center justify-center gap-1 rounded-md border border-dm-border py-1.5 text-xs font-extrabold text-dm-text transition duration-150 hover:bg-slate-100"
-                @click="selectedVersionForModal = ver"
+                :disabled="versionLoadingId === ver.id"
+                @click="void openVersion(ver)"
               >
                 <FileText class="h-3.5 w-3.5 text-dm-text-tertiary" />
-                <span>{{ t('quotation.pages.details.viewVersionSnapshot') }}</span>
+                <span>
+                  {{ versionLoadingId === ver.id
+                    ? t('quotation.pages.list.drawerLoading')
+                    : t('quotation.pages.details.viewVersionSnapshot') }}
+                </span>
               </button>
             </div>
             <p v-if="!reversedVersions.length" class="py-4 text-center font-medium text-dm-text-tertiary">

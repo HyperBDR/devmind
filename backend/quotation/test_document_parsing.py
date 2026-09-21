@@ -2174,7 +2174,11 @@ class DocumentParseEndpointTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 201, response.data)
-        self.assertEqual(response.data["status"], "failed", response.data)
+        self.assertEqual(
+            response.data["status"],
+            "review_required",
+            response.data,
+        )
         self.assertFalse(Quotation.objects.exists())
         normalized = response.data["normalized_json"]
         self.assertEqual(normalized["project_name"], "")
