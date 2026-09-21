@@ -4,8 +4,10 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction
-from django.db.models import Prefetch, Q
+from django.db.models import CharField, Prefetch, Q, Value
 from django.db.models.deletion import ProtectedError
+from django.db.models.functions import Coalesce
+from django.db.models.fields.json import KeyTextTransform
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -389,6 +391,28 @@ class QuotationDetailView(APIView):
         )
 
     def get_detail_object(self, quotation_id: str) -> Quotation | None:
+        version_queryset = QuotationVersion.objects.only(
+            "id",
+            "quotation_id",
+            "version_no",
+            "status",
+            "notes",
+            "operator_email",
+            "created_at",
+        ).annotate(
+            snapshot_currency=Coalesce(
+                KeyTextTransform("currency", "snapshot_json"),
+                KeyTextTransform("currency_code", "snapshot_json"),
+                Value("", output_field=CharField()),
+                output_field=CharField(),
+            ),
+            snapshot_grand_total=Coalesce(
+                KeyTextTransform("grand_total", "snapshot_json"),
+                KeyTextTransform("grandTotal", "snapshot_json"),
+                Value("0", output_field=CharField()),
+                output_field=CharField(),
+            ),
+        )
         replica_queryset = DocumentReplica.objects.filter(
             sync_status=ReplicaSyncStatus.SYNCED,
             revoked_at__isnull=True,
@@ -424,7 +448,7 @@ class QuotationDetailView(APIView):
             Quotation.objects.prefetch_related(
                 "items",
                 Prefetch("documents", queryset=document_queryset),
-                "versions",
+                Prefetch("versions", queryset=version_queryset),
             )
             .filter(pk=quotation_id)
             .first()

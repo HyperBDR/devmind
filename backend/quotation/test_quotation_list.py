@@ -661,13 +661,24 @@ class QuotationListAPITests(TestCase):
             snapshot_json={"status": "draft"},
         )
 
-        response = self.api.get(f"{self.url}/{quotation.id}")
+        with CaptureQueriesContext(connection) as detail_queries:
+            response = self.api.get(f"{self.url}/{quotation.id}")
 
         assert response.status_code == 200
         assert len(response.data["items"]) == 1
         assert len(response.data["versions"]) == 1
         version = response.data["versions"][0]
         assert "snapshot" not in version
+        version_queries = [
+            query["sql"].lower()
+            for query in detail_queries
+            if "quotation_versions" in query["sql"].lower()
+        ]
+        assert version_queries
+        assert all(
+            'select "quotation_versions"."snapshot_json"' not in query
+            for query in version_queries
+        )
         snapshot_response = self.api.get(
             f"{self.url}/{quotation.id}/versions/{version['id']}"
         )

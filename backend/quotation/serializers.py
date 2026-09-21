@@ -466,10 +466,16 @@ class QuotationVersionMetaSerializer(serializers.ModelSerializer):
         return obj.snapshot_json or {}
 
     def get_currency(self, obj):
+        currency = getattr(obj, "snapshot_currency", None)
+        if currency is not None:
+            return currency
         snapshot = self._snapshot(obj)
         return snapshot.get("currency") or snapshot.get("currency_code") or ""
 
     def get_grand_total(self, obj):
+        grand_total = getattr(obj, "snapshot_grand_total", None)
+        if grand_total is not None:
+            return grand_total
         snapshot = self._snapshot(obj)
         return snapshot.get("grand_total") or snapshot.get("grandTotal") or 0
 
