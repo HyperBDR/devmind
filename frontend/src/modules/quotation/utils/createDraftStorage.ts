@@ -30,6 +30,7 @@ export interface CreateQuoteDraft {
   vatRateInput: string;
   taxLabel: string;
   taxCalculationMode?: 'add' | 'subtract';
+  deductionAmountInput?: string;
   customTotalLabel?: string;
   customTotalAmountInput?: string;
   customTotalCurrency?: string;
@@ -62,7 +63,8 @@ export function isCreateQuoteDraftMeaningful(
     draft.billingEmail?.trim() ||
     draft.remarksDisclaimer?.trim() ||
     draft.paymentTermsCustom?.trim() ||
-    draft.vatRateInput?.trim()
+    draft.vatRateInput?.trim() ||
+    draft.deductionAmountInput?.trim()
   ) {
     return true;
   }

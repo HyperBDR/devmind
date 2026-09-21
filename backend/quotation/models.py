@@ -539,6 +539,9 @@ class Quotation(TimeStampedModel):
     vat_amount = models.DecimalField(
         max_digits=18, decimal_places=2, default=0
     )
+    deduction_amount = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0
+    )
     software_subtotal = models.DecimalField(
         max_digits=18, decimal_places=2, default=0
     )

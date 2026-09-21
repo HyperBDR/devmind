@@ -48,6 +48,21 @@ test('saving and generating a quote does not download a file', () => {
   assert.doesNotMatch(chinese.quotation.app.quoteGenerated, /下载/)
 })
 
+test('quote and invoice saves reject repeated submissions', () => {
+  assert.match(app, /if \(savingQuotation\.value\) return/)
+  assert.match(create, /if \(props\.saving\) return/)
+  assert.match(create, /:disabled="saving"/)
+
+  const invoice = readFileSync(
+    new URL(
+      '../src/modules/quotation/components/sales/InvoiceCreate.vue',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+  assert.match(invoice, /if \(submitting\.value\) return/)
+})
+
 test('precise discounts and signatures survive until saving succeeds', () => {
   const saveStart = app.indexOf('async function handleSaveQuotation')
   const saveEnd = app.indexOf('async function handleFeishuUploadDone')

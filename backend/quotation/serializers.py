@@ -69,7 +69,11 @@ def _validate_total_amounts(attrs, quotation: Quotation | None = None) -> None:
     """Reject quotation totals that exceed database decimal precision."""
     items = attrs.get("items")
     if items is None:
-        if quotation is None or "vat_rate" not in attrs:
+        if quotation is None or not {
+            "vat_rate",
+            "tax_calculation_mode",
+            "deduction_amount",
+        }.intersection(attrs):
             return
         extended_prices = [
             item.extended_price for item in quotation.items.all()
@@ -85,16 +89,41 @@ def _validate_total_amounts(attrs, quotation: Quotation | None = None) -> None:
     vat_amount = (subtotal * Decimal(vat_rate) / Decimal("100")).quantize(
         Decimal("0.01"), rounding=ROUND_HALF_UP
     )
+    tax_mode = attrs.get(
+        "tax_calculation_mode",
+        getattr(quotation, "tax_calculation_mode", "add"),
+    )
+    deduction_amount = Decimal(
+        attrs.get(
+            "deduction_amount",
+            getattr(quotation, "deduction_amount", Decimal("0")),
+        )
+    )
+    total_before_deduction = (
+        subtotal - vat_amount
+        if tax_mode == "subtract"
+        else subtotal + vat_amount
+    )
+    grand_total = total_before_deduction - deduction_amount
     if (
         subtotal > MAX_QUOTATION_AMOUNT
         or vat_amount > MAX_QUOTATION_AMOUNT
-        or subtotal + vat_amount > MAX_QUOTATION_AMOUNT
+        or deduction_amount > MAX_QUOTATION_AMOUNT
+        or grand_total > MAX_QUOTATION_AMOUNT
     ):
         raise serializers.ValidationError(
             {
                 "items": (
                     "Calculated quotation totals exceed the supported "
                     f"amount limit of {MAX_QUOTATION_AMOUNT}."
+                )
+            }
+        )
+    if grand_total < 0:
+        raise serializers.ValidationError(
+            {
+                "deduction_amount": (
+                    "Deduction amount cannot exceed the total amount."
                 )
             }
         )
@@ -767,6 +796,7 @@ class QuotationSerializer(serializers.ModelSerializer):
             "tax_calculation_mode",
             "vat_rate",
             "vat_amount",
+            "deduction_amount",
             "software_subtotal",
             "others_subtotal",
             "subtotal_before_vat",
@@ -874,6 +904,13 @@ class QuotationCreateSerializer(serializers.Serializer):
         choices=("add", "subtract"),
         required=False,
         default="add",
+    )
+    deduction_amount = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        min_value=Decimal("0"),
+        required=False,
+        default=Decimal("0"),
     )
     custom_total_label = serializers.CharField(
         required=False,
@@ -1046,6 +1083,12 @@ class QuotationUpdateSerializer(serializers.Serializer):
     )
     tax_calculation_mode = serializers.ChoiceField(
         choices=("add", "subtract"),
+        required=False,
+    )
+    deduction_amount = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        min_value=Decimal("0"),
         required=False,
     )
     custom_total_label = serializers.CharField(

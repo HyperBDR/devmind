@@ -51,6 +51,7 @@ export interface QuotationPreviewModel {
   taxCalculationMode: 'add' | 'subtract';
   vatRate: number;
   vatAmount: number;
+  deductionAmount: number;
   grandTotal: number;
   customTotalLabel: string;
   customTotalAmount: number;
@@ -210,6 +211,7 @@ export function buildQuotationPreviewModel(quote: Quotation, options: BuildOptio
     taxCalculationMode: quote.taxCalculationMode || 'add',
     vatRate: quote.vatRate ?? 0,
     vatAmount: quote.vatAmount ?? 0,
+    deductionAmount: quote.deductionAmount ?? 0,
     grandTotal: quote.grandTotal,
     customTotalLabel: quote.customTotalLabel || '',
     customTotalAmount: quote.customTotalAmount || 0,

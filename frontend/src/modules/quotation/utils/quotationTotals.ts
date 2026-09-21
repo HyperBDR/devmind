@@ -17,6 +17,7 @@ export interface QuotationTotals {
   subtotalBeforeVat: number;
   vatRate: number;
   vatAmount: number;
+  deductionAmount: number;
   grandTotal: number;
 }
 
@@ -62,6 +63,7 @@ export function calculateQuotationTotals(
   items: QuotationLineItem[],
   vatRateValue: number,
   taxMode: TaxCalculationMode = 'add',
+  deductionAmountValue = 0,
 ): QuotationTotals {
   const softwareSubtotal = roundMoney(
     items
@@ -76,6 +78,15 @@ export function calculateQuotationTotals(
   const subtotalBeforeVat = roundMoney(softwareSubtotal + othersSubtotal);
   const vatRate = normalizeVatRate(vatRateValue);
   const vatAmount = roundMoney(subtotalBeforeVat * vatRate / 100);
+  const totalBeforeDeduction = roundMoney(
+    taxMode === 'subtract'
+      ? subtotalBeforeVat - vatAmount
+      : subtotalBeforeVat + vatAmount,
+  );
+  const deductionAmount = Math.min(
+    roundMoney(Math.max(0, Number(deductionAmountValue) || 0)),
+    Math.max(0, totalBeforeDeduction),
+  );
 
   return {
     softwareSubtotal,
@@ -83,10 +94,7 @@ export function calculateQuotationTotals(
     subtotalBeforeVat,
     vatRate,
     vatAmount,
-    grandTotal: roundMoney(
-      taxMode === 'subtract'
-        ? subtotalBeforeVat - vatAmount
-        : subtotalBeforeVat + vatAmount,
-    ),
+    deductionAmount,
+    grandTotal: roundMoney(totalBeforeDeduction - deductionAmount),
   };
 }

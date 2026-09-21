@@ -1268,18 +1268,32 @@ def render_quotation_xlsx(
         sheet.row_dimensions[row].height = 15
         row += 1
 
-    totals = (
+    vat_amount = Decimal(str(snapshot.get("vat_amount") or 0))
+    deduction_amount = Decimal(
+        str(snapshot.get("deduction_amount") or 0)
+    )
+    totals = [
         (
             f"Subtotal before {value('tax_label')}:",
             snapshot.get("subtotal_before_vat"),
         ),
-        (
-            f"{value('tax_label')} Amount "
-            f"({number_text(value('vat_rate', 0))}%):",
-            snapshot.get("vat_amount"),
-        ),
-        ("Grand Total:", snapshot.get("grand_total")),
-    )
+    ]
+    if vat_amount:
+        signed_vat_amount = (
+            -vat_amount
+            if snapshot.get("tax_calculation_mode") == "subtract"
+            else vat_amount
+        )
+        totals.append(
+            (
+                f"{value('tax_label')} Amount "
+                f"({number_text(value('vat_rate', 0))}%):",
+                signed_vat_amount,
+            )
+        )
+    if deduction_amount:
+        totals.append(("Deduction Amount:", -deduction_amount))
+    totals.append(("Grand Total:", snapshot.get("grand_total")))
     total_label_start = _label_start_column(
         [*subtotal_labels, *(label for label, _amount in totals)],
     )
