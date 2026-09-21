@@ -184,6 +184,19 @@ function rowsForYear(rows: SalesPeriodRow[], year: number): SalesPeriodRow[] {
   return rows.filter((row) => Number(row.period.slice(0, 4)) === year)
 }
 
+function periodMonthRange(period: string): [number, number] | null {
+  if (/^\d{4}$/.test(period)) return [1, 12]
+  if (/^\d{4}-Q[1-4]$/.test(period)) {
+    const quarter = Number(period.slice(-1))
+    return [(quarter - 1) * 3 + 1, quarter * 3]
+  }
+  if (/^\d{4}-\d{2}$/.test(period)) {
+    const month = Number(period.slice(-2))
+    return [month, month]
+  }
+  return null
+}
+
 function chartMonthBounds() {
   if (!startDate.value || !endDate.value) {
     return { startMonth: 1, endMonth: 12 }
@@ -201,8 +214,9 @@ function rowsForSelectedMonths(
 ): SalesPeriodRow[] {
   const { startMonth, endMonth } = chartMonthBounds()
   return rowsForYear(rows, year).filter((row) => {
-    const month = Number(row.period.slice(5, 7))
-    return month >= startMonth && month <= endMonth
+    const range = periodMonthRange(row.period)
+    if (!range) return false
+    return range[1] >= startMonth && range[0] <= endMonth
   })
 }
 
@@ -224,18 +238,21 @@ function bucketIndex(period: string, value: Granularity): number {
 function valuesFor(
   rows: SalesPeriodRow[],
   value: Granularity,
+  fullRange = false,
 ): Array<number | null> {
   const values: Array<number | null> = chartLabels(value).map(() => null)
   const { startMonth, endMonth } = chartMonthBounds()
   if (value === 'year') values[0] = 0
   if (value === 'month') {
-    for (let month = startMonth; month <= endMonth; month += 1) {
+    const firstMonth = fullRange ? 1 : startMonth
+    const lastMonth = fullRange ? 12 : endMonth
+    for (let month = firstMonth; month <= lastMonth; month += 1) {
       values[month - 1] = 0
     }
   }
   if (value === 'quarter') {
-    const startQuarter = Math.ceil(startMonth / 3)
-    const endQuarter = Math.ceil(endMonth / 3)
+    const startQuarter = fullRange ? 1 : Math.ceil(startMonth / 3)
+    const endQuarter = fullRange ? 4 : Math.ceil(endMonth / 3)
     for (let quarter = startQuarter; quarter <= endQuarter; quarter += 1) {
       values[quarter - 1] = 0
     }
@@ -338,9 +355,8 @@ const yearlyTrendData = computed(() => {
   const points = [
     ...(result?.comparison || []).map((comparison) => ({
       year: comparison.year,
-      value: sumRows(rowsForSelectedMonths(comparison.series, comparison.year)),
-      hasData: rowsForSelectedMonths(comparison.series, comparison.year).length
-        > 0,
+      value: sumRows(rowsForYear(comparison.series, comparison.year)),
+      hasData: rowsForYear(comparison.series, comparison.year).length > 0,
     })),
     {
       year: selectedYear.value,
@@ -404,8 +420,9 @@ const trendData = computed<ChartData<'line'>>(() => {
       ...comparisons.map((comparison, index) => ({
         label: String(comparison.year),
         data: valuesFor(
-          rowsForSelectedMonths(comparison.series, comparison.year),
+          rowsForYear(comparison.series, comparison.year),
           granularity.value,
+          true,
         ),
         borderColor: colors[index + 1],
         backgroundColor: colors[index + 1],
@@ -500,15 +517,18 @@ const periodData = computed<ChartData<'bar'>>(() => {
         ),
         backgroundColor: colors[0],
         borderRadius: 0,
+        minBarLength: 4,
       },
       ...(source?.comparison || []).map((comparison, index) => ({
         label: String(comparison.year),
         data: valuesFor(
-          rowsForSelectedMonths(comparison.series, comparison.year),
+          rowsForYear(comparison.series, comparison.year),
           comparisonGranularity.value,
+          true,
         ),
         backgroundColor: colors[index + 1],
         borderRadius: 0,
+        minBarLength: 4,
       })),
     ],
   }

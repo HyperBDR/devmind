@@ -21,7 +21,7 @@ test('sales dashboard uses month filters and year-specific comparison series', (
   )
   assert.match(
     salesDashboard,
-    /rowsForSelectedMonths\(comparison\.series, comparison\.year\)/,
+    /rowsForYear\(comparison\.series, comparison\.year\)/,
   )
   assert.match(salesDashboard, /function rowsForSelectedMonths\(/)
   assert.match(salesDashboard, /return monthLabels\.value/)
