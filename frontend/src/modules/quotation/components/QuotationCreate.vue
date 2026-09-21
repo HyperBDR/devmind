@@ -116,6 +116,7 @@ const props = withDefaults(
     historyLoading?: boolean
     editingQuote?: Quotation | null
     copyQuote?: Quotation | null
+    saving?: boolean
     customerPrefill?: {
       company: string
       contact: string
@@ -137,6 +138,7 @@ const props = withDefaults(
     historyLoading: false,
     editingQuote: null,
     copyQuote: null,
+    saving: false,
     customerPrefill: null,
   },
 )
@@ -182,6 +184,7 @@ const paymentTermsCustom = ref('')
 const vatRateInput = ref('')
 const taxLabel = ref(DEFAULT_TAX_LABEL)
 const taxCalculationMode = ref<'add' | 'subtract'>('add')
+const deductionAmountInput = ref('')
 const customTotalLabel = ref('')
 const customTotalAmountInput = ref('')
 const customTotalCurrency = ref<string>('USD')
@@ -612,6 +615,9 @@ function loadEditingQuoteIntoForm(editingQuote: Quotation) {
   vatRateInput.value = formatVatRateForInput(editingQuote.vatRate)
   taxLabel.value = resolveTaxLabel(editingQuote.taxLabel)
   taxCalculationMode.value = editingQuote.taxCalculationMode || 'add'
+  deductionAmountInput.value = editingQuote.deductionAmount
+    ? String(editingQuote.deductionAmount)
+    : ''
   customTotalLabel.value = editingQuote.customTotalLabel || ''
   customTotalAmountInput.value = editingQuote.customTotalAmount
     ? String(editingQuote.customTotalAmount)
@@ -675,6 +681,9 @@ function loadCopiedQuoteIntoForm(sourceQuote: Quotation) {
   vatRateInput.value = formatVatRateForInput(sourceQuote.vatRate)
   taxLabel.value = resolveTaxLabel(sourceQuote.taxLabel)
   taxCalculationMode.value = sourceQuote.taxCalculationMode || 'add'
+  deductionAmountInput.value = sourceQuote.deductionAmount
+    ? String(sourceQuote.deductionAmount)
+    : ''
   customTotalLabel.value = sourceQuote.customTotalLabel || ''
   customTotalAmountInput.value = sourceQuote.customTotalAmount
     ? String(sourceQuote.customTotalAmount)
@@ -737,6 +746,7 @@ function resetCreateForm() {
   vatRateInput.value = ''
   taxLabel.value = DEFAULT_TAX_LABEL
   taxCalculationMode.value = 'add'
+  deductionAmountInput.value = ''
   customTotalLabel.value = ''
   customTotalAmountInput.value = ''
   customTotalCurrency.value = 'USD'
@@ -786,6 +796,7 @@ function buildCreateDraftPayload(): Omit<CreateQuoteDraft, 'version' | 'savedAt'
     vatRateInput: vatRateInput.value,
     taxLabel: taxLabel.value,
     taxCalculationMode: taxCalculationMode.value,
+    deductionAmountInput: deductionAmountInput.value,
     customTotalLabel: customTotalLabel.value,
     customTotalAmountInput: customTotalAmountInput.value,
     customTotalCurrency: customTotalCurrency.value,
@@ -824,6 +835,7 @@ function applyCreateDraft(draft: CreateQuoteDraft) {
   vatRateInput.value = draft.vatRateInput || ''
   taxLabel.value = draft.taxLabel || DEFAULT_TAX_LABEL
   taxCalculationMode.value = draft.taxCalculationMode || 'add'
+  deductionAmountInput.value = draft.deductionAmountInput || ''
   customTotalLabel.value = draft.customTotalLabel || ''
   customTotalAmountInput.value = draft.customTotalAmountInput || ''
   customTotalCurrency.value = draft.customTotalCurrency || 'USD'
@@ -976,6 +988,7 @@ watch(
     vatRateInput,
     taxLabel,
     taxCalculationMode,
+    deductionAmountInput,
     customTotalLabel,
     customTotalAmountInput,
     customTotalCurrency,
@@ -1150,13 +1163,33 @@ const quotationTotals = computed(() => calculateQuotationTotals(
   items.value,
   parsedVatRate.value,
   taxCalculationMode.value,
+  Number(deductionAmountInput.value) || 0,
 ))
 const softwareSubtotal = computed(() => quotationTotals.value.softwareSubtotal)
 const othersSubtotal = computed(() => quotationTotals.value.othersSubtotal)
 const subtotalBeforeVat = computed(() => quotationTotals.value.subtotalBeforeVat)
 const vatAmount = computed(() => quotationTotals.value.vatAmount)
+const maxDeductionAmount = computed(() => Math.max(
+  0,
+  subtotalBeforeVat.value + (
+    taxCalculationMode.value === 'subtract'
+      ? -vatAmount.value
+      : vatAmount.value
+  ),
+))
 const grandTotal = computed(() => quotationTotals.value.grandTotal)
 const currencySymbol = computed(() => getCurrencySymbol(currency.value))
+
+function handleDeductionAmountInput(event: Event) {
+  const input = event.target as HTMLInputElement
+  if (!input.value) return
+  const amount = Number(input.value)
+  if (!Number.isFinite(amount)) return
+  const clamped = Math.min(Math.max(0, amount), maxDeductionAmount.value)
+  if (clamped === amount) return
+  input.value = String(clamped)
+  deductionAmountInput.value = input.value
+}
 
 function handleResizeStart(event: PointerEvent) {
   event.preventDefault()
@@ -1221,6 +1254,7 @@ const previewQuote = computed<Quotation>(() => ({
   taxCalculationMode: taxCalculationMode.value,
   vatRate: quotationTotals.value.vatRate,
   vatAmount: vatAmount.value,
+  deductionAmount: quotationTotals.value.deductionAmount,
   grandTotal: grandTotal.value,
   customTotalLabel: customTotalLabel.value.trim(),
   customTotalAmount: Number(customTotalAmountInput.value) || 0,
@@ -1261,6 +1295,11 @@ function validateForm(status: 'Draft' | 'Generated') {
   }
   if (!normalizeTaxLabel(taxLabel.value)) {
     tempErrors.taxLabel = t('quotation.pages.create.errors.taxLabelRequired')
+  }
+  if (grandTotal.value < 0) {
+    tempErrors.deductionAmount = t(
+      'quotation.pages.create.errors.deductionAmountTooLarge',
+    )
   }
   if (!projectName.value.trim()) {
     tempErrors.projectName = t('quotation.pages.create.errors.projectNameRequired')
@@ -1306,6 +1345,7 @@ function validateForm(status: 'Draft' | 'Generated') {
 }
 
 function handleSubmit(status: 'Draft' | 'Generated') {
+  if (props.saving) return
   const validationErrors = validateForm(status)
   if (Object.keys(validationErrors).length > 0) {
     const firstErrorMsg =
@@ -1359,6 +1399,7 @@ function handleSubmit(status: 'Draft' | 'Generated') {
   taxCalculationMode: taxCalculationMode.value,
   vatRate: quotationTotals.value.vatRate,
   vatAmount: vatAmount.value,
+  deductionAmount: quotationTotals.value.deductionAmount,
   grandTotal: grandTotal.value,
   customTotalLabel: customTotalLabel.value.trim(),
   customTotalAmount: Number(customTotalAmountInput.value) || 0,
@@ -2266,8 +2307,9 @@ const itemErrorEntries = computed(() =>
                 </span>
               </div>
               <div
-                class="grid grid-cols-1 items-end gap-3 rounded-lg border border-dm-border-light bg-[#fafafa]/70 p-3 2xl:grid-cols-[minmax(0,1fr)_220px]"
+                class="space-y-3 rounded-lg border border-dm-border-light bg-[#fafafa]/70 p-3"
               >
+                <div class="grid grid-cols-1 items-end gap-3 2xl:grid-cols-[minmax(0,1fr)_220px]">
                 <div class="min-w-0 space-y-3">
                   <div>
                     <label class="mb-1 block font-semibold text-dm-text-tertiary">
@@ -2343,6 +2385,33 @@ const itemErrorEntries = computed(() =>
                     {{ currencySymbol }}{{ vatAmount.toLocaleString() }}
                   </span>
                 </div>
+                </div>
+              <div class="border-t border-dm-border-light pt-3">
+                <label class="mb-1 block font-semibold text-dm-text-tertiary">
+                  {{ t('quotation.pages.create.deductionAmount') }}
+                </label>
+                <input
+                  v-model="deductionAmountInput"
+                  data-testid="quote-deduction-amount-input"
+                  type="number"
+                  min="0"
+                  :max="maxDeductionAmount"
+                  step="0.01"
+                  @input="handleDeductionAmountInput"
+                  class="w-full rounded-lg border bg-white p-2 font-mono text-dm-text placeholder:text-slate-300 focus:border-blue-500 focus:outline-hidden"
+                  :class="errors.deductionAmount ? 'border-red-400 bg-red-50/20' : 'border-dm-border'"
+                  :placeholder="t('quotation.pages.create.deductionAmountPlaceholder')"
+                />
+                <p
+                  v-if="errors.deductionAmount"
+                  class="mt-1 text-xs text-red-500"
+                >
+                  {{ errors.deductionAmount }}
+                </p>
+                <p class="mt-1 text-xs font-medium text-dm-text-tertiary">
+                  {{ t('quotation.pages.create.deductionAmountHelper') }}
+                </p>
+              </div>
               </div>
               <div class="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,120px)_minmax(0,80px)] items-end gap-3 rounded-lg border border-dm-border-light bg-white p-3">
                 <div>
@@ -2494,6 +2563,7 @@ const itemErrorEntries = computed(() =>
             <button
               type="button"
               class="dm-btn-primary w-full cursor-pointer py-3 text-sm font-bold"
+              :disabled="saving"
               @click="handleSubmit('Generated')"
             >
               <FileSpreadsheet class="h-4 w-4" />
@@ -2502,6 +2572,7 @@ const itemErrorEntries = computed(() =>
             <button
               type="button"
               class="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-dm-border bg-[#fafafa] py-2.5 text-sm font-semibold text-dm-text transition duration-150 hover:bg-slate-100"
+              :disabled="saving"
               @click="handleSubmit('Draft')"
             >
               <Save class="h-4 w-4" />

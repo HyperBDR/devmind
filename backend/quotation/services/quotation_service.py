@@ -34,6 +34,7 @@ QUOTATION_BUSINESS_FIELDS = (
     "tax_label",
     "tax_calculation_mode",
     "vat_rate",
+    "deduction_amount",
     "custom_total_label",
     "custom_total_amount",
     "custom_total_currency",
@@ -64,6 +65,7 @@ QUOTATION_ITEM_BUSINESS_FIELDS = (
 )
 QUOTATION_DECIMAL_FIELDS = {
     "vat_rate",
+    "deduction_amount",
     "qty",
     "list_price",
     "discount_percent",
@@ -97,12 +99,14 @@ def calculate_totals(
     items: Iterable[Any],
     vat_rate: Decimal,
     tax_mode: str = "add",
+    deduction_amount: Decimal = Decimal("0"),
 ) -> dict[str, Decimal]:
     return calculate_document_totals(
         items,
         vat_rate,
         software_type=ItemType.SOFTWARE,
         tax_mode=tax_mode,
+        deduction_amount=deduction_amount,
     )
 
 
@@ -246,6 +250,7 @@ def build_quotation_snapshot(
         "tax_label": quotation.tax_label,
         "tax_calculation_mode": quotation.tax_calculation_mode,
         "vat_rate": _decimal_str(quotation.vat_rate),
+        "deduction_amount": _decimal_str(quotation.deduction_amount),
         "custom_total_label": quotation.custom_total_label,
         "custom_total_amount": _decimal_str(quotation.custom_total_amount),
         "custom_total_currency": quotation.custom_total_currency,
@@ -297,6 +302,7 @@ def build_quotation(
         [type("I", (), item)() for item in items_data],
         Decimal(str(data.get("vat_rate", 0))),
         tax_mode=data.get("tax_calculation_mode") or "add",
+        deduction_amount=Decimal(str(data.get("deduction_amount", 0))),
     )
     source_totals = data.get("_source_totals") or {}
     for field in ("subtotal_before_vat", "vat_amount", "grand_total"):
@@ -533,6 +539,7 @@ def copy_quotation(
         tax_label=quotation.tax_label,
         tax_calculation_mode=quotation.tax_calculation_mode,
         vat_rate=quotation.vat_rate,
+        deduction_amount=quotation.deduction_amount,
         vat_amount=quotation.vat_amount,
         software_subtotal=quotation.software_subtotal,
         others_subtotal=quotation.others_subtotal,
@@ -700,6 +707,7 @@ def update_quotation(
             "items" in data
             or "vat_rate" in data
             or "tax_calculation_mode" in data
+            or "deduction_amount" in data
         ):
             total_items = [
                 item
@@ -711,6 +719,9 @@ def update_quotation(
                 total_items,
                 Decimal(str(locked.vat_rate)),
                 tax_mode=locked.tax_calculation_mode,
+                deduction_amount=Decimal(
+                    str(locked.deduction_amount or 0)
+                ),
             )
             for field, value in totals.items():
                 setattr(locked, field, value)
@@ -795,6 +806,9 @@ def create_version_snapshot(
             line_items,
             Decimal(str(locked.vat_rate or 0)),
             tax_mode=locked.tax_calculation_mode,
+            deduction_amount=Decimal(
+                str(locked.deduction_amount or 0)
+            ),
         )
         for field in ("subtotal_before_vat", "vat_amount", "grand_total"):
             if source_totals and source_totals.get(field) not in (None, ""):

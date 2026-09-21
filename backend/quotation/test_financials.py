@@ -27,6 +27,7 @@ class DocumentFinancialsTests(SimpleTestCase):
                 "others_subtotal": Decimal("5.00"),
                 "subtotal_before_vat": Decimal("15.01"),
                 "vat_amount": Decimal("1.50"),
+                "deduction_amount": Decimal("0.00"),
                 "grand_total": Decimal("16.51"),
             },
         )
@@ -57,3 +58,36 @@ class DocumentFinancialsTests(SimpleTestCase):
 
         self.assertEqual(totals["vat_amount"], Decimal("10.00"))
         self.assertEqual(totals["grand_total"], Decimal("90.00"))
+
+    def test_deducts_manual_amount_from_grand_total(self):
+        item = type(
+            "Item",
+            (),
+            {"type": "Software", "extended_price": "100.00"},
+        )()
+
+        totals = calculate_document_totals(
+            [item],
+            Decimal("10"),
+            deduction_amount=Decimal("15"),
+        )
+
+        self.assertEqual(totals["vat_amount"], Decimal("10.00"))
+        self.assertEqual(totals["deduction_amount"], Decimal("15.00"))
+        self.assertEqual(totals["grand_total"], Decimal("95.00"))
+
+    def test_deduction_cannot_make_grand_total_negative(self):
+        item = type(
+            "Item",
+            (),
+            {"type": "Software", "extended_price": "10.00"},
+        )()
+
+        totals = calculate_document_totals(
+            [item],
+            Decimal("0"),
+            deduction_amount=Decimal("99"),
+        )
+
+        self.assertEqual(totals["deduction_amount"], Decimal("10.00"))
+        self.assertEqual(totals["grand_total"], Decimal("0.00"))

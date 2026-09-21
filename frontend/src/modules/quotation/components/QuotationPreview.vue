@@ -8,6 +8,9 @@ import {
   getCurrencySymbol,
   type PreviewUser,
 } from '../utils/quotationPreviewModel'
+import { useQuotationI18n } from '../composables/useQuotationI18n'
+
+const { t } = useQuotationI18n()
 
 const props = withDefaults(
   defineProps<{
@@ -48,6 +51,7 @@ const totalsLabelSpan = computed(() => {
     'Others Subtotal:',
     `Subtotal before ${model.value.taxLabel}:`,
     `${model.value.taxLabel} Amount (${model.value.vatRate}%):`,
+    t('quotation.create.deductionAmount'),
     model.value.customTotalLabel
       ? `${model.value.customTotalLabel}(${model.value.customTotalCurrency || model.value.currency}):`
       : '',
@@ -361,7 +365,7 @@ const moneyTotalCellClass =
             {{ money(model.subtotalBeforeVat) }}
           </td>
         </tr>
-        <tr>
+        <tr v-if="model.vatAmount !== 0">
           <td :colspan="totalsSpacerSpan" class="px-1.5 py-1 align-middle" />
           <td
             :colspan="totalsLabelSpan"
@@ -370,7 +374,19 @@ const moneyTotalCellClass =
             {{ model.taxLabel }} Amount ({{ model.vatRate }}%):
           </td>
           <td :class="moneyTotalCellClass">
-            {{ money(model.vatAmount) }}
+            {{ model.taxCalculationMode === 'subtract' ? '-' : '' }}{{ money(model.vatAmount) }}
+          </td>
+        </tr>
+        <tr v-if="model.deductionAmount !== 0">
+          <td :colspan="totalsSpacerSpan" class="px-1.5 py-1 align-middle" />
+          <td
+            :colspan="totalsLabelSpan"
+            class="whitespace-normal break-words border border-slate-300 px-1.5 py-1 text-right font-semibold leading-tight align-middle"
+          >
+            {{ t('quotation.create.deductionAmount') }}:
+          </td>
+          <td :class="moneyTotalCellClass">
+            -{{ money(model.deductionAmount) }}
           </td>
         </tr>
         <tr>

@@ -70,6 +70,7 @@ export interface QuoteVersion {
   taxCalculationMode?: TaxCalculationMode;
   vatRate: number;
   vatAmount: number;
+  deductionAmount: number;
   customTotalLabel?: string;
   customTotalAmount?: number;
   customTotalCurrency?: string;
@@ -130,6 +131,7 @@ export interface Quotation {
   taxCalculationMode?: TaxCalculationMode;
   vatRate: number;
   vatAmount: number;
+  deductionAmount: number;
   grandTotal: number;
   customTotalLabel?: string;
   customTotalAmount?: number;

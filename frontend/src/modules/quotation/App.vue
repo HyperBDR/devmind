@@ -217,6 +217,7 @@ const activeQuoteLoading = ref(false)
 const drawerQuoteId = ref<string | null>(null)
 const editingQuote = ref<Quotation | null>(null)
 const copySourceQuote = ref<Quotation | null>(null)
+const savingQuotation = ref(false)
 const quotationFormContext = ref<Quotation[]>([])
 const customerSummary = ref<Awaited<ReturnType<typeof getCustomerSummary>>>([])
 const quotationFormContextQuoteNumbers = ref<string[]>([])
@@ -731,11 +732,13 @@ function handleCloseDetailDrawer() {
 }
 
 async function handleSaveQuotation(newQuote: Quotation) {
+  if (savingQuotation.value) return
   if (!auth.currentUser) {
     triggerToast(t('quotation.app.loginRequired'), 'error')
     return
   }
 
+  savingQuotation.value = true
   const ownedQuote = ensureQuoteOwnership(newQuote, auth.currentUser)
 
   try {
@@ -793,6 +796,8 @@ async function handleSaveQuotation(newQuote: Quotation) {
     console.error(error)
     const message = error instanceof Error ? error.message : t('quotation.app.saveFailed')
     triggerToast(message, 'error')
+  } finally {
+    savingQuotation.value = false
   }
 }
 
@@ -1216,6 +1221,7 @@ function reloadPage() {
           :history-loading="quotationFormContextLoading"
           :editing-quote="editingQuote"
           :copy-quote="copySourceQuote"
+          :saving="savingQuotation"
           :customer-prefill="customerPrefill"
           :current-user="auth.currentUser"
           :product-line-options="productLineOptions"

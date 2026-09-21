@@ -176,6 +176,7 @@ const snapshotQuote = computed((): Quotation | null => {
     taxLabel: ver.taxLabel || props.quote.taxLabel,
     vatRate: ver.vatRate,
     vatAmount: ver.vatAmount,
+    deductionAmount: ver.deductionAmount,
     grandTotal: ver.grandTotal,
     versions: undefined,
   }
@@ -357,7 +358,7 @@ function setStatus(status: QuoteStatus) {
 <template>
   <div
     id="quote-details-root"
-    :class="embedded ? 'space-y-0' : 'mx-auto max-w-[1400px] space-y-6'"
+    :class="embedded ? 'space-y-0' : 'mx-auto max-w-[1500px] space-y-5'"
   >
     <div
       v-if="!embedded && quote.status === 'Cancelled'"
@@ -379,20 +380,30 @@ function setStatus(status: QuoteStatus) {
       </div>
     </div>
 
-    <div
-      v-if="!embedded"
-      class="flex flex-col items-start justify-between gap-4 dm-card p-4 shadow-xs sm:flex-row sm:items-center"
-    >
+    <div v-if="!embedded" class="space-y-4">
       <button
         type="button"
-        class="flex cursor-pointer items-center gap-1.5 rounded-lg border border-dm-border px-3 py-1.5 text-sm font-semibold text-dm-text-secondary transition duration-150 hover:bg-[#fafafa]"
+        class="inline-flex cursor-pointer items-center gap-1 text-sm font-medium text-dm-primary hover:underline"
         @click="emit('back')"
       >
         <ArrowLeft class="h-4 w-4" />
         {{ t('quotation.pages.details.backToList') }}
       </button>
 
-      <div class="flex flex-wrap items-center gap-2">
+      <header class="dm-card flex flex-wrap items-start justify-between gap-4 p-5">
+        <div>
+          <p class="text-xs font-semibold uppercase tracking-wider text-dm-primary">
+            {{ t('quotation.pages.details.headerTitle') }}
+          </p>
+          <h1 class="mt-1 text-2xl font-semibold text-dm-text">
+            {{ quote.quoteNo }}
+          </h1>
+          <p class="mt-1 text-sm text-dm-text-tertiary">
+            {{ t('quotation.pages.details.headerSubtitle') }}
+          </p>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
         <button
           v-if="
             quote.status !== 'Cancelled' &&
@@ -447,32 +458,72 @@ function setStatus(status: QuoteStatus) {
           {{ t('quotation.pages.details.exportPdf') }}
         </button>
       </div>
-      <p
-        v-if="activeExportStatus"
+        <p
+          v-if="activeExportStatus"
         class="w-full text-right text-xs font-semibold text-indigo-600 sm:w-auto"
         role="status"
       >
-        {{ activeExportStatusLabel }}
-      </p>
+          {{ activeExportStatusLabel }}
+        </p>
+        </header>
+
+      <section class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div class="dm-card p-4">
+          <p class="text-xs text-dm-text-tertiary">
+            {{ t('quotation.pages.list.tableCustomer') }}
+          </p>
+          <p class="mt-1 font-semibold text-dm-text">
+            {{ quote.clientCompany || '—' }}
+          </p>
+        </div>
+        <div class="dm-card p-4">
+          <p class="text-xs text-dm-text-tertiary">
+            {{ t('quotation.pages.list.dateRangeLabel') }}
+          </p>
+          <p class="mt-1 font-semibold text-dm-text">
+            {{ quote.quoteDate || '—' }}
+          </p>
+        </div>
+        <div class="dm-card p-4">
+          <p class="text-xs text-dm-text-tertiary">
+            {{ t('quotation.pages.list.tableTotal') }}
+          </p>
+          <p class="mt-1 font-semibold text-dm-text">
+            {{ currencySymbol }}{{ quote.grandTotal.toLocaleString() }}
+          </p>
+        </div>
+        <div class="dm-card p-4">
+          <p class="text-xs text-dm-text-tertiary">
+            {{ t('quotation.pages.list.tableSource') }}
+          </p>
+          <p class="mt-1 font-semibold text-dm-text">
+            {{ quote.sourceType === 'document_import'
+              ? t('quotation.pages.list.sourceDocumentImport')
+              : t('quotation.pages.list.sourceLocalCreated') }}
+          </p>
+        </div>
+      </section>
     </div>
 
-    <div
-      :class="
-        embedded
-          ? 'block'
-          : 'grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_300px]'
-      "
-    >
+    <div class="block">
       <div
         data-embedded-quotation-preview
-        class="min-w-0 overflow-x-auto rounded-xl border border-dm-border bg-slate-100"
+        class="dm-card min-w-0 p-4"
         :class="embedded ? 'p-0 sm:p-2' : 'p-4'"
       >
-        <QuotationPreview :quote="quote" :current-user="currentUser" />
+        <div class="mb-3 flex items-center gap-2">
+          <FileText class="h-4 w-4 text-dm-primary" />
+          <h2 class="text-sm font-semibold text-dm-text">
+            {{ t('quotation.pages.details.documentTitle') }}
+          </h2>
+        </div>
+        <div class="overflow-auto rounded-xl border border-dm-border bg-slate-200 p-3">
+          <QuotationPreview :quote="quote" :current-user="currentUser" />
+        </div>
       </div>
 
       <div
-        v-if="!embedded"
+        v-if="false"
         class="min-w-0 space-y-6 xl:w-[300px]"
         data-quotation-details-sidebar
       >
@@ -538,7 +589,10 @@ function setStatus(status: QuoteStatus) {
           </ol>
         </div>
 
-        <div class="space-y-4 dm-card p-5 shadow-xs">
+        <div
+          v-if="false"
+          class="space-y-4 dm-card p-5 shadow-xs"
+        >
           <div class="flex items-center gap-2 border-b border-slate-50 pb-2">
             <Settings class="h-4 w-4 text-dm-text-tertiary" />
             <h3 class="text-sm font-semibold text-dm-text">{{ t('quotation.pages.details.statusCenterTitle') }}</h3>

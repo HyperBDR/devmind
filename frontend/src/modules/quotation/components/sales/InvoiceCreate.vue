@@ -790,6 +790,7 @@ async function initializeForm() {
 }
 
 async function submit(status: InvoiceStatus) {
+  if (submitting.value) return
   error.value = ''
   const effectiveStatus: WritableInvoiceStatus =
     isFormalEditing.value && isWritableInvoiceStatus(editingStatus.value)

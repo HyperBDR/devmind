@@ -52,6 +52,7 @@ interface ApiQuotation {
   tax_calculation_mode?: 'add' | 'subtract';
   vat_rate: number | string;
   vat_amount: number | string;
+  deduction_amount: number | string;
   software_subtotal: number | string;
   others_subtotal: number | string;
   subtotal_before_vat: number | string;
@@ -278,12 +279,14 @@ function snapNumber(
 function totalsFromItems(
   items: QuotationLineItem[],
   vatRate: number,
+  deductionAmount = 0,
 ): Pick<
   QuoteVersion,
   | 'softwareSubtotal'
   | 'othersSubtotal'
   | 'subtotalBeforeVat'
   | 'vatAmount'
+  | 'deductionAmount'
   | 'grandTotal'
 > {
   const softwareSubtotal = items
@@ -299,7 +302,8 @@ function totalsFromItems(
     othersSubtotal,
     subtotalBeforeVat,
     vatAmount,
-    grandTotal: subtotalBeforeVat + vatAmount,
+    deductionAmount,
+    grandTotal: subtotalBeforeVat + vatAmount - deductionAmount,
   };
 }
 
@@ -323,6 +327,11 @@ function mapApiVersion(version: ApiQuotationVersion): QuoteVersion {
     })
     : [];
   const vatRate = snapNumber(snap, 'vat_rate', 'vatRate');
+  const deductionAmount = snapNumber(
+    snap,
+    'deduction_amount',
+    'deductionAmount',
+  );
   const storedTotals = {
     softwareSubtotal: snapNumber(snap, 'software_subtotal', 'softwareSubtotal'),
     othersSubtotal: snapNumber(snap, 'others_subtotal', 'othersSubtotal'),
@@ -332,11 +341,12 @@ function mapApiVersion(version: ApiQuotationVersion): QuoteVersion {
       'subtotalBeforeVat',
     ),
     vatAmount: snapNumber(snap, 'vat_amount', 'vatAmount'),
+    deductionAmount,
     grandTotal:
       snapNumber(snap, 'grand_total', 'grandTotal')
       || Number(version.grand_total || 0),
   };
-  const derivedTotals = totalsFromItems(items, vatRate);
+  const derivedTotals = totalsFromItems(items, vatRate, deductionAmount);
   const useDerived =
     items.length > 0 &&
     storedTotals.grandTotal === 0 &&
@@ -473,6 +483,7 @@ export function mapApiQuotation(api: ApiQuotation): Quotation {
     taxCalculationMode: api.tax_calculation_mode || 'add',
     vatRate: toNumber(api.vat_rate),
     vatAmount: toNumber(api.vat_amount),
+    deductionAmount: toNumber(api.deduction_amount),
     grandTotal: toNumber(api.grand_total),
     customTotalLabel: api.custom_total_label || '',
     customTotalAmount: toNumber(api.custom_total_amount),
@@ -537,6 +548,7 @@ function mapApiQuotationListItem(api: ApiQuotationListItem): Quotation {
     subtotalBeforeVat: 0,
     vatRate: 0,
     vatAmount: 0,
+    deductionAmount: 0,
     grandTotal: toNumber(api.grand_total),
     quoteDate: api.quote_date || undefined,
     createdAt: api.created_at,
@@ -578,6 +590,7 @@ function mapApiQuotationFormContextItem(
     subtotalBeforeVat: 0,
     vatRate: 0,
     vatAmount: 0,
+    deductionAmount: 0,
     grandTotal: 0,
     createdAt: api.created_at,
   };
@@ -601,6 +614,7 @@ export function mapQuotationToCreatePayload(quote: Quotation) {
     tax_label: quote.taxLabel || 'VAT',
     tax_calculation_mode: quote.taxCalculationMode || 'add',
     vat_rate: quote.vatRate ?? 0,
+    deduction_amount: quote.deductionAmount ?? 0,
     custom_total_label: quote.customTotalLabel || '',
     custom_total_amount: quote.customTotalAmount ?? 0,
     custom_total_currency: quote.customTotalCurrency || 'USD',

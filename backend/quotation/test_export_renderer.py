@@ -284,9 +284,34 @@ class QuotationTemplateRendererTests(TestCase):
         rendered = load_workbook(io.BytesIO(content))
         self.assertEqual(
             rendered["Quotation"]["D32"].value,
-            "GST Amount (10%):",
+            "Grand Total:",
         )
         rendered.close()
+
+    def test_zero_vat_is_hidden_and_deduction_is_rendered(self):
+        template = ensure_default_template()
+        content = render_quotation_xlsx(
+            template,
+            {
+                "tax_label": "VAT",
+                "vat_rate": "0",
+                "vat_amount": "0",
+                "deduction_amount": "25",
+                "subtotal_before_vat": "100",
+                "grand_total": "75",
+            },
+        )
+
+        workbook = load_workbook(io.BytesIO(content), data_only=False)
+        values = [
+            cell.value
+            for row in workbook["Quotation"].iter_rows()
+            for cell in row
+        ]
+        self.assertNotIn("VAT Amount (0%):", values)
+        self.assertIn("Deduction Amount:", values)
+        self.assertIn(-25, values)
+        workbook.close()
 
     def test_default_template_preserves_same_name_custom_version_one(self):
         workbook = load_workbook(io.BytesIO(_build_managed_template_bytes(version=1)))
