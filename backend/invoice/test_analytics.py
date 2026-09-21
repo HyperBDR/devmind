@@ -292,6 +292,45 @@ class SalesDashboardTests(TestCase):
         }
         self.assertIn("2025-12", periods)
 
+    def test_dashboard_comparison_period_matches_exact_shifted_dates(self):
+        Invoice.objects.create(
+            invoice_no="INV-2025-BEFORE",
+            invoice_date=date(2025, 2, 1),
+            customer_name="Before range",
+            currency="USD",
+            status=InvoiceStatus.ISSUED,
+            total_amount=Decimal("10"),
+        )
+        Invoice.objects.create(
+            invoice_no="INV-2025-IN-RANGE",
+            invoice_date=date(2025, 2, 2),
+            customer_name="In range",
+            currency="USD",
+            status=InvoiceStatus.ISSUED,
+            total_amount=Decimal("20"),
+        )
+        Invoice.objects.create(
+            invoice_no="INV-2025-AFTER",
+            invoice_date=date(2025, 5, 1),
+            customer_name="After range",
+            currency="USD",
+            status=InvoiceStatus.ISSUED,
+            total_amount=Decimal("40"),
+        )
+
+        result = sales_dashboard(
+            start_date=date(2026, 2, 2),
+            end_date=date(2026, 4, 30),
+            currency="USD",
+            granularity="quarter",
+            comparison_years=1,
+        )
+
+        self.assertEqual(
+            result["comparison"][0]["period_amount"],
+            "20.00",
+        )
+
     def test_dashboard_filters_amounts_and_lists_available_currencies(self):
         usd = sales_dashboard(
             start_date=date(2026, 1, 1),
