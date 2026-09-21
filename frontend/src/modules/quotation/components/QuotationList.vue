@@ -412,7 +412,7 @@ async function loadUploadAccess() {
   if (uploadAccessLoading.value) return
   uploadAccessLoading.value = true
   try {
-    const context = await getAccessRequestContext()
+    const context = await getAccessRequestContext(true)
     if (context.is_admin) {
       hasUploadAccess.value = true
       return

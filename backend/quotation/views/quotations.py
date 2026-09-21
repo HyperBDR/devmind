@@ -4,6 +4,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction
+from django.db.models import Prefetch, Q
 from django.db.models.deletion import ProtectedError
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -21,10 +22,19 @@ from quotation.audit import (
     set_request_audit_changed_fields,
     set_request_audit_target,
 )
-from quotation.models import Quotation, QuotationSourceType, QuoteStatus
+from quotation.models import (
+    DocumentAsset,
+    DocumentReplica,
+    Quotation,
+    QuotationSourceType,
+    QuotationVersion,
+    QuoteStatus,
+    ReplicaSyncStatus,
+)
 from quotation.permissions import user_display_email
 from quotation.serializers import (
     QuotationCreateSerializer,
+    QuotationDetailSerializer,
     QuotationFormContextQuerySerializer,
     QuotationFormContextSerializer,
     QuotationGenerateSerializer,
@@ -32,12 +42,10 @@ from quotation.serializers import (
     QuotationListQuerySerializer,
     QuotationListSerializer,
     QuotationSerializer,
+    QuotationVersionSerializer,
     QuotationUpdateSerializer,
 )
-from quotation.services.form_context import (
-    build_line_item_description_history,
-    parsed_quotation_queryset,
-)
+from quotation.services.form_context import build_line_item_description_history
 from quotation.services.quotation_queries import (
     annotate_quotation_list,
     attach_quotation_document_summaries,
@@ -310,9 +318,12 @@ class QuotationFormContextView(APIView):
         query_serializer.is_valid(raise_exception=True)
         page = query_serializer.validated_data["page"]
         page_size = int(query_serializer.validated_data["page_size"])
-        queryset = filter_accessible_quotations(
+        accessible_quotations = filter_accessible_quotations(
             request.user,
-            parsed_quotation_queryset(),
+            Quotation.objects.all(),
+        )
+        queryset = accessible_quotations.filter(
+            source_type=QuotationSourceType.DOCUMENT_IMPORT,
         ).order_by(
             "-created_at",
             "-id",
@@ -328,28 +339,28 @@ class QuotationFormContextView(APIView):
             build_line_item_description_history(page_queryset),
             many=True,
         ).data
-        quote_numbers = list(
-            filter_accessible_quotations(
-                request.user,
-                Quotation.objects.all(),
+        quote_numbers = []
+        number_rows = accessible_quotations.filter(
+            Q(
+                ~Q(status=QuoteStatus.DRAFT),
+                quote_no__isnull=False,
             )
-            .exclude(status=QuoteStatus.DRAFT)
-            .exclude(quote_no__isnull=True)
-            .exclude(quote_no="")
-            .values_list("quote_no", flat=True)
-        )
-        draft_quote_numbers = list(
-            filter_accessible_quotations(
-                request.user,
-                Quotation.objects.filter(
-                    status=QuoteStatus.DRAFT,
-                    numbering_mode="auto",
-                ),
+            | Q(
+                status=QuoteStatus.DRAFT,
+                numbering_mode="auto",
+                draft_quote_no__gt="",
             )
-            .exclude(draft_quote_no="")
-            .values_list("draft_quote_no", flat=True)
+        ).values_list(
+            "status",
+            "quote_no",
+            "draft_quote_no",
         )
-        quote_numbers.extend(draft_quote_numbers)
+        for status_value, quote_no, draft_quote_no in number_rows:
+            if status_value == QuoteStatus.DRAFT:
+                if draft_quote_no:
+                    quote_numbers.append(draft_quote_no)
+            elif quote_no:
+                quote_numbers.append(quote_no)
         return Response(
             {
                 "items": items,
@@ -377,8 +388,50 @@ class QuotationDetailView(APIView):
             .first()
         )
 
+    def get_detail_object(self, quotation_id: str) -> Quotation | None:
+        replica_queryset = DocumentReplica.objects.filter(
+            sync_status=ReplicaSyncStatus.SYNCED,
+            revoked_at__isnull=True,
+        ).exclude(
+            remote_file_token="",
+        ).only(
+            "id",
+            "asset_id",
+            "remote_file_token",
+            "remote_url",
+            "folder_token",
+            "version",
+            "sync_status",
+            "last_synced_at",
+            "revoked_at",
+            "created_at",
+            "updated_at",
+        )
+        document_queryset = DocumentAsset.objects.only(
+            "id",
+            "quotation_id",
+            "doc_type",
+            "file_name",
+            "source",
+            "feishu_file_token",
+            "feishu_url",
+            "feishu_folder_token",
+            "created_at",
+        ).prefetch_related(
+            Prefetch("replicas", queryset=replica_queryset),
+        )
+        return (
+            Quotation.objects.prefetch_related(
+                "items",
+                Prefetch("documents", queryset=document_queryset),
+                "versions",
+            )
+            .filter(pk=quotation_id)
+            .first()
+        )
+
     def get(self, request, quotation_id: str):
-        quotation = self.get_object(quotation_id)
+        quotation = self.get_detail_object(quotation_id)
         if not quotation:
             return Response({"detail": "quotation not found"}, status=404)
         denied = _ensure_access(request.user, quotation)
@@ -388,7 +441,7 @@ class QuotationDetailView(APIView):
             request,
             target_label=quotation_audit_label(quotation),
         )
-        return Response(QuotationSerializer(quotation).data)
+        return Response(QuotationDetailSerializer(quotation).data)
 
     def post(self, request, quotation_id: str):
         quotation = (
@@ -434,6 +487,7 @@ class QuotationDetailView(APIView):
             target_label=quotation_audit_label(copied),
         )
         return Response(QuotationSerializer(copied).data, status=201)
+
 
     def put(self, request, quotation_id: str):
         quotation = self.get_object(quotation_id)
@@ -518,6 +572,25 @@ class QuotationDetailView(APIView):
                 status=status.HTTP_409_CONFLICT,
             )
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class QuotationVersionDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, quotation_id: str, version_id: str):
+        quotation = Quotation.objects.filter(pk=quotation_id).first()
+        if not quotation:
+            return Response({"detail": "quotation not found"}, status=404)
+        denied = _ensure_access(request.user, quotation)
+        if denied:
+            return denied
+        version = QuotationVersion.objects.filter(
+            pk=version_id,
+            quotation_id=quotation_id,
+        ).first()
+        if not version:
+            return Response({"detail": "version not found"}, status=404)
+        return Response(QuotationVersionSerializer(version).data)
 
 
 class QuotationGenerateView(APIView):

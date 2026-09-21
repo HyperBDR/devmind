@@ -47,7 +47,7 @@ from quotation.services.storage import (
 LEGACY_DEFAULT_TEMPLATE_NAME = "DevMind standard quotation"
 DEFAULT_TEMPLATE_NAME = "DevMind managed standard quotation"
 DEFAULT_TEMPLATE_VERSION = 2
-CURRENT_RENDERER_VERSION = "quotation-preview-xlsx-v7"
+CURRENT_RENDERER_VERSION = "quotation-preview-xlsx-v8"
 DEFAULT_WORKSHEET = "Quotation"
 
 
@@ -110,7 +110,22 @@ def _description_row_height(description: str) -> float:
     """Return enough height for wrapped description text."""
     lines = str(description or "").splitlines() or [""]
     line_count = sum(max(1, ceil(len(line) / 24)) for line in lines)
-    return min(120, max(24, 6 + line_count * 15))
+    # ponytail: Excel caps row height; split rows if huge descriptions recur.
+    return min(409, max(24, 6 + line_count * 15))
+
+
+def _label_start_column(labels: list[str]) -> int:
+    """Return the first label column while preserving the amount column."""
+    length = max((len(label) for label in labels), default=0)
+    if length > 78:
+        return 1
+    if length > 58:
+        return 2
+    if length > 43:
+        return 3
+    if length > 28:
+        return 4
+    return 5
 
 
 @contextmanager
@@ -755,7 +770,23 @@ def render_quotation_xlsx(
     sheet = workbook.active
     sheet.title = DEFAULT_WORKSHEET
     sheet.sheet_view.showGridLines = False
-    widths = (12, 24, 8, 12, 10, 17, 17)
+    items = list(snapshot.get("items") or [])
+    completed_items = [
+        item
+        for item in items
+        if item.get("description")
+        or item.get("name")
+        or Decimal(str(item.get("list_price") or 0)) > 0
+    ]
+    show_discount = not completed_items or any(
+        Decimal(str(item.get("discount_percent") or 0)) != 0
+        for item in completed_items
+    )
+    widths = (
+        (12, 24, 8, 12, 10, 17, 17)
+        if show_discount
+        else (12, 32, 8, 8, 8, 9, 23)
+    )
     for index, width in enumerate(widths, 1):
         sheet.column_dimensions[get_column_letter(index)].width = width
 
@@ -795,6 +826,23 @@ def render_quotation_xlsx(
             "alignment", Alignment(vertical="center", wrap_text=True)
         )
         return cell
+
+    def fit_row(
+        row: int,
+        content,
+        *,
+        width: int,
+        minimum: float = 18,
+        line_height: float = 12,
+    ) -> None:
+        height = 6 + estimate_wrapped_lines(str(content), width=width) * (
+            line_height
+        )
+        sheet.row_dimensions[row].height = max(
+            sheet.row_dimensions[row].height or minimum,
+            minimum,
+            height,
+        )
 
     def value(key: str, fallback=""):
         result = snapshot.get(key)
@@ -879,7 +927,18 @@ def render_quotation_xlsx(
         7,
         value("issuer_company_name"),
         font=Font(name="Arial", size=18, bold=True, color="0F172A"),
-        alignment=Alignment(horizontal="center", vertical="center"),
+        alignment=Alignment(
+            horizontal="center",
+            vertical="center",
+            wrap_text=True,
+        ),
+    )
+    fit_row(
+        2,
+        value("issuer_company_name"),
+        width=50,
+        minimum=24,
+        line_height=24,
     )
     merged(
         3,
@@ -913,12 +972,17 @@ def render_quotation_xlsx(
             font=bold,
             alignment=Alignment(horizontal="right", vertical="center"),
         )
+        fit_row(row, content, width=16)
         style_range(
             row,
             7,
             7,
             border=bottom_border,
-            alignment=Alignment(horizontal="right", vertical="center"),
+            alignment=Alignment(
+                horizontal="right",
+                vertical="center",
+                wrap_text=True,
+            ),
         )
 
     merged(
@@ -937,13 +1001,15 @@ def render_quotation_xlsx(
         (10, "Email :", value("email")),
     )
     for row, label, content in customer_details:
+        text = f"{label} {content}"
         merged(
             row,
             1,
             2,
-            f"{label} {content}",
+            text,
             border=dark_border,
         )
+        fit_row(row, text, width=32)
     merged(11, 1, 7, "")
     sheet.row_dimensions[11].height = 9
     merged(
@@ -970,13 +1036,15 @@ def render_quotation_xlsx(
         (15, "Email :", issuer_value("billing_email", value("email"))),
     )
     for row, label, content in billing_details:
+        text = f"{label} {content}"
         merged(
             row,
             1,
             2,
-            f"{label} {content}",
+            text,
             border=dark_border,
         )
+        fit_row(row, text, width=32)
     merged(16, 1, 7, "")
     sheet.row_dimensions[16].height = 12
     merged(17, 1, 7, "")
@@ -1016,10 +1084,12 @@ def render_quotation_xlsx(
     style_range(19, border=cell_border)
     for cell in sheet[19]:
         cell.alignment = Alignment(vertical="center", wrap_text=True)
+    meta_widths = (10, 27, 34, 15, 16)
+    for content, width in zip(meta_values, meta_widths):
+        fit_row(19, content, width=width)
     merged(20, 1, 7, "")
     sheet.row_dimensions[20].height = 15
 
-    items = list(snapshot.get("items") or [])
     groups = (
         (
             "Software",
@@ -1034,6 +1104,11 @@ def render_quotation_xlsx(
             snapshot.get("others_subtotal"),
         ),
     )
+    subtotal_labels = (
+        "Software subscription subtotal:",
+        "Others Subtotal:",
+    )
+    subtotal_label_start = _label_start_column(list(subtotal_labels))
     row = 21
     headers = (
         "Item",
@@ -1057,6 +1132,8 @@ def render_quotation_xlsx(
         row += 1
         for column, header in enumerate(headers, 1):
             sheet.cell(row, column, header)
+        if not show_discount:
+            sheet.merge_cells(start_row=row, start_column=4, end_row=row, end_column=6)
         style_range(
             row,
             font=bold,
@@ -1074,6 +1151,8 @@ def render_quotation_xlsx(
         ]
         for index, item in enumerate(rows, 1):
             description = item.get("description") or item.get("name") or ""
+            discount_value = item.get("discount_percent") or 0
+            has_item_discount = Decimal(str(discount_value)) != 0
             values = [
                 index if description else "",
                 description,
@@ -1084,7 +1163,7 @@ def render_quotation_xlsx(
                         item.get("discount_percent") or 0,
                         decimal_places=4,
                     )
-                    if description
+                    if description and show_discount and has_item_discount
                     else None
                 ),
                 money(item.get("net_unit_price")) if description else None,
@@ -1092,6 +1171,13 @@ def render_quotation_xlsx(
             ]
             for column, content in enumerate(values, 1):
                 sheet.cell(row, column, content)
+            if not show_discount:
+                sheet.merge_cells(
+                    start_row=row,
+                    start_column=4,
+                    end_row=row,
+                    end_column=6,
+                )
             style_range(row, border=cell_border)
             sheet.row_dimensions[row].height = _description_row_height(
                 description,
@@ -1105,11 +1191,12 @@ def render_quotation_xlsx(
             sheet.cell(row, 3).number_format = numeric_format(
                 item.get("qty"),
             )
-            sheet.cell(row, 5).number_format = numeric_format(
-                item.get("discount_percent"),
-                decimal_places=4,
-                suffix="%",
-            )
+            if show_discount and has_item_discount:
+                sheet.cell(row, 5).number_format = numeric_format(
+                    discount_value,
+                    decimal_places=4,
+                    suffix="%",
+                )
             for column in (4, 6, 7):
                 sheet.cell(row, column).alignment = Alignment(
                     horizontal="right",
@@ -1125,15 +1212,20 @@ def render_quotation_xlsx(
                     grouped=True,
                 )
             row += 1
-        for column in range(1, 5):
-            sheet.cell(row, column).border = Border()
-        sheet.merge_cells(start_row=row, start_column=5, end_row=row, end_column=6)
         subtotal_label = (
             "Software subscription subtotal:"
             if section == "Software"
             else "Others Subtotal:"
         )
-        sheet.cell(row, 5, subtotal_label)
+        for column in range(1, subtotal_label_start):
+            sheet.cell(row, column).border = Border()
+        sheet.merge_cells(
+            start_row=row,
+            start_column=subtotal_label_start,
+            end_row=row,
+            end_column=6,
+        )
+        sheet.cell(row, subtotal_label_start, subtotal_label)
         sheet.cell(row, 7, money(subtotal))
         sheet.cell(row, 7).number_format = numeric_format(
             subtotal,
@@ -1141,7 +1233,7 @@ def render_quotation_xlsx(
         )
         style_range(
             row,
-            5,
+            subtotal_label_start,
             7,
             font=bold,
             border=cell_border,
@@ -1164,9 +1256,18 @@ def render_quotation_xlsx(
         ),
         ("Grand Total:", snapshot.get("grand_total")),
     )
+    total_label_start = _label_start_column(
+        [*subtotal_labels, *(label for label, _amount in totals)],
+    )
+    total_label_width = sum(widths[total_label_start - 1 : 6])
     for label, amount in totals:
-        sheet.merge_cells(start_row=row, start_column=5, end_row=row, end_column=6)
-        sheet.cell(row, 5, label)
+        sheet.merge_cells(
+            start_row=row,
+            start_column=total_label_start,
+            end_row=row,
+            end_column=6,
+        )
+        sheet.cell(row, total_label_start, label)
         sheet.cell(row, 7, money(amount))
         sheet.cell(row, 7).number_format = numeric_format(
             amount,
@@ -1174,11 +1275,16 @@ def render_quotation_xlsx(
         )
         style_range(
             row,
-            5,
+            total_label_start,
             7,
             font=bold,
             border=cell_border,
             alignment=Alignment(horizontal="right", vertical="center"),
+        )
+        fit_row(
+            row,
+            label,
+            width=max(1, int(total_label_width)),
         )
         row += 1
     merged(row, 1, 7, "")
@@ -1223,7 +1329,9 @@ def render_quotation_xlsx(
     row += 1
     merged(row, 1, 3, "")
     merged(row, 4, 4, "")
-    merged(row, 5, 7, value("issuer_company_name"), font=bold)
+    issuer_company_name = str(value("issuer_company_name"))
+    merged(row, 5, 7, issuer_company_name, font=bold)
+    fit_row(row, issuer_company_name, width=42)
     row += 1
     signature_row = row
     merged(
@@ -1259,6 +1367,7 @@ def render_quotation_xlsx(
         "Name : "
         f"{issuer_value('issuer_contact_name', value('contact_person'))}",
     )
+    fit_row(row, sheet.cell(row, 5).value, width=42)
     row += 1
     merged(row, 1, 3, "Title :")
     merged(
@@ -1267,6 +1376,7 @@ def render_quotation_xlsx(
         7,
         f"Title : {issuer_value('issuer_contact_title', 'Sales Manager')}",
     )
+    fit_row(row, sheet.cell(row, 5).value, width=42)
     row += 1
     merged(row, 1, 3, "Email :")
     merged(
@@ -1275,6 +1385,7 @@ def render_quotation_xlsx(
         7,
         f"Email : {issuer_value('issuer_contact_email', value('email'))}",
     )
+    fit_row(row, sheet.cell(row, 5).value, width=42)
     sheet.print_area = f"A1:G{row}"
     sheet.page_setup.orientation = "portrait"
     sheet.page_setup.paperSize = sheet.PAPERSIZE_A4

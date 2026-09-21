@@ -43,8 +43,12 @@ export interface AccessRequestContext {
   requests: AccessRequestRecord[]
 }
 
-export function getAccessRequestContext(): Promise<AccessRequestContext> {
-  return apiRequest<AccessRequestContext>('/access-requests')
+export function getAccessRequestContext(
+  compact = false,
+): Promise<AccessRequestContext> {
+  return apiRequest<AccessRequestContext>(
+    compact ? '/access-requests?compact=1' : '/access-requests',
+  )
 }
 
 export function decideAccessRequest(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from django.db import connection
 from django.db.models import Q, QuerySet
 from django.db.models.functions import Lower, Trim
 from django.utils import timezone
@@ -123,6 +124,19 @@ def _active_view_permissions(user):
     ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
 
 
+def _folder_asset_filter(folder_tokens: set[str]) -> Q | None:
+    """Build a database filter for direct and nested Feishu folders."""
+    if not folder_tokens:
+        return None
+    folder_filter = Q(feishu_folder_token__in=folder_tokens)
+    if getattr(connection.features, "supports_json_field_contains", False):
+        for token in folder_tokens:
+            folder_filter |= Q(
+                feishu_folder_path__contains=[{"token": token}]
+            )
+    return folder_filter
+
+
 def _granted_quotation_ids(user) -> set[str]:
     """Return quotations reachable through explicit view grants."""
     permissions = list(
@@ -152,10 +166,20 @@ def _granted_quotation_ids(user) -> set[str]:
             quotation__isnull=False,
         ).values_list("quotation_id", flat=True)
     )
-    for asset in DocumentAsset.objects.filter(
+    assets = DocumentAsset.objects.filter(
         source="feishu",
         quotation__isnull=False,
-    ).only("quotation_id", "feishu_folder_token", "feishu_folder_path"):
+    )
+    folder_filter = _folder_asset_filter(folder_tokens)
+    if folder_filter is not None and getattr(
+        connection.features, "supports_json_field_contains", False
+    ):
+        assets = assets.filter(folder_filter)
+    for asset in assets.only(
+        "quotation_id",
+        "feishu_folder_token",
+        "feishu_folder_path",
+    ):
         path_tokens = {
             str(item.get("token") or "")
             for item in asset.feishu_folder_path or []
@@ -190,9 +214,17 @@ def _granted_document_ids(user) -> set[str]:
         if permission.target_type == QuotationViewPermissionTarget.FOLDER
         and permission.folder_token
     }
-    for asset in DocumentAsset.objects.filter(
-        source="feishu",
-    ).only("id", "feishu_folder_token", "feishu_folder_path"):
+    assets = DocumentAsset.objects.filter(source="feishu")
+    folder_filter = _folder_asset_filter(folder_tokens)
+    if folder_filter is not None and getattr(
+        connection.features, "supports_json_field_contains", False
+    ):
+        assets = assets.filter(folder_filter)
+    for asset in assets.only(
+        "id",
+        "feishu_folder_token",
+        "feishu_folder_path",
+    ):
         path_tokens = {
             str(item.get("token") or "")
             for item in asset.feishu_folder_path or []

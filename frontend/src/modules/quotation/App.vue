@@ -57,13 +57,9 @@ import {
   type QuotationListParams,
   updateQuotation as updateQuotationApi,
 } from './api/quotations'
-import {
-  listInvoices,
-  type InvoiceRecord,
-} from './api/invoices'
+import { getCustomerSummary } from './api/customers'
 import { useAuthStore } from './stores/auth'
 import { useQuotationI18n } from './composables/useQuotationI18n'
-import { useUserStore } from '@/store/user'
 import { saveContactTitle } from './utils/contactTitleStorage'
 import { clearCurrentUserSignature } from './utils/signatureStorage'
 import {
@@ -72,7 +68,6 @@ import {
 } from './config/workspace'
 
 const auth = useAuthStore()
-const userStore = useUserStore()
 const { t, quoteStatusLabel } = useQuotationI18n()
 const route = useRoute()
 const router = useRouter()
@@ -223,13 +218,19 @@ const drawerQuoteId = ref<string | null>(null)
 const editingQuote = ref<Quotation | null>(null)
 const copySourceQuote = ref<Quotation | null>(null)
 const quotationFormContext = ref<Quotation[]>([])
-const customerInvoices = ref<InvoiceRecord[]>([])
+const customerSummary = ref<Awaited<ReturnType<typeof getCustomerSummary>>>([])
 const quotationFormContextQuoteNumbers = ref<string[]>([])
 const lineItemDescriptionHistory = ref<LineItemDescriptionHistory[]>([])
 const quotationFormContextPage = ref(0)
 const quotationFormContextHasMore = ref(false)
 const quotationFormContextLoading = ref(false)
 let quotationListRequestId = 0
+let quotationListInFlight: {
+  key: string
+  promise: Promise<void>
+} | null = null
+let tabLoadPromise: Promise<void> | null = null
+let tabLoadKey = ''
 
 function shouldUseStoredCatalog() {
   return localStorage.getItem('qmp_catalog_version') === MOCK_CATALOG_VERSION
@@ -385,9 +386,31 @@ function triggerToast(msg: string, type: 'success' | 'info' | 'error' = 'success
   }, 4000)
 }
 
-async function refreshQuotations(
+function refreshQuotations(
   query: QuotationListParams = quotationListQuery.value,
-) {
+): Promise<void> {
+  const key = JSON.stringify(query)
+  if (quotationListInFlight?.key === key) {
+    return quotationListInFlight.promise
+  }
+
+  const promise = refreshQuotationsOnce(query)
+  quotationListInFlight = { key, promise }
+  void promise.then(() => {
+    if (quotationListInFlight?.promise === promise) {
+      quotationListInFlight = null
+    }
+  }, () => {
+    if (quotationListInFlight?.promise === promise) {
+      quotationListInFlight = null
+    }
+  })
+  return promise
+}
+
+async function refreshQuotationsOnce(
+  query: QuotationListParams,
+): Promise<void> {
   const requestId = ++quotationListRequestId
   quotationListQuery.value = { ...query }
   quotationListLoading.value = true
@@ -490,48 +513,22 @@ async function loadQuotationFormContext(reset = true) {
 
 async function loadCustomerInvoices() {
   try {
-    const firstPage = await listInvoices({ page: 1, pageSize: 50 })
-    if (firstPage.totalPages <= 1) {
-      customerInvoices.value = firstPage.items
-      return
-    }
-    const remainingPages = await Promise.all(
-      Array.from({ length: firstPage.totalPages - 1 }, (_, index) =>
-        listInvoices({ page: index + 2, pageSize: 50 }),
-      ),
-    )
-    customerInvoices.value = [
-      ...firstPage.items,
-      ...remainingPages.flatMap((page) => page.items),
-    ]
+    customerSummary.value = await getCustomerSummary()
   } catch (error) {
-    console.error('Unable to load invoice customers', error)
-    customerInvoices.value = []
+    console.error('Unable to load customer summary', error)
+    customerSummary.value = []
   }
 }
 
 async function loadCustomers() {
-  const tasks: Promise<unknown>[] = [loadCustomerInvoices()]
-  const canUseQuotation = Boolean(
-    userStore.user?.is_staff
-    || userStore.user?.is_superuser
-    || userStore.user?.access_profile?.visible_features?.includes(
-      'quotation_management',
-    )
-  )
-  if (canUseQuotation) {
-    tasks.push(loadQuotationFormContext())
-  } else {
-    quotationFormContext.value = []
-  }
-  await Promise.all(tasks)
+  await loadCustomerInvoices()
 }
 
 function loadMoreQuotationFormContext() {
   void loadQuotationFormContext(false)
 }
 
-async function loadCurrentQuotationTab() {
+async function loadCurrentQuotationTabOnce() {
   if (currentTab.value === 'list') {
     await refreshQuotations()
     return
@@ -554,13 +551,31 @@ async function loadCurrentQuotationTab() {
   }
 }
 
+async function loadCurrentQuotationTab() {
+  const requestKey = route.fullPath
+  if (tabLoadPromise && tabLoadKey === requestKey) {
+    return tabLoadPromise
+  }
+  tabLoadKey = requestKey
+  const request = loadCurrentQuotationTabOnce()
+  tabLoadPromise = request
+  try {
+    await request
+  } finally {
+    if (tabLoadPromise === request) {
+      tabLoadPromise = null
+      tabLoadKey = ''
+    }
+  }
+}
+
 onMounted(async () => {
   await auth.bootstrap()
   if (auth.isAuthenticated) {
-    const tasks: Promise<unknown>[] = [
-      hydrateUserCatalog(),
-      loadCurrentQuotationTab(),
-    ]
+    const tasks: Promise<unknown>[] = [loadCurrentQuotationTab()]
+    if (currentTab.value === 'create' || currentTab.value === 'catalog') {
+      tasks.push(hydrateUserCatalog())
+    }
     await Promise.all(tasks)
   }
   const params = new URLSearchParams(window.location.search)
@@ -591,7 +606,6 @@ watch(
 async function handleLoginSuccess() {
   const me = await auth.fetchCurrentUser()
   const tasks: Promise<unknown>[] = [
-    hydrateUserCatalog(),
     loadCurrentQuotationTab(),
   ]
   await Promise.all(tasks)
@@ -1250,8 +1264,7 @@ function reloadPage() {
 
         <CustomerCenter
           v-if="currentTab === 'customers'"
-          :quotations="quotationFormContext"
-          :invoices="customerInvoices"
+          :customers="customerSummary"
           @navigate-to-create="handleCustomerQuote"
           @toast="triggerToast"
           @refresh="handleRefreshCustomers"

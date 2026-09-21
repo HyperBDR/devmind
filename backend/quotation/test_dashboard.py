@@ -61,6 +61,21 @@ class QuotationDashboardTests(TestCase):
             snapshot_json={"status": QuoteStatus.ACCEPTED},
         )
 
+    def test_overview_returns_summary_analytics_and_recent_together(self):
+        self._quote("Q-OVERVIEW")
+
+        response = self.api.get(
+            "/api/v1/quotation/dashboard/overview?currency=USD"
+        )
+
+        assert response.status_code == 200
+        assert set(response.data) == {"summary", "analytics", "recent"}
+        assert response.data["summary"]["currency"] == "USD"
+        assert response.data["analytics"]["currency"] == "USD"
+        assert response.data["recent"]["items"][0]["quote_no"] == (
+            "Q-OVERVIEW"
+        )
+
     def test_summary_uses_all_accessible_rows_and_separates_currency(self):
         accepted_usd = self._quote(
             "Q-USD-ACCEPTED",
@@ -199,6 +214,27 @@ class QuotationDashboardTests(TestCase):
             "2026-07",
             "2026-06",
         ]
+
+    def test_summary_compares_selected_range_with_matching_prior_year(self):
+        self._quote(
+            "Q-CURRENT-RANGE",
+            amount="120.00",
+            quote_date="2026-04-15",
+        )
+        self._quote(
+            "Q-PRIOR-RANGE",
+            amount="30.00",
+            quote_date="2025-04-15",
+        )
+
+        response = self.api.get(
+            "/api/v1/quotation/dashboard/summary"
+            "?currency=USD&date_from=2026-04&date_to=2026-09"
+        )
+
+        assert response.status_code == 200
+        assert response.data["month_quote_amount"] == "120.00"
+        assert response.data["previous_year_quote_amount"] == "30.00"
 
     def test_summary_month_stats_ignore_currency(self):
         self._quote(

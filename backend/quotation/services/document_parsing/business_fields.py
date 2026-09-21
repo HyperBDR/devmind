@@ -48,6 +48,29 @@ REMARKS_LABELS = (
     "Remarks",
     "Remark",
 )
+SECTION_ALIASES = {
+    "Software": frozenset(
+        {
+            "software",
+            "software subscription",
+            "subscription",
+            "subscription items",
+            "subscriptions items",
+            "subscriptions",
+        }
+    ),
+    "Others": frozenset(
+        {
+            "others",
+            "other",
+            "one-time items",
+            "one time items",
+            "optional items",
+            "services",
+            "professional services",
+        }
+    ),
+}
 _CURRENCY_CANONICAL = {
     "USD": "USD",
     "US$": "USD",
@@ -78,6 +101,20 @@ _PERSON_NAME_RE = re.compile(
     r"^[A-Za-z][A-Za-z.'-]*"
     r"(?:\s+[A-Za-z][A-Za-z.'-]*){1,3}$"
 )
+
+
+def normalize_section_name(value: Any) -> str:
+    """Normalize a quotation section title for alias matching."""
+    return re.sub(r"\s+", " ", str(value or "")).strip(" :").lower()
+
+
+def section_type(value: Any) -> str:
+    """Return the canonical quotation section type for a title."""
+    normalized = normalize_section_name(value)
+    for item_type, aliases in SECTION_ALIASES.items():
+        if normalized in aliases:
+            return item_type
+    return ""
 
 
 def find_issuer_email(text: str) -> tuple[str, int, int] | None:

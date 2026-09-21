@@ -24,6 +24,8 @@ interface ApiQuotationVersion {
   notes: string;
   operator_email?: string | null;
   created_at: string;
+  currency?: string | null;
+  grand_total?: number | string | null;
   snapshot?: Record<string, unknown> | null;
 }
 
@@ -304,7 +306,8 @@ function totalsFromItems(
 function mapApiVersion(version: ApiQuotationVersion): QuoteVersion {
   const snap = (version.snapshot || {}) as Record<string, unknown>;
   const rawItems = snap.items;
-  const snapshotCurrency = snapText(snap, 'currency', 'currency')
+  const snapshotCurrency =
+    snapText(snap, 'currency', 'currency') || version.currency || ''
   const items = Array.isArray(rawItems)
     ? rawItems.map((item) => {
       const mapped = mapApiItem(item as ApiQuotationItem)
@@ -329,7 +332,9 @@ function mapApiVersion(version: ApiQuotationVersion): QuoteVersion {
       'subtotalBeforeVat',
     ),
     vatAmount: snapNumber(snap, 'vat_amount', 'vatAmount'),
-    grandTotal: snapNumber(snap, 'grand_total', 'grandTotal'),
+    grandTotal:
+      snapNumber(snap, 'grand_total', 'grandTotal')
+      || Number(version.grand_total || 0),
   };
   const derivedTotals = totalsFromItems(items, vatRate);
   const useDerived =
@@ -368,6 +373,7 @@ function mapApiVersion(version: ApiQuotationVersion): QuoteVersion {
       snapText(snap, 'created_by_email', 'createdByEmail') || undefined,
     currency:
       (snapText(snap, 'currency', 'currency') as Quotation['currency']) ||
+      version.currency ||
       'USD',
     paymentTermOption: snapText(
       snap,
@@ -406,6 +412,7 @@ function mapApiVersion(version: ApiQuotationVersion): QuoteVersion {
     taxLabel: snapText(snap, 'tax_label', 'taxLabel'),
     vatRate,
     ...totals,
+    snapshotLoaded: Boolean(version.snapshot),
   };
 }
 
@@ -670,6 +677,16 @@ export async function listQuotations(
 export async function getQuotation(quoteId: string): Promise<Quotation> {
   const data = await apiRequest<ApiQuotation>(`/quotations/${quoteId}`);
   return mapApiQuotation(data);
+}
+
+export async function getQuotationVersion(
+  quoteId: string,
+  versionId: string,
+): Promise<QuoteVersion> {
+  const data = await apiRequest<ApiQuotationVersion>(
+    `/quotations/${quoteId}/versions/${versionId}`,
+  )
+  return mapApiVersion(data)
 }
 
 export async function copyQuotation(quoteId: string): Promise<Quotation> {

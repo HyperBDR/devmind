@@ -34,6 +34,10 @@ const customerCenter = fs.readFileSync(
   ),
   'utf8',
 )
+const customerApi = fs.readFileSync(
+  new URL('../src/modules/quotation/api/customers.ts', import.meta.url),
+  'utf8',
+)
 const invoiceCreate = fs.readFileSync(
   new URL(
     '../src/modules/quotation/components/sales/InvoiceCreate.vue',
@@ -140,12 +144,34 @@ test('Quote Desk access navigation is restricted to Quote admins', () => {
 
 test('Invoice navigation mirrors the Quote section naming hierarchy', () => {
   assert.equal(appEn.quotation.salesSection, 'Invoice')
-  assert.equal(appEn.quotation.salesDashboard, 'Invoice Overview')
+  assert.equal(appEn.quotation.salesDashboard, 'Overview')
   assert.equal(appEn.quotation.createInvoice, 'New Invoice')
   assert.equal(quotationEn.quotation.sales.create.title, 'New Invoice')
   assert.equal(appZh.quotation.salesSection, '发票')
   assert.equal(appZh.quotation.salesDashboard, '发票看板')
   assert.equal(appZh.quotation.createInvoice, '新建发票')
+})
+
+test('Invoice English copy uses customer-facing accounting terminology', () => {
+  const sales = quotationEn.quotation.sales
+  const create = sales.create
+  const fields = sales.fields
+
+  assert.equal(sales.dashboardTitle, 'Invoice overview')
+  assert.equal(sales.trendGranularityLabel, 'Trend interval')
+  assert.equal(sales.invoiceValue, 'Invoice amount')
+  assert.equal(sales.salesOwner, 'Account owner')
+  assert.equal(sales.filters.invoiceContact, 'Billing contact')
+  assert.equal(fields.contactPerson, 'Billing contact')
+  assert.equal(fields.contactEmail, 'Billing contact email')
+  assert.equal(create.invoiceInformation, 'Invoice details')
+  assert.equal(create.enquiryEmail, 'Contact email')
+  assert.equal(create.contactAndPayment, 'Contact and payment details')
+  assert.equal(create.product, 'Internal product')
+  assert.equal(create.salesOwner, 'Account owner')
+  assert.equal(create.bankHistory, 'Saved bank details')
+  assert.equal(create.bankHistoryPlaceholder, 'Select saved bank details')
+  assert.equal(create.generateAndIssue, 'Issue invoice')
 })
 
 test('Chinese Quote Desk copy does not mix in Sales or Invoice labels', () => {
@@ -176,13 +202,12 @@ test('Invoice users can open shared customer, catalog, and audit links', () => {
 })
 
 test('Customers combines quotation and parsed invoice contacts', () => {
-  assert.match(quotationApp, /listInvoices/)
-  assert.match(quotationApp, /:invoices="customerInvoices"/)
-  assert.match(quotationApp, /access_profile\?\.visible_features/)
+  assert.match(quotationApp, /getCustomerSummary/)
+  assert.match(quotationApp, /:customers="customerSummary"/)
   assert.match(quotationApp, /async function loadCustomers\(\)/)
-  assert.match(customerCenter, /invoices: InvoiceRecord\[\]/)
-  assert.match(customerCenter, /invoice\.customer_name/)
-  assert.match(customerCenter, /invoice\.customer_contact_email/)
+  assert.match(customerCenter, /customers: Customer\[\]/)
+  assert.match(customerApi, /record_count/)
+  assert.match(customerApi, /updated_at/)
 })
 
 test('Invoice permission is an internal Quote Desk capability', () => {
@@ -429,6 +454,20 @@ test('Invoice creation offers complete parsed bank-account history', () => {
   assert.match(invoiceCreate, /invoice-bank-account-history/)
 })
 
+test('Invoice payment terms support presets and custom values', () => {
+  assert.match(invoiceCreate, /test-id="invoice-payment-terms"/)
+  assert.match(invoiceCreate, /:options="paymentTermOptions"/)
+  assert.match(invoiceCreate, /function normalizePaymentTerm\(value: string\)/)
+  assert.match(
+    invoiceCreate,
+    /return paymentTermOptions\.some[\s\S]*normalized \|\| 'CIA'/,
+  )
+  assert.doesNotMatch(
+    invoiceCreate,
+    /<FormSelect\s+\n\s+v-model="form\.paymentTerms"/,
+  )
+})
+
 test('Invoice bank fields offer parsed history without a standalone remarks input', () => {
   const bankFieldHistoryIds = [
     'invoice-bank-account-name-history',
@@ -598,7 +637,7 @@ test('Invoice preview remains an approved English commercial document', () => {
   assert.match(invoicePreview, /Commercial Invoice/)
   assert.match(invoicePreview, /Bill to/)
   assert.match(invoicePreview, /Additional Notes &amp; Disclaimers/)
-  assert.match(invoicePreview, /SWIFT CODE/)
+  assert.match(invoicePreview, /SWIFT Code/)
   assert.doesNotMatch(invoicePreview, /sales_owner|Sales Region/)
 })
 

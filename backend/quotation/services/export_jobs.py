@@ -178,7 +178,9 @@ def create_export_job(
         request_id = getattr(request, "audit_request_id", "") or context.get(
             "request_id", ""
         )
-        trace_id = getattr(request, "audit_trace_id", "") or context.get("trace_id", "")
+        trace_id = getattr(request, "audit_trace_id", "") or context.get(
+            "trace_id", ""
+        )
         key = _idempotency_key(
             version=version,
             template=template,
@@ -206,13 +208,27 @@ def create_export_job(
         )
         if not created:
             job = ExportJob.objects.select_for_update().get(pk=job.pk)
+        required_doc_types = set(normalized_formats)
+        if "pdf" in required_doc_types and selected_attachments:
+            required_doc_types.add("merged_pdf")
+        missing_assets = (
+            not created
+            and job.status
+            in {
+                ExportJobStatus.COMPLETED,
+                ExportJobStatus.UPLOAD_FAILED,
+            }
+            and not required_doc_types.issubset(
+                set(job.assets.values_list("doc_type", flat=True))
+            )
+        )
         archive_upgraded = archive_to_feishu and not job.archive_to_feishu
         if archive_upgraded:
             job.archive_to_feishu = True
             job.save(update_fields=["archive_to_feishu", "updated_at"])
         if created:
             transaction.on_commit(lambda: _enqueue_export(job.id))
-        elif job.status == ExportJobStatus.RENDER_FAILED:
+        elif job.status == ExportJobStatus.RENDER_FAILED or missing_assets:
             job.status = ExportJobStatus.QUEUED
             job.error_code = ""
             job.error_message = ""
@@ -228,7 +244,9 @@ def create_export_job(
             )
             transaction.on_commit(lambda: _enqueue_export(job.id))
         elif archive_upgraded and job.assets.exists():
-            from quotation.services.export_pipeline import queue_replica_uploads
+            from quotation.services.export_pipeline import (
+                queue_replica_uploads,
+            )
 
             assets = list(job.assets.all())
             job.status = ExportJobStatus.UPLOAD_QUEUED

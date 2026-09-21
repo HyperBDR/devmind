@@ -44,6 +44,8 @@ function highlightCellClass(changed: boolean): string {
 const model = computed(() => buildQuotationPreviewModel(props.quote, { currentUser: props.currentUser }))
 const totalsLabelSpan = computed(() => {
   const labels = [
+    'Software subscription subtotal:',
+    'Others Subtotal:',
     `Subtotal before ${model.value.taxLabel}:`,
     `${model.value.taxLabel} Amount (${model.value.vatRate}%):`,
     model.value.customTotalLabel
@@ -122,7 +124,7 @@ const headerCellClass =
       class="w-full table-fixed border-collapse leading-snug"
       :class="textSize"
     >
-      <colgroup>
+      <colgroup v-if="model.showDiscount">
         <col class="w-[12%]" />
         <col class="w-[24%]" />
         <col class="w-[8%]" />
@@ -131,12 +133,21 @@ const headerCellClass =
         <col class="w-[17%]" />
         <col class="w-[17%]" />
       </colgroup>
+      <colgroup v-else>
+        <col class="w-[12%]" />
+        <col class="w-[32%]" />
+        <col class="w-[8%]" />
+        <col class="w-[8%]" />
+        <col class="w-[8%]" />
+        <col class="w-[9%]" />
+        <col class="w-[23%]" />
+      </colgroup>
       <tbody>
         <tr :class="titleSpacerClass">
           <td colspan="7" class="px-1.5 py-1 align-middle" />
         </tr>
         <tr>
-          <td colspan="7" class="px-1.5 py-1 text-center text-[18px] font-semibold align-middle">
+          <td colspan="7" class="break-words px-1.5 py-1 text-center text-[18px] font-semibold align-middle">
             {{ model.issuerCompanyName }}
           </td>
         </tr>
@@ -174,7 +185,7 @@ const headerCellClass =
             Quote No.:
           </td>
           <td
-            class="whitespace-nowrap border-b border-slate-900 px-1.5 py-1 pb-0.5 text-right font-mono align-middle"
+            class="whitespace-normal break-all border-b border-slate-900 px-1.5 py-1 pb-0.5 text-right font-mono leading-tight align-middle"
           >
             {{ model.quoteNo }}
           </td>
@@ -289,7 +300,7 @@ const headerCellClass =
           </td>
         </tr>
         <tr>
-          <td class="whitespace-nowrap border border-slate-300 px-1.5 py-1 align-middle">
+          <td class="whitespace-normal break-words border border-slate-300 px-1.5 py-1 align-middle">
             {{ model.signer.name }}
           </td>
           <td class="break-all border border-slate-300 px-1.5 py-1 align-middle">
@@ -331,9 +342,18 @@ const headerCellClass =
           <td :class="headerCellClass">Item</td>
           <td :class="headerCellClass">Description</td>
           <td :class="headerCellClass">Qty</td>
-          <td :class="headerCellClass">List Price</td>
-          <td :class="headerCellClass">Discount (%)</td>
-          <td :class="headerCellClass">Discounted Price</td>
+          <td
+            :colspan="model.showDiscount ? 1 : 3"
+            :class="headerCellClass"
+          >
+            List Price
+          </td>
+          <td v-if="model.showDiscount" :class="headerCellClass">
+            {{ model.showDiscount ? 'Discount (%)' : '' }}
+          </td>
+          <td v-if="model.showDiscount" :class="headerCellClass">
+            Discounted Price
+          </td>
           <td :class="headerCellClass">Extended Price</td>
         </tr>
         <tr
@@ -364,16 +384,29 @@ const headerCellClass =
           >
             {{ rowHasContent(item) ? item.qty : '' }}
           </td>
-          <td :class="[moneyCellClass, highlightCellClass(isLineChanged(item.id))]">
+          <td
+            :colspan="model.showDiscount ? 1 : 3"
+            :class="[moneyCellClass, highlightCellClass(isLineChanged(item.id))]"
+          >
             {{ rowHasContent(item) ? money(item.listPrice) : '' }}
           </td>
           <td
+            v-if="model.showDiscount"
             class="border border-slate-300 px-1.5 py-1 text-center font-mono align-middle"
             :class="highlightCellClass(isLineChanged(item.id))"
           >
-            {{ rowHasContent(item) ? percent(item.discountPercent) : '' }}
+            {{
+              model.showDiscount &&
+              Number(item.discountPercent) > 0 &&
+              rowHasContent(item)
+                ? percent(item.discountPercent)
+                : ''
+            }}
           </td>
-          <td :class="[moneyCellClass, highlightCellClass(isLineChanged(item.id))]">
+          <td
+            v-if="model.showDiscount"
+            :class="[moneyCellClass, highlightCellClass(isLineChanged(item.id))]"
+          >
             {{ rowHasContent(item) ? money(item.netUnitPrice) : '' }}
           </td>
           <td :class="[moneyCellClass, highlightCellClass(isLineChanged(item.id))]">
@@ -408,9 +441,18 @@ const headerCellClass =
           <td :class="headerCellClass">Item</td>
           <td :class="headerCellClass">Description</td>
           <td :class="headerCellClass">Qty</td>
-          <td :class="headerCellClass">List Price</td>
-          <td :class="headerCellClass">Discount (%)</td>
-          <td :class="headerCellClass">Discounted Price</td>
+          <td
+            :colspan="model.showDiscount ? 1 : 3"
+            :class="headerCellClass"
+          >
+            List Price
+          </td>
+          <td v-if="model.showDiscount" :class="headerCellClass">
+            {{ model.showDiscount ? 'Discount (%)' : '' }}
+          </td>
+          <td v-if="model.showDiscount" :class="headerCellClass">
+            Discounted Price
+          </td>
           <td :class="headerCellClass">Extended Price</td>
         </tr>
         <tr
@@ -441,16 +483,29 @@ const headerCellClass =
           >
             {{ rowHasContent(item) ? item.qty : '' }}
           </td>
-          <td :class="[moneyCellClass, highlightCellClass(isLineChanged(item.id))]">
+          <td
+            :colspan="model.showDiscount ? 1 : 3"
+            :class="[moneyCellClass, highlightCellClass(isLineChanged(item.id))]"
+          >
             {{ rowHasContent(item) ? money(item.listPrice) : '' }}
           </td>
           <td
+            v-if="model.showDiscount"
             class="border border-slate-300 px-1.5 py-1 text-center font-mono align-middle"
             :class="highlightCellClass(isLineChanged(item.id))"
           >
-            {{ rowHasContent(item) ? percent(item.discountPercent) : '' }}
+            {{
+              model.showDiscount &&
+              Number(item.discountPercent) > 0 &&
+              rowHasContent(item)
+                ? percent(item.discountPercent)
+                : ''
+            }}
           </td>
-          <td :class="[moneyCellClass, highlightCellClass(isLineChanged(item.id))]">
+          <td
+            v-if="model.showDiscount"
+            :class="[moneyCellClass, highlightCellClass(isLineChanged(item.id))]"
+          >
             {{ rowHasContent(item) ? money(item.netUnitPrice) : '' }}
           </td>
           <td :class="[moneyCellClass, highlightCellClass(isLineChanged(item.id))]">
@@ -458,10 +513,10 @@ const headerCellClass =
           </td>
         </tr>
         <tr>
-          <td colspan="4" class="px-1.5 py-1 align-middle" />
+          <td :colspan="totalsSpacerSpan" class="px-1.5 py-1 align-middle" />
           <td
-            colspan="2"
-            class="whitespace-nowrap border border-slate-300 px-1.5 py-1 text-right font-semibold align-middle"
+            :colspan="totalsLabelSpan"
+            class="whitespace-normal break-words border border-slate-300 px-1.5 py-1 text-right font-semibold leading-tight align-middle"
           >
             Others Subtotal:
           </td>

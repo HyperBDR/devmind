@@ -82,3 +82,44 @@ class DashboardRecentView(APIView):
             serializer.validated_data.get("date_to", ""),
         )
         return Response(payload)
+
+
+class DashboardOverviewView(APIView):
+    """Return the dashboard summary, charts, and recent rows together."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        serializer = DashboardCurrencyQuerySerializer(
+            data=request.query_params
+        )
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        quotations = _accessible_quotations(request)
+        summary = build_dashboard_summary(
+            quotations,
+            values["currency"],
+            "",
+            values.get("date_from", ""),
+            values.get("date_to", ""),
+        )
+        available_currencies = summary["available_currencies"]
+        return Response(
+            {
+                "summary": summary,
+                "analytics": build_dashboard_analytics(
+                    quotations,
+                    values["currency"],
+                    values.get("date_from", ""),
+                    values.get("date_to", ""),
+                    available_currencies,
+                ),
+                "recent": build_dashboard_recent(
+                    quotations,
+                    5,
+                    values["currency"],
+                    values.get("date_from", ""),
+                    values.get("date_to", ""),
+                ),
+            }
+        )

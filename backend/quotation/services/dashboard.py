@@ -185,6 +185,7 @@ def build_dashboard_summary(
     period: str = "",
     date_from: str = "",
     date_to: str = "",
+    available_currencies: list[str] | None = None,
 ) -> dict[str, object]:
     """Build lightweight KPI aggregates for the quotation dashboard."""
     currency = _normalize_currency(currency)
@@ -275,7 +276,11 @@ def build_dashboard_summary(
     )
     return {
         "currency": currency,
-        "available_currencies": _available_currencies(queryset),
+        "available_currencies": (
+            available_currencies
+            if available_currencies is not None
+            else _available_currencies(queryset)
+        ),
         "available_periods": _available_periods(
             queryset,
             month_start.strftime("%Y-%m"),
@@ -440,6 +445,7 @@ def build_dashboard_analytics(
     currency: str = DEFAULT_DASHBOARD_CURRENCY,
     date_from: str = "",
     date_to: str = "",
+    available_currencies: list[str] | None = None,
 ) -> dict[str, object]:
     """Build bounded chart aggregates without serializing quotation rows."""
     currency = _normalize_currency(currency)
@@ -529,7 +535,11 @@ def build_dashboard_analytics(
     ]
     return {
         "currency": currency,
-        "available_currencies": _available_currencies(queryset),
+        "available_currencies": (
+            available_currencies
+            if available_currencies is not None
+            else _available_currencies(queryset)
+        ),
         "amount_breakdown": breakdown,
         "breakdown_total_amount": _money(total_amount),
         "breakdown_omitted_count": max(

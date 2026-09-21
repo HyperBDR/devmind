@@ -102,6 +102,14 @@ class QuotationAccessRequestTests(TestCase):
             str(response.data),
         )
 
+    def test_compact_context_only_returns_admin_capability(self):
+        response = self.user_api.get(
+            "/api/v1/quotation/access-requests?compact=1"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, {"is_admin": False})
+
     def test_regular_user_can_submit_view_and_upload_requests(self):
         folder_view = self.submit("folder_view", "sales-folder")
         document_view = self.submit("document_view", self.asset.id)

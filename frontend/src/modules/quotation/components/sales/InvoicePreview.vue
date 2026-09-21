@@ -272,7 +272,7 @@ function formatAmount(value: number): string {
             <th>Email</th>
             <th>PO#</th>
             <th>Currency</th>
-            <th>Payment Term</th>
+            <th>Payment Terms</th>
           </tr>
         </thead>
         <tbody>
@@ -301,7 +301,7 @@ function formatAmount(value: number): string {
             <th>Item</th>
             <th>Description</th>
             <th>Qty</th>
-            <th>Price</th>
+            <th>Unit Price</th>
             <th>Extended Price</th>
           </tr>
         </thead>
@@ -325,7 +325,7 @@ function formatAmount(value: number): string {
 
       <template v-if="pageIndex === pages.length - 1">
         <div class="invoice-total-row">
-          <strong>Total Amount:</strong>
+          <strong>Total:</strong>
           <strong>{{ formatAmount(totalAmount) }}</strong>
         </div>
 
@@ -351,7 +351,7 @@ function formatAmount(value: number): string {
               <dd>{{ invoice.bankCode || '—' }}</dd>
               <dt>Branch Code:</dt>
               <dd>{{ invoice.bankBranchCode || '—' }}</dd>
-              <dt>SWIFT CODE:</dt>
+              <dt>SWIFT Code:</dt>
               <dd>{{ invoice.bankSwiftCode || '—' }}</dd>
             </dl>
             <p class="invoice-remittance">

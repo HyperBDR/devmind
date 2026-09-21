@@ -13,6 +13,10 @@ const salesPage = fs.readFileSync(
   new URL('../src/pages/QuotationSales.vue', import.meta.url),
   'utf8',
 )
+const sidebar = fs.readFileSync(
+  new URL('../src/components/layout/AppSidebar.vue', import.meta.url),
+  'utf8',
+)
 const en = JSON.parse(fs.readFileSync(
   new URL('../src/modules/quotation/locales/en.json', import.meta.url),
   'utf8',
@@ -45,8 +49,8 @@ test('Sales dashboard keeps the primary controls actionable', () => {
   assert.match(dashboard, /v-model="endDate"/)
   assert.match(dashboard, /@update:model-value="setComparisonYears"/)
   assert.match(dashboard, /@update:model-value="setComparisonGranularity"/)
-  assert.match(dashboard, /start_date: startDate\.value/)
-  assert.match(dashboard, /end_date: endDate\.value/)
+  assert.match(dashboard, /start_date: `\$\{startDate\.value\}-01`/)
+  assert.match(dashboard, /end_date: monthEndDate\(endDate\.value\)/)
   assert.match(dashboard, /comparison_years: comparisonYears\.value/)
   assert.match(dashboard, /<Line/)
   assert.match(dashboard, /<Bar/)
@@ -56,6 +60,15 @@ test('Sales dashboard keeps the primary controls actionable', () => {
   assert.match(dashboard, /quarter_to_date_amount/)
   assert.match(dashboard, /year_to_date_amount/)
   assert.match(dashboard, /year_over_year/)
+})
+
+test('Sales chart granularity changes reuse one monthly response', () => {
+  assert.match(dashboard, /granularity: 'month'/)
+  assert.match(dashboard, /rowsForGranularity/)
+  assert.doesNotMatch(
+    dashboard,
+    /watch\(\[granularity, comparisonGranularity\]/,
+  )
 })
 
 test('Sales dashboard keeps the existing application navigation', () => {
@@ -75,6 +88,22 @@ test('Sales dashboard exposes real customer regions and customer navigation', ()
   assert.match(dashboard, /['"]\/quotation\/customers['"]/)
 })
 
+test('Quotation secondary navigation uses concise labels', () => {
+  assert.match(sidebar, /t\('quotation\.list'\)/)
+  assert.match(sidebar, /t\('quotation\.create'\)/)
+  assert.match(
+    fs.readFileSync(
+      new URL('../src/locales/zh-CN.json', import.meta.url),
+      'utf8',
+    ),
+    /"list": "报价",[\s\S]*"create": "新建报价"/,
+  )
+  assert.doesNotMatch(
+    JSON.stringify(zh),
+    /在线创建报价单|报价查询中心/,
+  )
+})
+
 test('Sales product labels clip without an ellipsis', () => {
   assert.match(dashboard, /product-rank-name/)
   assert.match(dashboard, /productDisplayName\(row\.name\)/)
@@ -82,7 +111,7 @@ test('Sales product labels clip without an ellipsis', () => {
   assert.match(dashboard, /\.product-rank-name[\s\S]*text-overflow:\s*clip/)
   assert.match(
     dashboard,
-    /\.product-list \.rank-row[\s\S]*grid-template-columns:\s*minmax\(110px/,
+    /\.product-list \.rank-row[\s\S]*grid-template-columns:\s*minmax\(0,/,
   )
 })
 
@@ -137,6 +166,19 @@ test('Yearly trend connects totals across the parsed invoice years', () => {
   assert.match(dashboard, /data: yearlyTrendData\.value\.values/)
 })
 
+test('Comparison charts stay inside the selected month range', () => {
+  assert.match(
+    dashboard,
+    /value: sumRows\(rowsForSelectedMonths\(comparison\.series, comparison\.year\)\)/,
+  )
+  assert.match(
+    dashboard,
+    /data: valuesFor\(\s*rowsForSelectedMonths\(\s*comparison\.series,/,
+  )
+  assert.match(dashboard, /if \(!startDate\.value \|\| !endDate\.value\)/)
+  assert.match(dashboard, /if \(!value\) return '—'/)
+})
+
 test('Sales KPI values share one aligned single-line title row', () => {
   assert.doesNotMatch(dashboard, /class="kpi-detail"/)
   assert.doesNotMatch(dashboard, /\bdetail:/)
@@ -147,7 +189,7 @@ test('Sales KPI values share one aligned single-line title row', () => {
 })
 
 test('Invoice dashboard uses invoice terminology and readable small text', () => {
-  assert.equal(en.quotation.sales.dashboardTitle, 'Invoice dashboard')
+  assert.equal(en.quotation.sales.dashboardTitle, 'Invoice overview')
   assert.equal(en.quotation.sales.salesTrend, 'Invoice value trend')
   assert.equal(en.quotation.sales.periodComparison, 'Invoice value by period')
   assert.equal(zh.quotation.sales.dashboardTitle, '发票看板')

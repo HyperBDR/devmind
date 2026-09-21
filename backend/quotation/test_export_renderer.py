@@ -100,7 +100,7 @@ class QuotationTemplateRendererTests(TestCase):
         self.assertEqual(sheet["G31"].value, 300)
         self.assertEqual(sheet["G31"].number_format, "#,##0")
         self.assertEqual(sheet["G33"].value, 330)
-        self.assertEqual(sheet["E32"].value, "GST Amount (10%):")
+        self.assertEqual(sheet["D32"].value, "GST Amount (10%):")
         self.assertEqual(sheet["A37"].value, "Immutable snapshot")
         notes_row = 37
         acceptance_row = next(
@@ -123,7 +123,7 @@ class QuotationTemplateRendererTests(TestCase):
         self.assertIn("A16:G16", merged_ranges)
         self.assertIn("A17:G17", merged_ranges)
         self.assertIn("A21:G21", merged_ranges)
-        self.assertIn("E31:F31", merged_ranges)
+        self.assertIn("D31:F31", merged_ranges)
         self.assertIn("A34:G34", merged_ranges)
         self.assertIn("A35:G35", merged_ranges)
         self.assertEqual(sheet.print_area, "'Quotation'!$A$1:$G$46")
@@ -152,6 +152,33 @@ class QuotationTemplateRendererTests(TestCase):
         sheet = workbook["Quotation"]
         self.assertAlmostEqual(sheet["E23"].value, 71.7647)
         self.assertEqual(sheet["E23"].number_format, '0.0000"%"')
+
+    def test_default_template_expands_long_total_labels(self):
+        template = ensure_default_template()
+        tax_label = "KooGallery WHT & Platform Fee"
+        snapshot = {
+            "currency": "USD",
+            "tax_label": tax_label,
+            "vat_rate": "36.31",
+            "items": [],
+        }
+
+        content = render_quotation_xlsx(template, snapshot)
+
+        workbook = load_workbook(io.BytesIO(content), data_only=False)
+        sheet = workbook["Quotation"]
+        label = f"Subtotal before {tax_label}:"
+        label_cell = next(
+            cell
+            for row in sheet.iter_rows()
+            for cell in row
+            if cell.value == label
+        )
+        self.assertEqual(label_cell.column, 3)
+        self.assertIn(
+            f"C{label_cell.row}:F{label_cell.row}",
+            {str(item) for item in sheet.merged_cells.ranges},
+        )
 
     def test_estimates_wrapped_lines_for_long_notes(self):
         notes = "This is a long paragraph that must wrap across the merged notes area."
@@ -209,7 +236,7 @@ class QuotationTemplateRendererTests(TestCase):
         )
         rendered = load_workbook(io.BytesIO(content))
         self.assertEqual(
-            rendered["Quotation"]["E32"].value,
+            rendered["Quotation"]["D32"].value,
             "GST Amount (10%):",
         )
         rendered.close()
@@ -347,10 +374,14 @@ class QuotationTemplateRendererTests(TestCase):
             [sheet.cell(row, 2).value for row in range(23, 25)],
             ["Software 1", "Software 2"],
         )
-        self.assertEqual(sheet["E25"].value, "Software subscription subtotal:")
+        self.assertEqual(sheet["D25"].value, "Software subscription subtotal:")
+        self.assertIn(
+            "D25:F25",
+            {str(item) for item in sheet.merged_cells.ranges},
+        )
         self.assertEqual(sheet["A27"].value, "Others")
         self.assertIsNone(sheet["B29"].value)
-        self.assertEqual(sheet["E30"].value, "Others Subtotal:")
+        self.assertEqual(sheet["D30"].value, "Others Subtotal:")
         rendered.close()
 
     def test_preview_rows_grow_for_wrapped_descriptions(self):
@@ -372,6 +403,35 @@ class QuotationTemplateRendererTests(TestCase):
 
         rendered = load_workbook(io.BytesIO(content))
         self.assertGreater(rendered["Quotation"].row_dimensions[23].height, 24)
+        rendered.close()
+
+    def test_variable_text_rows_grow_without_height_caps(self):
+        template = ensure_default_template()
+        long_project = "Long project name " * 12
+        long_description = "Detailed implementation scope " * 20
+        content = render_quotation_xlsx(
+            template,
+            {
+                "quote_no": "LAYOUT-LONG-QUOTATION-NUMBER-001",
+                "client_company": "Long customer company name " * 6,
+                "issuer_company_name": "Long issuer company name " * 6,
+                "project_name": long_project,
+                "items": [
+                    {
+                        "type": "Software",
+                        "description": long_description,
+                    }
+                ],
+            },
+        )
+
+        rendered = load_workbook(io.BytesIO(content))
+        sheet = rendered["Quotation"]
+        self.assertGreater(sheet.row_dimensions[2].height, 24)
+        self.assertGreater(sheet.row_dimensions[8].height, 18)
+        self.assertGreater(sheet.row_dimensions[19].height, 18)
+        self.assertGreater(sheet.row_dimensions[23].height, 120)
+        self.assertTrue(sheet["G7"].alignment.wrap_text)
         rendered.close()
 
     def test_preview_uses_the_managed_logo(self):

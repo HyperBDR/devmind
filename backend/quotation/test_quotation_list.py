@@ -642,7 +642,7 @@ class QuotationListAPITests(TestCase):
         assert row["source_document"] is None
         assert row["available_versions"] == []
 
-    def test_detail_still_returns_items_versions_and_snapshots(self):
+    def test_detail_returns_version_metadata_and_lazy_snapshot(self):
         quotation = self._quote(1, status=QuoteStatus.EXPIRED)
         QuotationItem.objects.create(
             quotation=quotation,
@@ -666,9 +666,13 @@ class QuotationListAPITests(TestCase):
         assert response.status_code == 200
         assert len(response.data["items"]) == 1
         assert len(response.data["versions"]) == 1
-        assert response.data["versions"][0]["snapshot"] == {
-            "status": "draft"
-        }
+        version = response.data["versions"][0]
+        assert "snapshot" not in version
+        snapshot_response = self.api.get(
+            f"{self.url}/{quotation.id}/versions/{version['id']}"
+        )
+        assert snapshot_response.status_code == 200
+        assert snapshot_response.data["snapshot"] == {"status": "draft"}
         assert response.data["status"] == QuoteStatus.EXPIRED
 
     def test_list_query_count_does_not_grow_with_page_size(self):
