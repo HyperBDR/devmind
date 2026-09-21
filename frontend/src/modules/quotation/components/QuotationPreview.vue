@@ -374,7 +374,7 @@ const moneyTotalCellClass =
             {{ model.taxLabel }} Amount ({{ model.vatRate }}%):
           </td>
           <td :class="moneyTotalCellClass">
-            {{ model.taxCalculationMode === 'subtract' ? '-' : '' }}{{ money(model.vatAmount) }}
+            {{ money(model.vatAmount) }}
           </td>
         </tr>
         <tr v-if="model.deductionAmount !== 0">

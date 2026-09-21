@@ -1279,16 +1279,11 @@ def render_quotation_xlsx(
         ),
     ]
     if vat_amount:
-        signed_vat_amount = (
-            -vat_amount
-            if snapshot.get("tax_calculation_mode") == "subtract"
-            else vat_amount
-        )
         totals.append(
             (
                 f"{value('tax_label')} Amount "
                 f"({number_text(value('vat_rate', 0))}%):",
-                signed_vat_amount,
+                vat_amount,
             )
         )
     if deduction_amount:
