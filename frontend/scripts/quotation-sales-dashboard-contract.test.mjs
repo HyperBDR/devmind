@@ -63,6 +63,15 @@ test('Sales dashboard keeps the primary controls actionable', () => {
   assert.match(dashboard, /year_over_year/)
 })
 
+test('Sales chart granularity changes reuse one monthly response', () => {
+  assert.match(dashboard, /granularity: 'month'/)
+  assert.match(dashboard, /rowsForGranularity/)
+  assert.doesNotMatch(
+    dashboard,
+    /watch\(\[granularity, comparisonGranularity\]/,
+  )
+})
+
 test('Sales dashboard keeps the existing application navigation', () => {
   assert.match(dashboard, /class="sales-analytics-shell"/)
   assert.doesNotMatch(dashboard, /class="sales-sidebar"/)
@@ -161,7 +170,7 @@ test('Yearly trend connects totals across the parsed invoice years', () => {
 test('Historical comparisons use full years', () => {
   assert.match(
     dashboard,
-    /data: valuesFor\(rows, granularity\.value\),/,
+    /data: valuesFor\(displayRows, granularity\.value\),/,
   )
   assert.match(
     dashboard,

@@ -17,6 +17,7 @@ from core.management.commands.register_periodic_tasks import (
     discover_and_register,
 )
 from core.periodic_registry import TASK_REGISTRY
+from invoice.tasks import dispatch_invoice_feishu_sync
 
 
 FALSE_VALUES = {"0", "false", "no", "off"}
@@ -100,6 +101,11 @@ class Command(BaseCommand):
                 "migrate_feishu_control_plane",
                 "--apply",
                 verbosity=verbosity,
+            )
+
+        with self._timed_step("Queuing initial Invoice synchronization"):
+            dispatch_invoice_feishu_sync.apply_async(
+                queue="quotation_sync",
             )
 
         should_collect_static = _env_enabled(

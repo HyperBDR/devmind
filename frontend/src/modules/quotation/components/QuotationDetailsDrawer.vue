@@ -31,6 +31,11 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useQuotationI18n()
+const quotationDetailCache = new Map<
+  string,
+  { quote: Quotation; expiresAt: number }
+>()
+const DETAIL_CACHE_TTL_MS = 30_000
 const quote = ref<Quotation | null>(null)
 const loading = ref(false)
 const error = ref('')
@@ -56,6 +61,13 @@ async function loadQuote() {
   if (!quoteId) return
 
   const requestId = ++detailRequestId
+  const cachedQuote = quotationDetailCache.get(quoteId)
+  if (cachedQuote && cachedQuote.expiresAt > Date.now()) {
+    quote.value = cachedQuote.quote
+    loading.value = false
+    error.value = ''
+    return
+  }
   loading.value = true
   error.value = ''
   quote.value = null
@@ -63,6 +75,10 @@ async function loadQuote() {
     const result = await getQuotation(quoteId)
     if (requestId === detailRequestId) {
       quote.value = result
+      quotationDetailCache.set(quoteId, {
+        quote: result,
+        expiresAt: Date.now() + DETAIL_CACHE_TTL_MS,
+      })
     }
   } catch (err: unknown) {
     if (requestId === detailRequestId) {
@@ -84,6 +100,7 @@ function close() {
 }
 
 function handleEditQuote(id: string) {
+  quotationDetailCache.delete(id)
   emit('editQuote', id)
   close()
 }
@@ -95,6 +112,10 @@ function handleUpdateQuoteStatus(
 ) {
   if (quote.value?.id === id) {
     quote.value = { ...quote.value, ...updatedFields }
+    quotationDetailCache.set(id, {
+      quote: quote.value,
+      expiresAt: Date.now() + DETAIL_CACHE_TTL_MS,
+    })
   }
   emit('updateQuoteStatus', id, updatedFields, notes)
 }

@@ -123,6 +123,7 @@ test('dashboard quote breakdown uses one centered server-filtered pie', () => {
   assert.match(dashboardSource, /@click="loadDashboardAnalytics"/)
   assert.doesNotMatch(dashboardSource, /loadCurrencyDashboard/)
   assert.match(dashboardSource, /getDashboardSummary\(/)
+  assert.match(dashboardSource, /getDashboardOverview\(/)
   assert.doesNotMatch(
     dashboardSource,
     /getDashboardSummary\(currency/
@@ -141,7 +142,7 @@ test('dashboard quote breakdown uses one centered server-filtered pie', () => {
   )
   assert.match(
     dashboardSource,
-    /watch\(dashboardCurrency, \(\) => \{\s*void loadDashboardSummary\(\)\s*void loadDashboardAnalytics\(\)/
+    /watch\(dashboardCurrency, \(\) => \{\s*void loadDashboardOverview\(\)/
   )
   assert.match(
     dashboardSource,

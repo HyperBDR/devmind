@@ -415,6 +415,7 @@ export async function getSalesDashboard(params: {
   start_date?: string
   end_date?: string
   comparison_years?: 1 | 2
+  dimension?: 'region' | 'product' | 'customer'
 }): Promise<SalesDashboardData> {
   const response = await apiClient.get('/v1/invoice/dashboard/analytics', {
     params,

@@ -12,8 +12,10 @@ from quotation.views.catalog import (
     PublicAttachmentStatusView,
     UserQuotationCatalogView,
 )
+from quotation.views.customers import CustomerSummaryView
 from quotation.views.dashboard import (
     DashboardAnalyticsView,
+    DashboardOverviewView,
     DashboardRecentView,
     DashboardSummaryView,
 )
@@ -66,6 +68,7 @@ from quotation.views.quotations import (
     QuotationFormContextView,
     QuotationGenerateView,
     QuotationListCreateView,
+    QuotationVersionDetailView,
 )
 from quotation.views.upload_permissions import (
     QuotationUploadPermissionDetailView,
@@ -77,6 +80,7 @@ from quotation.views.view_permissions import (
 )
 
 urlpatterns = [
+    path("dashboard/overview", DashboardOverviewView.as_view()),
     path("dashboard/summary", DashboardSummaryView.as_view()),
     path("dashboard/analytics", DashboardAnalyticsView.as_view()),
     path("dashboard/recent", DashboardRecentView.as_view()),
@@ -111,6 +115,7 @@ urlpatterns = [
     path("catalog", UserQuotationCatalogView.as_view()),
     path("catalog/import-legacy", LegacyCatalogImportView.as_view()),
     path("catalog/bootstrap", CatalogBootstrapView.as_view()),
+    path("customers/summary", CustomerSummaryView.as_view()),
     path(
         "public-attachments",
         PublicAttachmentListCreateView.as_view(),
@@ -124,6 +129,10 @@ urlpatterns = [
     path(
         "quotations/<str:quotation_id>/copy",
         QuotationDetailView.as_view(),
+    ),
+    path(
+        "quotations/<str:quotation_id>/versions/<str:version_id>",
+        QuotationVersionDetailView.as_view(),
     ),
     path("quotations/<str:quotation_id>", QuotationDetailView.as_view()),
     path(

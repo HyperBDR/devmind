@@ -81,6 +81,12 @@ export interface DashboardRecentQuotation {
   status: Quotation['status']
 }
 
+export interface DashboardOverview {
+  summary: DashboardSummary
+  analytics: DashboardAnalytics
+  recent: DashboardRecentQuotation[]
+}
+
 interface ApiSummary {
   currency: DashboardCurrency
   available_currencies: string[]
@@ -147,6 +153,12 @@ interface ApiRecentQuotation {
   status: string
 }
 
+interface ApiDashboardOverview {
+  summary: ApiSummary
+  analytics: ApiAnalytics
+  recent: { items: ApiRecentQuotation[] }
+}
+
 const API_TO_STATUS: Record<string, Quotation['status']> = {
   draft: 'Draft',
   generated: 'Generated',
@@ -173,20 +185,7 @@ function dashboardQuery(
   return params.toString()
 }
 
-export async function getDashboardSummary(
-  period = '',
-  dateFrom = '',
-  dateTo = '',
-  currency = 'USD'
-): Promise<DashboardSummary> {
-  const params = new URLSearchParams({ currency })
-  if (period) params.set('period', period)
-  if (dateFrom) params.set('date_from', dateFrom)
-  if (dateTo) params.set('date_to', dateTo)
-  const query = params.toString()
-  const data = await apiRequest<ApiSummary>(
-    query ? `/dashboard/summary?${query}` : '/dashboard/summary'
-  )
+function mapSummary(data: ApiSummary): DashboardSummary {
   return {
     currency: data.currency,
     availableCurrencies: data.available_currencies,
@@ -211,14 +210,7 @@ export async function getDashboardSummary(
   }
 }
 
-export async function getDashboardAnalytics(
-  currency = 'USD',
-  dateFrom = '',
-  dateTo = ''
-): Promise<DashboardAnalytics> {
-  const data = await apiRequest<ApiAnalytics>(
-    `/dashboard/analytics?${dashboardQuery(currency, dateFrom, dateTo)}`
-  )
+function mapAnalytics(data: ApiAnalytics): DashboardAnalytics {
   const mapTrend = (row: ApiTrendPoint): DashboardTrendPoint => ({
     period: row.period,
     quoteAmount: Number(row.quote_amount || 0),
@@ -252,6 +244,49 @@ export async function getDashboardAnalytics(
   }
 }
 
+function mapRecent(data: { items: ApiRecentQuotation[] }) {
+  return data.items.map((row) => ({
+    id: row.id,
+    quoteNo: row.quote_no,
+    projectName: row.project_name,
+    clientCompany: row.client_company,
+    salesperson: row.salesperson,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    currency: row.currency,
+    grandTotal: Number(row.grand_total || 0),
+    status: mapStatus(row.status)
+  }))
+}
+
+export async function getDashboardSummary(
+  period = '',
+  dateFrom = '',
+  dateTo = '',
+  currency = 'USD'
+): Promise<DashboardSummary> {
+  const params = new URLSearchParams({ currency })
+  if (period) params.set('period', period)
+  if (dateFrom) params.set('date_from', dateFrom)
+  if (dateTo) params.set('date_to', dateTo)
+  const query = params.toString()
+  const data = await apiRequest<ApiSummary>(
+    query ? `/dashboard/summary?${query}` : '/dashboard/summary'
+  )
+  return mapSummary(data)
+}
+
+export async function getDashboardAnalytics(
+  currency = 'USD',
+  dateFrom = '',
+  dateTo = ''
+): Promise<DashboardAnalytics> {
+  const data = await apiRequest<ApiAnalytics>(
+    `/dashboard/analytics?${dashboardQuery(currency, dateFrom, dateTo)}`
+  )
+  return mapAnalytics(data)
+}
+
 export async function getDashboardRecent(
   limit = 5,
   dateFrom = '',
@@ -267,16 +302,20 @@ export async function getDashboardRecent(
   const data = await apiRequest<{ items: ApiRecentQuotation[] }>(
     `/dashboard/recent?${params.toString()}`
   )
-  return data.items.map((row) => ({
-    id: row.id,
-    quoteNo: row.quote_no,
-    projectName: row.project_name,
-    clientCompany: row.client_company,
-    salesperson: row.salesperson,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    currency: row.currency,
-    grandTotal: Number(row.grand_total || 0),
-    status: mapStatus(row.status)
-  }))
+  return mapRecent(data)
+}
+
+export async function getDashboardOverview(
+  currency = 'USD',
+  dateFrom = '',
+  dateTo = ''
+): Promise<DashboardOverview> {
+  const data = await apiRequest<ApiDashboardOverview>(
+    `/dashboard/overview?${dashboardQuery(currency, dateFrom, dateTo)}`
+  )
+  return {
+    summary: mapSummary(data.summary),
+    analytics: mapAnalytics(data.analytics),
+    recent: mapRecent(data.recent)
+  }
 }

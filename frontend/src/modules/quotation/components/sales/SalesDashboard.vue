@@ -265,6 +265,35 @@ function valuesFor(
   return values
 }
 
+function rowsForGranularity(
+  rows: SalesPeriodRow[],
+  target: Granularity,
+): SalesPeriodRow[] {
+  if (target === 'month') return rows
+  const totals = new Map<string, SalesPeriodRow>()
+  rows.forEach((row) => {
+    const year = Number(row.period.slice(0, 4))
+    const month = Number(row.period.slice(5, 7))
+    const period = target === 'year'
+      ? String(year)
+      : `${year}-Q${Math.ceil(month / 3)}`
+    const current = totals.get(period)
+    if (current) {
+      current.amount = String(Number(current.amount) + Number(row.amount))
+      current.invoice_count += row.invoice_count
+      return
+    }
+    totals.set(period, {
+      period,
+      amount: row.amount,
+      invoice_count: row.invoice_count,
+    })
+  })
+  return [...totals.values()].sort((left, right) =>
+    left.period.localeCompare(right.period),
+  )
+}
+
 const dateRangeLabel = computed(
   () => `${formatDateLabel(startDate.value)} – ${formatDateLabel(
     endDate.value,
@@ -383,6 +412,7 @@ const trendData = computed<ChartData<'line'>>(() => {
     selectedYear.value,
   )
   const comparisons = data.value?.comparison || []
+  const displayRows = rowsForGranularity(rows, granularity.value)
   if (granularity.value === 'year') {
     return {
       labels: yearlyTrendData.value.labels,
@@ -404,7 +434,7 @@ const trendData = computed<ChartData<'line'>>(() => {
     datasets: [
       {
         label: String(selectedYear.value),
-        data: valuesFor(rows, granularity.value),
+        data: valuesFor(displayRows, granularity.value),
         borderColor: colors[0],
         backgroundColor: colors[0],
         pointBackgroundColor: colors[0],
@@ -644,16 +674,11 @@ async function loadDashboard() {
       end_date: monthEndDate(endDate.value),
       comparison_years: comparisonYears.value,
     }
-    const [trendResult, comparisonResult] = await Promise.all([
-      getSalesDashboard({
-        ...params,
-        granularity: granularity.value,
-      }),
-      getSalesDashboard({
-        ...params,
-        granularity: comparisonGranularity.value,
-      }),
-    ])
+    const trendRequest = getSalesDashboard({
+      ...params,
+      granularity: 'month',
+    })
+    const trendResult = await trendRequest
     if (sequence !== requestSequence) return
     availableCurrencies.value = trendResult.available_currencies
     if (
@@ -664,7 +689,7 @@ async function loadDashboard() {
       return
     }
     data.value = trendResult
-    comparisonData.value = comparisonResult
+    comparisonData.value = trendResult
     regionRows.value = trendResult.by_region
     productRows.value = trendResult.by_product
     customerRows.value = trendResult.top_customers
@@ -673,7 +698,7 @@ async function loadDashboard() {
       ? loadError.message
       : t('quotation.sales.loadDashboardFailed')
   } finally {
-    loading.value = false
+    if (sequence === requestSequence) loading.value = false
   }
 }
 
@@ -700,6 +725,7 @@ async function loadBreakdown(
       end_date: `${year}-12-31`,
       comparison_years: 1,
       granularity: 'month',
+      dimension: section,
     })
     if (section === 'region') regionRows.value = result.by_region
     if (section === 'product') productRows.value = result.by_product
@@ -730,7 +756,6 @@ function scheduleDashboardLoad() {
 watch([startDate, endDate, currency, comparisonYears], () => {
   scheduleDashboardLoad()
 })
-watch([granularity, comparisonGranularity], scheduleDashboardLoad)
 
 onMounted(loadDashboard)
 </script>

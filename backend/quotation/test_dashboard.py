@@ -61,6 +61,21 @@ class QuotationDashboardTests(TestCase):
             snapshot_json={"status": QuoteStatus.ACCEPTED},
         )
 
+    def test_overview_returns_summary_analytics_and_recent_together(self):
+        self._quote("Q-OVERVIEW")
+
+        response = self.api.get(
+            "/api/v1/quotation/dashboard/overview?currency=USD"
+        )
+
+        assert response.status_code == 200
+        assert set(response.data) == {"summary", "analytics", "recent"}
+        assert response.data["summary"]["currency"] == "USD"
+        assert response.data["analytics"]["currency"] == "USD"
+        assert response.data["recent"]["items"][0]["quote_no"] == (
+            "Q-OVERVIEW"
+        )
+
     def test_summary_uses_all_accessible_rows_and_separates_currency(self):
         accepted_usd = self._quote(
             "Q-USD-ACCEPTED",

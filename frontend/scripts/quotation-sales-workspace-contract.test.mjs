@@ -34,6 +34,10 @@ const customerCenter = fs.readFileSync(
   ),
   'utf8',
 )
+const customerApi = fs.readFileSync(
+  new URL('../src/modules/quotation/api/customers.ts', import.meta.url),
+  'utf8',
+)
 const invoiceCreate = fs.readFileSync(
   new URL(
     '../src/modules/quotation/components/sales/InvoiceCreate.vue',
@@ -198,13 +202,12 @@ test('Invoice users can open shared customer, catalog, and audit links', () => {
 })
 
 test('Customers combines quotation and parsed invoice contacts', () => {
-  assert.match(quotationApp, /listInvoices/)
-  assert.match(quotationApp, /:invoices="customerInvoices"/)
-  assert.match(quotationApp, /access_profile\?\.visible_features/)
+  assert.match(quotationApp, /getCustomerSummary/)
+  assert.match(quotationApp, /:customers="customerSummary"/)
   assert.match(quotationApp, /async function loadCustomers\(\)/)
-  assert.match(customerCenter, /invoices: InvoiceRecord\[\]/)
-  assert.match(customerCenter, /invoice\.customer_name/)
-  assert.match(customerCenter, /invoice\.customer_contact_email/)
+  assert.match(customerCenter, /customers: Customer\[\]/)
+  assert.match(customerApi, /record_count/)
+  assert.match(customerApi, /updated_at/)
 })
 
 test('Invoice permission is an internal Quote Desk capability', () => {

@@ -18,6 +18,7 @@ import {
 } from 'chart.js'
 import {
   getDashboardAnalytics,
+  getDashboardOverview,
   getDashboardRecent,
   getDashboardSummary,
   type DashboardAnalytics,
@@ -603,6 +604,45 @@ function openSelectedRangeQuotes() {
 
 let summaryRequestId = 0
 let analyticsRequestId = 0
+let overviewRequestId = 0
+
+async function loadDashboardOverview() {
+  const requestId = ++overviewRequestId
+  const currency = normalizeDashboardCurrency(dashboardCurrency.value)
+  const dateFrom = selectedDateFrom.value
+  const dateTo = selectedDateTo.value
+  summaryLoading.value = true
+  analyticsLoading.value = true
+  summaryError.value = false
+  analyticsError.value = false
+  try {
+    const data = await getDashboardOverview(currency, dateFrom, dateTo)
+    if (
+      requestId !== overviewRequestId
+      || currency !== normalizeDashboardCurrency(dashboardCurrency.value)
+      || dateFrom !== selectedDateFrom.value
+      || dateTo !== selectedDateTo.value
+    ) {
+      return
+    }
+    summary.value = data.summary
+    analytics.value = data.analytics
+    recentQuotes.value = data.recent
+  } catch (error) {
+    if (requestId !== overviewRequestId) return
+    summaryError.value = true
+    analyticsError.value = true
+    summary.value = null
+    analytics.value = null
+    recentQuotes.value = []
+    console.error('Unable to load quotation dashboard overview', error)
+  } finally {
+    if (requestId === overviewRequestId) {
+      summaryLoading.value = false
+      analyticsLoading.value = false
+    }
+  }
+}
 
 async function loadDashboardSummary() {
   const requestId = ++summaryRequestId
@@ -680,9 +720,7 @@ async function loadRecentQuotations() {
 }
 
 watch(dashboardCurrency, () => {
-  void loadDashboardSummary()
-  void loadDashboardAnalytics()
-  void loadRecentQuotations()
+  void loadDashboardOverview()
   selectedQuoteBreakdownIndex.value = null
 })
 
@@ -708,17 +746,11 @@ watch([selectedDateFrom, selectedDateTo], () => {
     selectedDateTo.value = selectedDateFrom.value
     return
   }
-  void loadDashboardSummary()
-  void loadDashboardAnalytics()
-  void loadRecentQuotations()
+  void loadDashboardOverview()
 })
 
 onMounted(async () => {
-  await Promise.all([
-    loadDashboardSummary(),
-    loadDashboardAnalytics(),
-    loadRecentQuotations()
-  ])
+  await loadDashboardOverview()
 })
 </script>
 

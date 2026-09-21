@@ -52,6 +52,11 @@ const TRIGGER_POSITION_STORAGE_KEY = 'quotation-notes-trigger-position'
 const PANEL_POSITION_STORAGE_KEY = 'quotation-notes-panel-position'
 const TRIGGER_GUIDE_VERSION = 'quotation-notes-trigger-guide-v1'
 const VIEWPORT_MARGIN = 12
+const NOTES_CACHE_TTL_MS = 30_000
+const notesCache = new Map<
+  string,
+  { notes: QuotationNote[]; expiresAt: number }
+>()
 
 const enabled = computed(() => Boolean(props.quotation?.id))
 const panelMode = computed(() => props.displayMode === 'panel')
@@ -194,11 +199,24 @@ async function loadNotes() {
   if (!quotationId) {
     return
   }
+  const cached = notesCache.get(quotationId)
+  if (cached && cached.expiresAt > Date.now()) {
+    notes.value = cached.notes
+    loading.value = false
+    error.value = ''
+    return
+  }
   loading.value = true
   error.value = ''
   try {
     const result = await listQuotationNotes(quotationId)
-    if (currentRequest === requestId) notes.value = result
+    if (currentRequest === requestId) {
+      notes.value = result
+      notesCache.set(quotationId, {
+        notes: result,
+        expiresAt: Date.now() + NOTES_CACHE_TTL_MS,
+      })
+    }
   } catch (err) {
     if (currentRequest === requestId) {
       error.value =
@@ -248,6 +266,10 @@ async function submitNote() {
   try {
     const note = await createQuotationNote(quotationId, content)
     notes.value.unshift(note)
+    notesCache.set(quotationId, {
+      notes: notes.value,
+      expiresAt: Date.now() + NOTES_CACHE_TTL_MS,
+    })
     draft.value = ''
   } catch (err) {
     error.value =
@@ -275,6 +297,10 @@ async function saveEdit(note: QuotationNote) {
     notes.value = notes.value.map((item) =>
       item.id === updated.id ? updated : item
     )
+    notesCache.set(quotationId, {
+      notes: notes.value,
+      expiresAt: Date.now() + NOTES_CACHE_TTL_MS,
+    })
     editingId.value = null
   } catch (err) {
     error.value =
@@ -295,6 +321,10 @@ async function removeNote(note: QuotationNote) {
   try {
     await deleteQuotationNote(quotationId, note.id)
     notes.value = notes.value.filter((item) => item.id !== note.id)
+    notesCache.set(quotationId, {
+      notes: notes.value,
+      expiresAt: Date.now() + NOTES_CACHE_TTL_MS,
+    })
   } catch (err) {
     error.value =
       err instanceof Error
