@@ -59,6 +59,7 @@ test('Sales dashboard keeps the primary controls actionable', () => {
   assert.match(dashboard, /available_currencies/)
   assert.match(dashboard, /quarter_to_date_amount/)
   assert.match(dashboard, /year_to_date_amount/)
+  assert.match(dashboard, /period_amount/)
   assert.match(dashboard, /year_over_year/)
 })
 
@@ -157,17 +158,32 @@ test('Yearly trend connects totals across the parsed invoice years', () => {
   assert.match(dashboard, /data: yearlyTrendData\.value\.values/)
 })
 
-test('Comparison charts stay inside the selected month range', () => {
+test('Historical comparisons use full years', () => {
   assert.match(
     dashboard,
-    /value: sumRows\(rowsForSelectedMonths\(comparison\.series, comparison\.year\)\)/,
+    /data: valuesFor\(rows, granularity\.value\),/,
   )
   assert.match(
     dashboard,
-    /data: valuesFor\(\s*rowsForSelectedMonths\(\s*comparison\.series,/,
+    /value: sumRows\(rowsForYear\(comparison\.series, comparison\.year\)\)/,
+  )
+  assert.match(
+    dashboard,
+    /data: valuesFor\(\s*rowsForYear\(comparison\.series, comparison\.year\),\s*granularity\.value,\s*true,/,
+  )
+  assert.match(
+    dashboard,
+    /data: valuesFor\(\s*rowsForYear\(comparison\.series, comparison\.year\),\s*comparisonGranularity\.value,\s*true,/,
   )
   assert.match(dashboard, /if \(!startDate\.value \|\| !endDate\.value\)/)
   assert.match(dashboard, /if \(!value\) return '—'/)
+})
+
+test('Total comparison uses the exact historical date range', () => {
+  assert.match(
+    dashboard,
+    /Number\(data\.value\?\.comparison\[0\]\?\.period_amount \|\| 0\)/,
+  )
 })
 
 test('Sales KPI values share one aligned single-line title row', () => {
