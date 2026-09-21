@@ -310,7 +310,31 @@ class QuotationTemplateRendererTests(TestCase):
         ]
         self.assertNotIn("VAT Amount (0%):", values)
         self.assertIn("Deduction Amount:", values)
-        self.assertIn(-25, values)
+        self.assertIn(25, values)
+        workbook.close()
+
+    def test_subtract_vat_is_rendered_without_negative_sign(self):
+        template = ensure_default_template()
+        content = render_quotation_xlsx(
+            template,
+            {
+                "tax_label": "DST",
+                "vat_rate": "10",
+                "vat_amount": "30",
+                "tax_calculation_mode": "subtract",
+                "subtotal_before_vat": "300",
+                "grand_total": "270",
+            },
+        )
+
+        workbook = load_workbook(io.BytesIO(content), data_only=False)
+        values = [
+            cell.value
+            for row in workbook["Quotation"].iter_rows()
+            for cell in row
+        ]
+        self.assertIn(30, values)
+        self.assertNotIn(-30, values)
         workbook.close()
 
     def test_default_template_preserves_same_name_custom_version_one(self):
