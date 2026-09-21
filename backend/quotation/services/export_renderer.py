@@ -1292,7 +1292,7 @@ def render_quotation_xlsx(
             )
         )
     if deduction_amount:
-        totals.append(("Deduction Amount:", -deduction_amount))
+        totals.append(("Deduction Amount:", deduction_amount))
     totals.append(("Grand Total:", snapshot.get("grand_total")))
     total_label_start = _label_start_column(
         [*subtotal_labels, *(label for label, _amount in totals)],

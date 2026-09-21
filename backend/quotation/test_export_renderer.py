@@ -310,7 +310,7 @@ class QuotationTemplateRendererTests(TestCase):
         ]
         self.assertNotIn("VAT Amount (0%):", values)
         self.assertIn("Deduction Amount:", values)
-        self.assertIn(-25, values)
+        self.assertIn(25, values)
         workbook.close()
 
     def test_default_template_preserves_same_name_custom_version_one(self):
