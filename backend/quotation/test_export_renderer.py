@@ -153,6 +153,53 @@ class QuotationTemplateRendererTests(TestCase):
         self.assertAlmostEqual(sheet["E23"].value, 71.7647)
         self.assertEqual(sheet["E23"].number_format, '0.0000"%"')
 
+    def test_sections_hide_discount_columns_independently(self):
+        template = ensure_default_template()
+        snapshot = {
+            "items": [
+                {
+                    "type": "Software",
+                    "description": "License",
+                    "list_price": 105,
+                    "discount_percent": 0,
+                    "net_unit_price": 105,
+                    "extended_price": 105,
+                },
+                {
+                    "type": "Other",
+                    "description": "Deployment",
+                    "list_price": 6095,
+                    "discount_percent": 20,
+                    "net_unit_price": 4876,
+                    "extended_price": 4876,
+                },
+            ],
+        }
+
+        workbook = load_workbook(
+            io.BytesIO(render_quotation_xlsx(template, snapshot)),
+        )
+        sheet = workbook["Quotation"]
+        software_row = next(
+            cell.row
+            for row in sheet.iter_rows()
+            for cell in row
+            if cell.value == "Software"
+        )
+        others_row = next(
+            cell.row
+            for row in sheet.iter_rows()
+            for cell in row
+            if cell.value == "Others"
+        )
+        merged_ranges = {str(item) for item in sheet.merged_cells.ranges}
+
+        self.assertIn(f"D{software_row + 1}:F{software_row + 1}", merged_ranges)
+        self.assertNotIn(f"D{others_row + 1}:F{others_row + 1}", merged_ranges)
+        self.assertIsNone(sheet.cell(software_row + 2, 5).value)
+        self.assertEqual(sheet.cell(others_row + 2, 5).value, 20)
+        workbook.close()
+
     def test_default_template_expands_long_total_labels(self):
         template = ensure_default_template()
         tax_label = "KooGallery WHT & Platform Fee"
