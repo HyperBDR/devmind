@@ -42,8 +42,6 @@ export interface QuotationPreviewModel {
   softwareRows: PreviewLineItem[];
   othersRows: PreviewLineItem[];
   showDiscount: boolean;
-  showSoftwareDiscount: boolean;
-  showOthersDiscount: boolean;
   softwareSubtotal: number;
   othersSubtotal: number;
   subtotalBeforeVat: number;
@@ -168,17 +166,12 @@ export function buildQuotationPreviewModel(quote: Quotation, options: BuildOptio
   const othersItems = withLineNumbers(
     quote.items.filter(item => item.type !== 'Software'),
   );
-  const showDiscountForItems = (items: QuotationLineItem[]) => {
-    const completedItems = items.filter(
-      item => item.name || item.description || Number(item.listPrice) > 0,
-    );
-    return (
-      completedItems.length === 0 ||
-      completedItems.some(item => Number(item.discountPercent) > 0)
-    );
-  };
-  const showSoftwareDiscount = showDiscountForItems(softwareItems);
-  const showOthersDiscount = showDiscountForItems(othersItems);
+  const completedItems = quote.items.filter(
+    item => item.name || item.description || Number(item.listPrice) > 0,
+  );
+  const showDiscount =
+    completedItems.length === 0 ||
+    completedItems.some(item => Number(item.discountPercent) > 0);
 
   return {
     quoteNo: quote.quoteNo,
@@ -199,9 +192,7 @@ export function buildQuotationPreviewModel(quote: Quotation, options: BuildOptio
     othersItems,
     softwareRows: fitTemplateRows(softwareItems, 1, 'Software'),
     othersRows: fitTemplateRows(othersItems, 1, 'Other'),
-    showDiscount: showSoftwareDiscount || showOthersDiscount,
-    showSoftwareDiscount,
-    showOthersDiscount,
+    showDiscount,
     softwareSubtotal: quote.softwareSubtotal,
     othersSubtotal: quote.othersSubtotal,
     subtotalBeforeVat:

@@ -778,31 +778,10 @@ def render_quotation_xlsx(
         or item.get("name")
         or Decimal(str(item.get("list_price") or 0)) > 0
     ]
-    def section_shows_discount(section_items):
-        completed = [
-            item
-            for item in section_items
-            if item.get("description")
-            or item.get("name")
-            or Decimal(str(item.get("list_price") or 0)) > 0
-        ]
-        return not completed or any(
-            Decimal(str(item.get("discount_percent") or 0)) != 0
-            for item in completed
-        )
-
-    section_discount_states = [
-        section_shows_discount(
-            [
-                item
-                for item in items
-                if (item.get("type") == "Software")
-                == (section_type == "Software")
-            ]
-        )
-        for section_type in ("Software", "Other")
-    ]
-    show_discount = any(section_discount_states)
+    show_discount = not completed_items or any(
+        Decimal(str(item.get("discount_percent") or 0)) != 0
+        for item in completed_items
+    )
     widths = (
         (12, 24, 8, 12, 10, 17, 17)
         if show_discount
@@ -1140,10 +1119,7 @@ def render_quotation_xlsx(
         "Discounted Price",
         "Extended Price",
     )
-    for group_index, (section, section_items, minimum, subtotal) in enumerate(
-        groups
-    ):
-        section_show_discount = section_discount_states[group_index]
+    for section, section_items, minimum, subtotal in groups:
         merged(
             row,
             1,
@@ -1156,7 +1132,7 @@ def render_quotation_xlsx(
         row += 1
         for column, header in enumerate(headers, 1):
             sheet.cell(row, column, header)
-        if not section_show_discount:
+        if not show_discount:
             sheet.merge_cells(start_row=row, start_column=4, end_row=row, end_column=6)
         style_range(
             row,
@@ -1187,7 +1163,7 @@ def render_quotation_xlsx(
                         item.get("discount_percent") or 0,
                         decimal_places=4,
                     )
-                    if description and section_show_discount and has_item_discount
+                    if description and show_discount and has_item_discount
                     else None
                 ),
                 money(item.get("net_unit_price")) if description else None,
@@ -1195,7 +1171,7 @@ def render_quotation_xlsx(
             ]
             for column, content in enumerate(values, 1):
                 sheet.cell(row, column, content)
-            if not section_show_discount:
+            if not show_discount:
                 sheet.merge_cells(
                     start_row=row,
                     start_column=4,
@@ -1215,7 +1191,7 @@ def render_quotation_xlsx(
             sheet.cell(row, 3).number_format = numeric_format(
                 item.get("qty"),
             )
-            if section_show_discount and has_item_discount:
+            if show_discount and has_item_discount:
                 sheet.cell(row, 5).number_format = numeric_format(
                     discount_value,
                     decimal_places=4,

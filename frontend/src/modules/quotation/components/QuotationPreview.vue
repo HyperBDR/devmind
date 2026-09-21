@@ -2,10 +2,10 @@
 import { computed } from 'vue'
 import type { Quotation } from '../types'
 import oneProLogoUrl from '../assets/onepro-logo.png'
-import QuotationSectionTable from './QuotationSectionTable.vue'
 import {
   buildQuotationPreviewModel,
   getCurrencySymbol,
+  type PreviewLineItem,
   type PreviewUser,
 } from '../utils/quotationPreviewModel'
 
@@ -89,8 +89,24 @@ function customMoney(value: number, currency: string): string {
   })}`
 }
 
+function percent(value: number): string {
+  return value ? `${value}%` : '0%'
+}
+
+function rowHasContent(item: PreviewLineItem) {
+  return Boolean(item.name || item.description)
+}
+
+function rowDescription(item: PreviewLineItem) {
+  return item.description || item.name || ''
+}
+
+const moneyCellClass =
+  'whitespace-nowrap border border-slate-300 px-1.5 py-1 text-right font-mono tabular-nums align-middle'
 const moneyTotalCellClass =
   'whitespace-nowrap border border-slate-300 px-1.5 py-1 text-right font-mono font-semibold tabular-nums align-middle'
+const headerCellClass =
+  'whitespace-normal break-normal border border-slate-300 px-1.5 py-1 text-center font-semibold leading-tight align-middle'
 </script>
 
 <template>
@@ -314,36 +330,198 @@ const moneyTotalCellClass =
           <td colspan="7" class="px-1.5 py-1 align-middle" />
         </tr>
         <tr>
-          <td colspan="7" class="p-0 align-middle">
-            <QuotationSectionTable
-              title="Software"
-              :items="model.softwareRows"
-              :show-discount="model.showSoftwareDiscount"
-              :subtotal="model.softwareSubtotal"
-              :currency="model.currency"
-              :text-size="textSize"
-              :section-title-size="sectionTitleSize"
-              :totals-label-span="totalsLabelSpan"
-              :changed-line-ids="changedLineIdSet"
-            />
+          <td
+            colspan="7"
+            class="border border-slate-300 bg-slate-200 px-1.5 py-1 text-left font-semibold align-middle"
+            :class="sectionTitleSize"
+          >
+            Software
+          </td>
+        </tr>
+        <tr class="bg-slate-50">
+          <td :class="headerCellClass">Item</td>
+          <td :class="headerCellClass">Description</td>
+          <td :class="headerCellClass">Qty</td>
+          <td
+            :colspan="model.showDiscount ? 1 : 3"
+            :class="headerCellClass"
+          >
+            List Price
+          </td>
+          <td v-if="model.showDiscount" :class="headerCellClass">
+            {{ model.showDiscount ? 'Discount (%)' : '' }}
+          </td>
+          <td v-if="model.showDiscount" :class="headerCellClass">
+            Discounted Price
+          </td>
+          <td :class="headerCellClass">Extended Price</td>
+        </tr>
+        <tr
+          v-for="item in model.softwareRows"
+          :key="item.id"
+          class="h-8"
+          :class="isLineChanged(item.id) ? 'bg-rose-50' : ''"
+        >
+          <td
+            class="border border-slate-300 px-1.5 py-1 text-center font-mono align-middle"
+            :class="highlightCellClass(isLineChanged(item.id))"
+          >
+            {{ rowHasContent(item) ? item.lineNo : '' }}
+          </td>
+          <td
+            class="whitespace-pre-line break-words border border-slate-300 px-1.5 py-1 align-middle"
+            :class="
+              isLineChanged(item.id)
+                ? 'bg-rose-50 font-semibold text-rose-700'
+                : 'text-slate-900'
+            "
+          >
+            {{ rowDescription(item) }}
+          </td>
+          <td
+            class="border border-slate-300 px-1.5 py-1 text-center font-mono align-middle"
+            :class="highlightCellClass(isLineChanged(item.id))"
+          >
+            {{ rowHasContent(item) ? item.qty : '' }}
+          </td>
+          <td
+            :colspan="model.showDiscount ? 1 : 3"
+            :class="[moneyCellClass, highlightCellClass(isLineChanged(item.id))]"
+          >
+            {{ rowHasContent(item) ? money(item.listPrice) : '' }}
+          </td>
+          <td
+            v-if="model.showDiscount"
+            class="border border-slate-300 px-1.5 py-1 text-center font-mono align-middle"
+            :class="highlightCellClass(isLineChanged(item.id))"
+          >
+            {{
+              model.showDiscount &&
+              Number(item.discountPercent) > 0 &&
+              rowHasContent(item)
+                ? percent(item.discountPercent)
+                : ''
+            }}
+          </td>
+          <td
+            v-if="model.showDiscount"
+            :class="[moneyCellClass, highlightCellClass(isLineChanged(item.id))]"
+          >
+            {{ rowHasContent(item) ? money(item.netUnitPrice) : '' }}
+          </td>
+          <td :class="[moneyCellClass, highlightCellClass(isLineChanged(item.id))]">
+            {{ rowHasContent(item) ? money(item.extendedPrice) : '' }}
+          </td>
+        </tr>
+        <tr>
+          <td :colspan="totalsSpacerSpan" class="px-1.5 py-1 align-middle" />
+          <td
+            :colspan="totalsLabelSpan"
+            class="whitespace-normal break-words border border-slate-300 px-1.5 py-1 text-right font-semibold leading-tight align-middle"
+          >
+            Software subscription subtotal:
+          </td>
+          <td :class="moneyTotalCellClass">
+            {{ money(model.softwareSubtotal) }}
           </td>
         </tr>
         <tr class="h-5">
           <td colspan="7" class="px-1.5 py-1 align-middle" />
         </tr>
         <tr>
-          <td colspan="7" class="p-0 align-middle">
-            <QuotationSectionTable
-              title="Others"
-              :items="model.othersRows"
-              :show-discount="model.showOthersDiscount"
-              :subtotal="model.othersSubtotal"
-              :currency="model.currency"
-              :text-size="textSize"
-              :section-title-size="sectionTitleSize"
-              :totals-label-span="totalsLabelSpan"
-              :changed-line-ids="changedLineIdSet"
-            />
+          <td
+            colspan="7"
+            class="border border-slate-300 bg-slate-200 px-1.5 py-1 text-left font-semibold align-middle"
+            :class="sectionTitleSize"
+          >
+            Others
+          </td>
+        </tr>
+        <tr class="bg-slate-50">
+          <td :class="headerCellClass">Item</td>
+          <td :class="headerCellClass">Description</td>
+          <td :class="headerCellClass">Qty</td>
+          <td
+            :colspan="model.showDiscount ? 1 : 3"
+            :class="headerCellClass"
+          >
+            List Price
+          </td>
+          <td v-if="model.showDiscount" :class="headerCellClass">
+            {{ model.showDiscount ? 'Discount (%)' : '' }}
+          </td>
+          <td v-if="model.showDiscount" :class="headerCellClass">
+            Discounted Price
+          </td>
+          <td :class="headerCellClass">Extended Price</td>
+        </tr>
+        <tr
+          v-for="item in model.othersRows"
+          :key="item.id"
+          class="h-8"
+          :class="isLineChanged(item.id) ? 'bg-rose-50' : ''"
+        >
+          <td
+            class="border border-slate-300 px-1.5 py-1 text-center font-mono align-middle"
+            :class="highlightCellClass(isLineChanged(item.id))"
+          >
+            {{ rowHasContent(item) ? item.lineNo : '' }}
+          </td>
+          <td
+            class="whitespace-pre-line break-words border border-slate-300 px-1.5 py-1 align-middle"
+            :class="
+              isLineChanged(item.id)
+                ? 'bg-rose-50 font-semibold text-rose-700'
+                : 'text-slate-900'
+            "
+          >
+            {{ rowDescription(item) }}
+          </td>
+          <td
+            class="border border-slate-300 px-1.5 py-1 text-center font-mono align-middle"
+            :class="highlightCellClass(isLineChanged(item.id))"
+          >
+            {{ rowHasContent(item) ? item.qty : '' }}
+          </td>
+          <td
+            :colspan="model.showDiscount ? 1 : 3"
+            :class="[moneyCellClass, highlightCellClass(isLineChanged(item.id))]"
+          >
+            {{ rowHasContent(item) ? money(item.listPrice) : '' }}
+          </td>
+          <td
+            v-if="model.showDiscount"
+            class="border border-slate-300 px-1.5 py-1 text-center font-mono align-middle"
+            :class="highlightCellClass(isLineChanged(item.id))"
+          >
+            {{
+              model.showDiscount &&
+              Number(item.discountPercent) > 0 &&
+              rowHasContent(item)
+                ? percent(item.discountPercent)
+                : ''
+            }}
+          </td>
+          <td
+            v-if="model.showDiscount"
+            :class="[moneyCellClass, highlightCellClass(isLineChanged(item.id))]"
+          >
+            {{ rowHasContent(item) ? money(item.netUnitPrice) : '' }}
+          </td>
+          <td :class="[moneyCellClass, highlightCellClass(isLineChanged(item.id))]">
+            {{ rowHasContent(item) ? money(item.extendedPrice) : '' }}
+          </td>
+        </tr>
+        <tr>
+          <td :colspan="totalsSpacerSpan" class="px-1.5 py-1 align-middle" />
+          <td
+            :colspan="totalsLabelSpan"
+            class="whitespace-normal break-words border border-slate-300 px-1.5 py-1 text-right font-semibold leading-tight align-middle"
+          >
+            Others Subtotal:
+          </td>
+          <td :class="moneyTotalCellClass">
+            {{ money(model.othersSubtotal) }}
           </td>
         </tr>
         <tr class="h-5">
