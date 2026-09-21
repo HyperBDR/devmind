@@ -166,14 +166,22 @@ test('Yearly trend connects totals across the parsed invoice years', () => {
   assert.match(dashboard, /data: yearlyTrendData\.value\.values/)
 })
 
-test('Comparison charts stay inside the selected month range', () => {
+test('Historical comparisons use full years', () => {
   assert.match(
     dashboard,
-    /value: sumRows\(rowsForSelectedMonths\(comparison\.series, comparison\.year\)\)/,
+    /data: valuesFor\(displayRows, granularity\.value\),/,
   )
   assert.match(
     dashboard,
-    /data: valuesFor\(\s*rowsForSelectedMonths\(\s*comparison\.series,/,
+    /value: sumRows\(rowsForYear\(comparison\.series, comparison\.year\)\)/,
+  )
+  assert.match(
+    dashboard,
+    /data: valuesFor\(\s*rowsForYear\(comparison\.series, comparison\.year\),\s*granularity\.value,\s*true,/,
+  )
+  assert.match(
+    dashboard,
+    /data: valuesFor\(\s*rowsForYear\(comparison\.series, comparison\.year\),\s*comparisonGranularity\.value,\s*true,/,
   )
   assert.match(dashboard, /if \(!startDate\.value \|\| !endDate\.value\)/)
   assert.match(dashboard, /if \(!value\) return '—'/)
