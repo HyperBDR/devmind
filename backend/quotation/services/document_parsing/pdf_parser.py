@@ -36,8 +36,8 @@ from quotation.services.document_parsing.schemas import (
 )
 
 PARSER_NAME = "devmind_standard_pdf"
-PARSER_VERSION = "2.26.0"
-_CURRENCY_TOKEN = r"(?:MYR|HK\$|RM|USD|HKD|CNY|RMB|EUR|GBP|[$¥￥€£])"
+PARSER_VERSION = "2.48.0"
+_CURRENCY_TOKEN = r"(?:MYR|US\$|HK\$|RM|USD|HKD|CNY|RMB|EUR|GBP|[$¥￥€£])"
 
 
 class QuotationPdfParseError(ValueError):
@@ -473,6 +473,75 @@ def _parse_currency_item_line(
     line: str,
     pending_description: str,
 ) -> ParsedQuotationItem | None:
+    currency_matches = list(
+        re.finditer(
+            rf"{_CURRENCY_TOKEN}\s*([\d,]+(?:\.\d+)?)",
+            line,
+            flags=re.IGNORECASE,
+        )
+    )
+    trailing_tilde = line.find("~", currency_matches[0].start()) \
+        if currency_matches else -1
+    if trailing_tilde >= 0:
+        line = line[:trailing_tilde].rstrip()
+        currency_matches = list(
+            re.finditer(
+                rf"{_CURRENCY_TOKEN}\s*([\d,]+(?:\.\d+)?)",
+                line,
+                flags=re.IGNORECASE,
+            )
+        )
+    if len(currency_matches) >= 5:
+        extended_match = currency_matches[-1]
+        if "~" in line[currency_matches[-1].start() - 2:]:
+            extended_match = currency_matches[-2]
+        prefix = line[: currency_matches[0].start()].strip().split()
+        numeric_indexes = [
+            index
+            for index, token in enumerate(prefix)
+            if re.fullmatch(r"[\d,.]+", token)
+        ]
+        if not numeric_indexes:
+            return None
+        qty_index = numeric_indexes[-1]
+        item_index = (
+            numeric_indexes[0]
+            if len(numeric_indexes) > 1
+            else None
+        )
+        description = _clean_item_description(
+            " ".join(
+                token
+                for index, token in enumerate(prefix)
+                if index not in {item_index, qty_index}
+            )
+        )
+        if pending_description:
+            description = "\n".join(
+                value
+                for value in (
+                    _clean_item_description(pending_description),
+                    description,
+                )
+                if value
+            )
+        if not description:
+            return None
+        line_no = (
+            int(_decimal(prefix[item_index]))
+            if item_index is not None
+            else 0
+        )
+        return ParsedQuotationItem(
+            line_no=line_no,
+            type="",
+            description=description,
+            qty=_decimal(prefix[qty_index]),
+            list_price=_decimal(currency_matches[0].group(1)),
+            discount_percent=Decimal("0"),
+            net_unit_price=_decimal(currency_matches[1].group(1)),
+            extended_price=_decimal(extended_match.group(1)),
+        )
     parts = re.split(rf"\s*{_CURRENCY_TOKEN}\s*", line)
     if len(parts) not in {3, 4, 5}:
         return None
@@ -483,7 +552,10 @@ def _parse_currency_item_line(
     if not price_fields:
         return None
     extended_part = parts[-1].strip()
-    extended_match = re.match(r"[\d,.\s-]+", extended_part)
+    extended_match = re.match(
+        r"(?:\([\d,]+(?:\.\d+)?\)|-?[\d,]+(?:\.\d+)?)",
+        extended_part,
+    )
     if extended_match is None:
         return None
     numeric_indexes = [
@@ -532,8 +604,6 @@ def _parse_currency_item_line(
     if not description:
         return None
     if len(parts) == 3:
-        if len(price_fields) < 2:
-            return None
         list_price = _decimal(price_fields[0])
         discount_percent = Decimal("0")
         net_unit_price = list_price
@@ -547,7 +617,11 @@ def _parse_currency_item_line(
             return None
         net_unit_price = _decimal(parts[2])
     return ParsedQuotationItem(
-        line_no=int(prefix[item_index]) if item_index is not None else 0,
+        line_no=(
+            int(_decimal(prefix[item_index]))
+            if item_index is not None
+            else 0
+        ),
         type="",
         description=description,
         qty=qty,
@@ -560,6 +634,7 @@ def _parse_currency_item_line(
 
 def _clean_item_description(value: str) -> str:
     """Remove table-unit fragments accidentally emitted by PDF extraction."""
+    value = re.sub(r"^\s*\(%\)\s*", "", value)
     value = re.sub(
         r"\((?:ea|qty|myr|hk\$?|hkd|rm|usd|cny|rmb|eur|gbp|[$¥￥€£])\)",
         "",
@@ -571,9 +646,9 @@ def _clean_item_description(value: str) -> str:
 
 def _parse_item_line(line: str) -> ParsedQuotationItem | None:
     cells = _split_row(line)
-    if len(cells) >= 7 and cells[0].strip().isdigit():
+    if len(cells) >= 7 and re.fullmatch(r"\d+(?:\.\d+)?", cells[0].strip()):
         return ParsedQuotationItem(
-            line_no=int(cells[0]),
+            line_no=int(_decimal(cells[0])),
             type="",
             description=_clean_item_description(cells[1]),
             qty=_decimal(cells[2]),
@@ -602,6 +677,71 @@ def _parse_item_line(line: str) -> ParsedQuotationItem | None:
         net_unit_price=_decimal(match.group(6)),
         extended_price=_decimal(match.group(7)),
     )
+
+
+def _unsectioned_item_lines(
+    lines: list[str],
+) -> list[ParsedQuotationItem]:
+    """Parse row-oriented tables that do not have section headings."""
+    items = []
+    pending_description = ""
+    in_table = False
+    current_type = ""
+    for line in lines:
+        lower = line.casefold()
+        normalized = normalize_section_name(line)
+        if normalized in SECTION_ALIASES["Software"]:
+            current_type = "Software"
+        elif normalized in SECTION_ALIASES["Others"]:
+            current_type = "Other"
+        if (
+            "item" in lower and "description" in lower
+        ) or "product details" in lower:
+            in_table = True
+            pending_description = ""
+            continue
+        if not in_table:
+            continue
+        if "subtotal" in lower:
+            in_table = False
+            continue
+        marker_count = len(
+            re.findall(_CURRENCY_TOKEN, line, flags=re.IGNORECASE)
+        )
+        if marker_count >= 2 and re.match(
+            r"^\d+(?:\.\d+)?\s",
+            line,
+        ):
+            item = _parse_currency_item_line(
+                line,
+                pending_description,
+            )
+            if item is not None:
+                item.line_no = len(items) + 1
+                item.type = current_type or (
+                    "Software" if not items else "Other"
+                )
+                items.append(item)
+                pending_description = ""
+                continue
+        if items and line.startswith("~"):
+            items[-1].description = (
+                f"{items[-1].description}\n{line}"
+            )
+        elif (
+            not re.match(r"^\d+\s", line)
+            and not any(
+                label in lower
+                for label in (
+                    "qty",
+                    "list price",
+                    "discount",
+                    "extended price",
+                )
+            )
+        ):
+            pending_description = _clean_item_description(line)
+    return items
 
 
 def _line_items(
@@ -639,6 +779,12 @@ def _line_items(
                 "grand total",
                 "vat amount",
                 "tax amount",
+                "vat charged",
+                "digital service tax",
+                "tax charged",
+                "additional notes",
+                "to indicate customer acceptance",
+                "onepro cloud confidential",
             )
         ):
             break
@@ -649,10 +795,13 @@ def _line_items(
             and after_item
             and not re.search(_CURRENCY_TOKEN, line, flags=re.IGNORECASE)
             and (
-                re.match(r"^\d+\s+", line)
+                re.match(r"^\d+(?:\.\d+)?\s+", line)
                 or (
                     index + 1 < len(section_lines)
-                    and re.match(r"^\d+\s+", section_lines[index + 1])
+                    and re.match(
+                        r"^\d+(?:\.\d+)?\s+",
+                        section_lines[index + 1],
+                    )
                     and re.search(
                         _CURRENCY_TOKEN,
                         section_lines[index + 1],
@@ -671,11 +820,19 @@ def _line_items(
                 "\n".join(pending_description),
             )
         if item is None:
+            if re.fullmatch(
+                r"\d+\s+(?:HK\$|RM|USD|[$¥￥€£])?\s*0+(?:\.0+)?",
+                line.strip(),
+                flags=re.IGNORECASE,
+            ):
+                continue
             header_fragment = re.fullmatch(
                 r"[a-z]\s*\(%\)",
                 line.strip(),
                 flags=re.IGNORECASE,
             )
+            if line.strip() in {"(%)", "%"}:
+                continue
             if not any(
                 label in lower
                 for label in (
@@ -707,6 +864,16 @@ def _line_items(
                         re.sub(r"^\d+\s+", "", line)
                     )
                     after_item = False
+            continue
+        if (
+            item.qty == 0
+            and item.list_price == 0
+            and item.net_unit_price == 0
+            and item.extended_price == 0
+        ):
+            current_item = None
+            pending_description = []
+            after_item = False
             continue
         item.type = item_type
         items.append(item)
@@ -775,8 +942,15 @@ def _tax_details(lines: list[str]) -> tuple[str, Decimal]:
         if match:
             return match.group(1).strip(), Decimal(match.group(2))
         match = re.search(
-            r"(.+?)\s+\(([0-9.]+)%\)\s+"
-            r"(?:HK\$|[$¥￥€£]|RM)",
+            r"(.+?)\s+\(([0-9.]+)%\)\s*:?\s*"
+            rf"{_CURRENCY_TOKEN}",
+            line,
+            flags=re.IGNORECASE,
+        )
+        if match:
+            return match.group(1).strip(), Decimal(match.group(2))
+        match = re.search(
+            r"(.+?)\s+([0-9.]+)%\s*(?:VAT|Tax)?\s*$",
             line,
             flags=re.IGNORECASE,
         )
@@ -836,6 +1010,36 @@ def parse_quotation_pdf_text(text: str) -> ParsedDocumentData:
     ship_to = _section_fields(lines, "Ship to")
     bill_to = _section_fields(lines, "Bill to")
     project = _project_fields(lines)
+    quote_date_value = _line_value_aliases(lines, QUOTE_DATE_LABELS)
+    if not quote_date_value:
+        quote_date_value = next(
+            (
+                line for line in lines[:8]
+                if re.fullmatch(r"\d{1,2}[./-]\d{1,2}[./-]\d{2,4}", line)
+            ),
+            "",
+        )
+    quote_no_value = _line_value_aliases(lines, QUOTE_NO_LABELS)
+    if not quote_no_value:
+        match = re.search(r"\bShip\s+to\s+([A-Za-z0-9_-]+)", " ".join(lines[:8]), re.I)
+        quote_no_value = match.group(1) if match else ""
+    expire_value = _line_value_aliases(lines, EXPIRE_DATE_LABELS)
+    if not expire_value:
+        for line in lines[:8]:
+            match = re.search(
+                r"Company\s*:\s*.+?\s+"
+                r"(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})$",
+                line,
+                re.I,
+            )
+            if match:
+                expire_value = match.group(1)
+                break
+    for address in (ship_to, bill_to):
+        address["company"] = re.sub(
+            r"\s+\d{1,2}[./-]\d{1,2}[./-]\d{2,4}$", "",
+            address.get("company", ""),
+        ).strip()
     excluded_names = {
         value.strip().casefold()
         for value in (ship_to.get("name", ""), bill_to.get("name", ""))
@@ -862,6 +1066,9 @@ def parse_quotation_pdf_text(text: str) -> ParsedDocumentData:
         items.extend(_line_items(lines, alias, "Software"))
     for alias in SECTION_ALIASES["Others"]:
         items.extend(_line_items(lines, alias, "Other"))
+    unsectioned_items = _unsectioned_item_lines(lines)
+    if len(unsectioned_items) > len(items):
+        items = unsectioned_items
     _merge_optional_service_rows(items, lines)
     for line_no, item in enumerate(items, start=1):
         item.line_no = line_no
@@ -875,20 +1082,72 @@ def parse_quotation_pdf_text(text: str) -> ParsedDocumentData:
         Decimal("0"),
     )
     if not subtotal_before_vat:
-        subtotal_before_vat = item_total or total_amount
-    grand_total = _amount_by_label(lines, "grand total")
+        subtotal_lines = [
+            line for line in lines if "subtotal" in line.casefold()
+        ]
+        generic_subtotal = (
+            _amount_by_label(lines, "subtotal")
+            if len(subtotal_lines) == 1
+            else Decimal("0")
+        )
+        subtotal_before_vat = generic_subtotal or item_total or total_amount
+    grand_total = (
+        _amount_by_label(lines, "grand total")
+        or _amount_by_label(lines, "final amount")
+    )
     if not subtotal_before_vat:
         subtotal_before_vat = total_amount
     if not grand_total:
         grand_total = total_amount or subtotal_before_vat
-    vat_amount = _amount_by_label(lines, "amount (")
+    vat_amount = (
+        _amount_by_label(lines, "amount (")
+        or _amount_by_label(lines, "vat charged")
+        or _amount_by_label(lines, "tax charged")
+    )
     if not vat_amount and vat_rate:
         vat_amount = _amount_by_label(lines, tax_label)
+    deduction_amount = _amount_by_label(lines, "special offer")
+    tax_calculation_mode = "add"
+    has_charge = any(
+        re.search(r"\b(?:tax|vat|markup)\b", line, re.IGNORECASE)
+        and re.search(r"\d+(?:\.\d+)?%", line)
+        for line in lines
+    )
+    if not has_charge and abs(item_total - grand_total) <= Decimal("0.02"):
+        subtotal_before_vat = item_total
+    total_difference = grand_total + deduction_amount - subtotal_before_vat
+    if (
+        has_charge
+        and not vat_amount
+        and abs(total_difference) > Decimal("0.02")
+    ):
+        vat_amount = abs(total_difference)
+        tax_calculation_mode = (
+            "add" if total_difference > 0 else "subtract"
+        )
+    has_extra_charge = any(
+        "withold" in line.casefold()
+        or "withhold" in line.casefold()
+        or "markup" in line.casefold()
+        for line in lines
+    )
+    if has_extra_charge and abs(total_difference) > Decimal("0.02"):
+        vat_amount = abs(total_difference)
+    if (
+        vat_amount
+        and abs(
+            subtotal_before_vat - vat_amount
+            - deduction_amount - grand_total
+        ) <= Decimal("0.02")
+    ):
+        tax_calculation_mode = "subtract"
     source_totals = {
         "software_subtotal": str(
             _amount_by_label(lines, "software subscription subtotal")
             or _amount_by_label(lines, "subscription items subtotal")
             or _amount_by_label(lines, "subscriptions items subtotal")
+            or _amount_by_label(lines, "monthly subscriptions subtotal")
+            or _amount_by_label(lines, "yearly subscriptions subtotal")
             or sum(
                 (item.extended_price for item in items
                  if item.type == "Software"),
@@ -900,6 +1159,7 @@ def parse_quotation_pdf_text(text: str) -> ParsedDocumentData:
             or _amount_by_label(lines, "one-time items subtotal")
             or _amount_by_label(lines, "one time items subtotal")
             or _amount_by_label(lines, "optional items subtotal")
+            or _amount_by_label(lines, "professional service subtotal")
             or sum(
                 (item.extended_price for item in items
                  if item.type == "Other"),
@@ -912,17 +1172,19 @@ def parse_quotation_pdf_text(text: str) -> ParsedDocumentData:
     }
     payment_terms = project.get("payment_terms", "")
     quotation = ParsedQuotation(
-        quote_no=_line_value_aliases(lines, QUOTE_NO_LABELS),
+        quote_no=quote_no_value,
         product_line=product_line,
         product_line_name=product_line_name,
         project_name=project.get("project_name", ""),
         currency=normalize_currency_code(project.get("currency", "")),
         payment_term_option=_payment_term_option(payment_terms),
         payment_terms=payment_terms,
-        quote_date=_date(_line_value_aliases(lines, QUOTE_DATE_LABELS)),
-        expire_date=_date(_line_value_aliases(lines, EXPIRE_DATE_LABELS)),
+        quote_date=_date(quote_date_value),
+        expire_date=_date(expire_value),
         tax_label=tax_label,
         vat_rate=vat_rate,
+        tax_calculation_mode=tax_calculation_mode,
+        deduction_amount=deduction_amount,
         remarks_disclaimer=_remarks(lines),
         issuer_company_name=_issuer_company(lines),
         issuer_contact_name=normalize_contact_name(

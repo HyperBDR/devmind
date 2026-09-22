@@ -704,6 +704,77 @@ class StandardQuotationPdfParserTests(TestCase):
 
 
 class StandardQuotationPdfParserTests(TestCase):
+    def test_parses_two_currency_columns_without_section_heading(self):
+        from quotation.services.document_parsing.pdf_parser import (
+            parse_quotation_pdf_text,
+        )
+
+        parsed = parse_quotation_pdf_text(
+            "\n".join(
+                [
+                    "OnePro Cloud Limited",
+                    "Quotation",
+                    "Item Description Qty List Price Extended Price",
+                    "1 Annual License 80 MYR 240.00 MYR 19,200.00",
+                    "Software subscription subtotal: MYR 19,200.00",
+                    "Digital Tax (8%): MYR 1,422.22",
+                    "Total Amount: MYR 17,777.78",
+                ]
+            )
+        )
+
+        self.assertEqual(len(parsed.quotation.items), 1)
+        self.assertEqual(
+            parsed.quotation.items[0].extended_price,
+            Decimal("19200.00"),
+        )
+        self.assertEqual(
+            parsed.quotation.tax_calculation_mode,
+            "subtract",
+        )
+        self.assertFalse(
+            any(
+                issue["code"] == "amount_mismatch"
+                for issue in parsed.validation_errors
+            )
+        )
+
+    def test_pdf_amount_does_not_consume_subscription_suffix(self):
+        from quotation.services.document_parsing.pdf_parser import (
+            _parse_currency_item_line,
+        )
+
+        item = _parse_currency_item_line(
+            "1 180 $ 385.0 30% $ 269.5 $48,510.0 "
+            "11-Month Subscription: 1 Jul 2026 - 31 May 2027",
+            "",
+        )
+
+        self.assertEqual(item.extended_price, Decimal("48510.0"))
+        self.assertIn("11-Month Subscription", item.description)
+
+    def test_combines_source_tax_and_markup_into_total_adjustment(self):
+        from quotation.services.document_parsing.pdf_parser import (
+            parse_quotation_pdf_text,
+        )
+
+        parsed = parse_quotation_pdf_text("\n".join([
+            "Quotation",
+            "Software",
+            "Item Description Qty List Price Extended Price",
+            "1 License 1 $100 $100",
+            "Software subscription subtotal: $100",
+            "Partner 10% Markup $10",
+            "China 6% VAT $6.6",
+            "Grand Total $116.6",
+        ]))
+
+        self.assertEqual(parsed.source_totals["vat_amount"], "16.6")
+        self.assertFalse(any(
+            issue["code"] == "amount_mismatch"
+            for issue in parsed.validation_errors
+        ))
+
     def test_source_total_mismatch_blocks_confirmation(self):
         from quotation.services.document_parsing.flexible_parser import (
             complete_document_parse,
@@ -1640,6 +1711,19 @@ class StandardQuotationPdfParserTests(TestCase):
         )
         self.assertEqual(str(items[0].extended_price), "1785.0")
 
+    def test_flexible_pdf_parser_keeps_us_dollar_rows(self):
+        from quotation.services.document_parsing.flexible_parser import (
+            _pdf_items,
+        )
+
+        items = _pdf_items(
+            "1 HyperMotion License 22 US$ 105.0 0% US$ 105.0 US$ 2,310.0"
+        )
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].description, "HyperMotion License")
+        self.assertEqual(items[0].extended_price, Decimal("2310.0"))
+
     def test_flexible_pdf_parser_keeps_split_rows_separate(self):
         from quotation.services.document_parsing.flexible_parser import (
             _pdf_items,
@@ -2024,6 +2108,7 @@ class DocumentParseEndpointTests(TestCase):
     def test_new_parser_version_updates_existing_import_in_place(self):
         from quotation.services.document_parsing.service import (
             parse_and_create_quotation,
+            parser_version_for_asset,
         )
 
         old_result, _ = parse_and_create_quotation(
@@ -2053,7 +2138,10 @@ class DocumentParseEndpointTests(TestCase):
 
         self.assertTrue(reused)
         self.assertNotEqual(new_result.id, old_result.id)
-        self.assertEqual(new_result.parser_version, "2.15.0")
+        self.assertEqual(
+            new_result.parser_version,
+            parser_version_for_asset(self.asset),
+        )
         self.assertEqual(new_result.status, "confirmed")
         self.assertEqual(new_result.quotation_id, quotation.id)
         self.assertEqual(Quotation.objects.count(), 1)
@@ -2126,9 +2214,9 @@ class DocumentParseEndpointTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 201, response.data)
-        self.assertEqual(response.data["status"], "failed", response.data)
+        self.assertEqual(response.data["status"], "confirmed", response.data)
         self.assertTrue(response.data["validation_warnings_json"])
-        self.assertEqual(Quotation.objects.count(), 0)
+        self.assertEqual(Quotation.objects.count(), 1)
 
     def test_flexible_excel_rejects_inventory_without_quote_markers(self):
         workbook = Workbook()

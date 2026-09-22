@@ -57,6 +57,8 @@ SECTION_ALIASES = {
             "subscription items",
             "subscriptions items",
             "subscriptions",
+            "yearly subscription items",
+            "monthly subscription items",
         }
     ),
     "Others": frozenset(
@@ -67,6 +69,7 @@ SECTION_ALIASES = {
             "one time items",
             "optional items",
             "services",
+            "professional service",
             "professional services",
         }
     ),

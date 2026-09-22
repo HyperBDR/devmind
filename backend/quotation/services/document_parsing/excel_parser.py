@@ -37,8 +37,8 @@ from quotation.services.document_parsing.schemas import (
 )
 
 PARSER_NAME = "devmind_standard_excel"
-PARSER_VERSION = "2.15.0"
-MONEY_TOLERANCE = Decimal("0.02")
+PARSER_VERSION = "2.21.0"
+MONEY_TOLERANCE = Decimal("0.05")
 
 
 class QuotationExcelParseError(ValueError):
@@ -90,8 +90,14 @@ def _decimal(value: Any) -> Decimal:
     if isinstance(value, (int, float)):
         return Decimal(str(value))
     raw = _text(value).strip()
+    if raw in {"-", "–", "—"}:
+        return Decimal("0")
     negative = raw.startswith("(") and raw.endswith(")")
     raw = raw.strip("()").replace(",", "").replace("%", "")
+    if not re.fullmatch(r"-?\d+(?:\.\d+)?", raw):
+        match = re.search(r"-?\d[\d,]*(?:\.\d+)?", raw)
+        if match:
+            raw = match.group(0).replace(",", "")
     raw = re.sub(r"[^0-9.\-]", "", raw)
     if not raw:
         return Decimal("0")
@@ -106,6 +112,10 @@ def _decimal(value: Any) -> Decimal:
 
 def _decimal_string(value: Any) -> str:
     return format(_decimal(value).normalize(), "f")
+
+
+def _money(value: Any) -> Decimal:
+    return _decimal(value).quantize(Decimal("0.01"))
 
 
 def _date(value: Any) -> date | None:
@@ -457,8 +467,10 @@ def _line_items(
                     "vat amount",
                     "tax amount",
                 )
-            ) and not _text(row_value(row, list_price_column)):
-                break
+            ):
+                if not _text(row_value(row, list_price_column)):
+                    break
+                continue
             qty_raw = row_value(row, qty_column)
             qty = _decimal(qty_raw) if _text(qty_raw) else Decimal("1")
             items.append(
@@ -467,14 +479,14 @@ def _line_items(
                     type=item_type,
                     description=description,
                     qty=qty,
-                    list_price=_decimal(row_value(row, list_price_column)),
+                    list_price=_money(row_value(row, list_price_column)),
                     discount_percent=discount_value(
                         row_value(row, discount_column)
                     ),
-                    net_unit_price=_decimal(
+                    net_unit_price=_money(
                         row_value(row, net_price_column)
                     ),
-                    extended_price=_decimal(
+                    extended_price=_money(
                         row_value(row, extended_column)
                     ),
                 )
@@ -584,7 +596,12 @@ def _validate(
                 "Line item total differs from source subtotal",
             )
         )
-    expected_grand = subtotal + Decimal(source_totals.get("vat_amount", "0"))
+    vat_amount = Decimal(source_totals.get("vat_amount", "0"))
+    expected_grand = (
+        subtotal - vat_amount
+        if quotation.tax_calculation_mode == "subtract"
+        else subtotal + vat_amount
+    ) - quotation.deduction_amount
     source_grand = Decimal(source_totals.get("grand_total", "0"))
     if abs(expected_grand - source_grand) > MONEY_TOLERANCE:
         errors.append(
