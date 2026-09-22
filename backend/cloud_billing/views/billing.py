@@ -11,7 +11,13 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from ..dashboard import CNY_RATE, _build_exchange_rate_info, build_dashboard_overview
+from ..dashboard import (
+    CNY_RATE,
+    _build_exchange_rate_info,
+    build_dashboard_accounts,
+    build_dashboard_overview,
+    build_dashboard_summary,
+)
 from ..models import BillingData, exclude_shadow_default_accounts
 from ..serializers import (
     BillingDataListSerializer,
@@ -312,6 +318,40 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
         """Return dashboard data for the operations overview page."""
         timezone_name = request.query_params.get('timezone')
         return Response(build_dashboard_overview(timezone_name=timezone_name))
+
+    @extend_schema(
+        tags=['cloud-billing'],
+        summary="Get operations overview summary",
+        description=(
+            "Return the KPI summary and trend ranges for the cloud billing "
+            "operations dashboard."
+        ),
+        responses={200: {'type': 'object'}},
+    )
+    @action(detail=False, methods=['get'], url_path='overview/summary')
+    def overview_summary(self, request):
+        """Return the summary section of the operations overview."""
+        timezone_name = request.query_params.get('timezone')
+        return Response(
+            build_dashboard_summary(timezone_name=timezone_name)
+        )
+
+    @extend_schema(
+        tags=['cloud-billing'],
+        summary="Get operations overview accounts",
+        description=(
+            "Return the account cards, financial health and currency "
+            "breakdown for the cloud billing operations dashboard."
+        ),
+        responses={200: {'type': 'object'}},
+    )
+    @action(detail=False, methods=['get'], url_path='overview/accounts')
+    def overview_accounts(self, request):
+        """Return the account section of the operations overview."""
+        timezone_name = request.query_params.get('timezone')
+        return Response(
+            build_dashboard_accounts(timezone_name=timezone_name)
+        )
 
     @extend_schema(
         tags=['cloud-billing'],

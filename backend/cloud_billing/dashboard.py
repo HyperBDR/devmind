@@ -14,13 +14,13 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import requests
 from django.core.cache import cache
-from django.db.models import Prefetch
-from django.utils import timezone
+from django.db.models import F, Window
+from django.db.models.functions import RowNumber
+from django.utils import timezone, translation
 from django.utils.translation import gettext as _
 
 from .models import (
     BillingData,
-    CloudProvider,
     exclude_shadow_default_accounts,
 )
 from .serializers import get_balance_support_info
@@ -31,6 +31,10 @@ EXCHANGE_RATE_API_URL = 'https://v6.exchangerate-api.com/v6/{api_key}/latest/USD
 EXCHANGE_RATE_SOURCE_URL = 'https://www.exchangerate-api.com/'
 EXCHANGE_RATE_CACHE_PREFIX = 'cloud_billing:exchange_rate'
 EXCHANGE_RATE_CACHE_TTL = 60 * 60 * 24
+DASHBOARD_CACHE_PREFIX = 'cloud_billing:dashboard'
+DASHBOARD_CACHE_TTL = int(
+    os.getenv('CLOUD_BILLING_DASHBOARD_CACHE_TTL', '60')
+)
 RECENT_BURN_WINDOW_DAYS = 30
 MIN_DAYS_REMAINING_REFERENCE_DAYS = 7
 DATA_FRESHNESS_FAILURE_THRESHOLD = 2
@@ -65,15 +69,33 @@ def _cache_get_safely(cache_key: str):
     try:
         return cache.get(cache_key)
     except Exception as exc:  # noqa: BLE001
-        logger.warning('Failed to read exchange rate cache: %s', exc)
+        logger.warning('Failed to read cache key %s: %s', cache_key, exc)
         return None
 
 
-def _cache_set_safely(cache_key: str, value: dict[str, object], timeout: int) -> None:
+def _cache_set_safely(cache_key: str, value, timeout: int) -> None:
     try:
         cache.set(cache_key, value, timeout=timeout)
     except Exception as exc:  # noqa: BLE001
-        logger.warning('Failed to write exchange rate cache: %s', exc)
+        logger.warning('Failed to write cache key %s: %s', cache_key, exc)
+
+
+def _dashboard_cache_key(
+    section: str,
+    local_tz,
+    language: str | None = None,
+) -> str:
+    """Build a cache key from the resolved timezone and active language.
+
+    Using the resolved timezone keeps arbitrary/invalid ``?timezone=``
+    inputs from creating unbounded distinct cache entries, and including
+    the language prevents localized payload strings (e.g. currency and
+    service labels) from leaking across locales.
+    """
+    return (
+        f'{DASHBOARD_CACHE_PREFIX}:{section}:'
+        f'{local_tz}:{language or "default"}'
+    )
 
 
 def _payment_type_for_provider(provider, balance_supported: bool) -> str:
@@ -263,37 +285,35 @@ def _billing_rows_for_recent_days(local_tz, days: int = 30):
 
 
 def _latest_billings():
-    providers = CloudProvider.objects.filter(is_active=True).order_by(
-        'display_name',
-        'id',
+    """Return the latest billing row per provider/account combination."""
+    latest_window = Window(
+        expression=RowNumber(),
+        partition_by=[F('provider_id'), F('account_id')],
+        order_by=[
+            F('day').desc(),
+            F('collected_at').desc(),
+            F('period').desc(),
+            F('hour').desc(),
+        ],
     )
-    billings = exclude_shadow_default_accounts(
-        BillingData.objects.select_related('provider')
-    ).order_by(
-        'provider_id',
-        'account_id',
-        '-day',
-        '-collected_at',
-        '-period',
-        '-hour',
+    latest = (
+        exclude_shadow_default_accounts(
+            BillingData.objects.select_related('provider').filter(
+                provider__is_active=True
+            )
+        )
+        .annotate(row_number=latest_window)
+        .filter(row_number=1)
+        .order_by(
+            'provider__display_name',
+            'provider_id',
+            'account_id',
+        )
     )
-    providers = providers.prefetch_related(
-        Prefetch('billing_data', queryset=billings, to_attr='ordered_billing_data')
-    )
-
-    latest = []
-    for provider in providers:
-        seen_accounts = set()
-        for billing in getattr(provider, 'ordered_billing_data', []):
-            account_key = billing.account_id or ''
-            if account_key in seen_accounts:
-                continue
-            latest.append(billing)
-            seen_accounts.add(account_key)
-    return latest
+    return list(latest)
 
 
-def _build_summary(latest_billings, daily_rows, local_tz, now, usd_to_cny_rate: float):
+def _build_summary(daily_rows, local_tz, now, usd_to_cny_rate: float):
     collected_dates = set()
 
     trend_map = defaultdict(lambda: {'cny': 0.0, 'usd': 0.0})
@@ -954,24 +974,29 @@ def _build_accounts(
         collection_health = _collection_health(billing, provider)
         is_available = getattr(billing, 'is_available', None)
         display_funds = float(funds['display_funds'])
+        prepaid_funds_exhausted = (
+            payment_type == 'prepaid'
+            and getattr(billing, 'balance', None) is not None
+            and float(funds['balance']) <= 0
+        )
         if not has_days_remaining_reference:
             days_remaining = None
         elif funds['uses_credit_limit_days'] and display_funds > 0 and daily_burn > 0:
             days_remaining = max(int(display_funds / daily_burn), 1)
         elif float(funds['balance']) > 0 and daily_burn > 0:
             days_remaining = max(int(float(funds['balance']) / daily_burn), 1)
+        elif prepaid_funds_exhausted:
+            # Known prepaid debt/zero balance: never fall back to the
+            # optimistic default, otherwise an overdrawn account would
+            # still report a healthy number of remaining days.
+            days_remaining = 0
         elif payment_type == 'postpaid':
             days_remaining = 45
         else:
             days_remaining = 120
 
         has_known_funds_risk = (
-            is_available is False
-            or (
-                payment_type == 'prepaid'
-                and getattr(billing, 'balance', None) is not None
-                and float(funds['balance']) <= 0
-            )
+            is_available is False or prepaid_funds_exhausted
         )
         risk = (
             'high'
@@ -1236,7 +1261,6 @@ def build_dashboard_overview(timezone_name: str | None = None) -> dict[str, obje
         now=now,
     )
     summary = _build_summary(
-        latest_billings,
         daily_rows,
         local_tz,
         now,
@@ -1262,3 +1286,81 @@ def build_dashboard_overview(timezone_name: str | None = None) -> dict[str, obje
     }
     overview.update(exchange_rate_info)
     return overview
+
+
+def build_dashboard_summary(
+    timezone_name: str | None = None,
+) -> dict[str, object]:
+    """Build the KPI summary section of the operations overview page."""
+    local_tz = _resolve_dashboard_timezone(timezone_name)
+    cache_key = _dashboard_cache_key(
+        'summary',
+        local_tz,
+        translation.get_language(),
+    )
+    cached = _cache_get_safely(cache_key)
+    if cached is not None:
+        return cached
+
+    exchange_rate_info = _build_exchange_rate_info()
+    exchange_rate = float(
+        exchange_rate_info.get('exchange_rate') or CNY_RATE
+    )
+    now, _, daily_rows = _daily_rows_for_current_month(local_tz)
+    _, _, recent_rows = _billing_rows_for_recent_days(local_tz, days=30)
+    _, _, year_rows = _billing_rows_for_current_year(local_tz)
+    summary = _build_summary(daily_rows, local_tz, now, exchange_rate)
+    summary['trend_ranges'] = _build_trend_ranges(
+        daily_rows,
+        recent_rows,
+        year_rows,
+        local_tz,
+        now,
+        exchange_rate,
+    )
+    payload: dict[str, object] = {
+        'summary': summary,
+        'timezone': str(local_tz),
+    }
+    payload.update(exchange_rate_info)
+    _cache_set_safely(cache_key, payload, timeout=DASHBOARD_CACHE_TTL)
+    return payload
+
+
+def build_dashboard_accounts(
+    timezone_name: str | None = None,
+) -> dict[str, object]:
+    """Build the account section of the operations overview page."""
+    local_tz = _resolve_dashboard_timezone(timezone_name)
+    cache_key = _dashboard_cache_key(
+        'accounts',
+        local_tz,
+        translation.get_language(),
+    )
+    cached = _cache_get_safely(cache_key)
+    if cached is not None:
+        return cached
+
+    exchange_rate_info = _build_exchange_rate_info()
+    latest_billings = _latest_billings()
+    now, _, daily_rows = _daily_rows_for_current_month(local_tz)
+    _, _, recent_rows = _billing_rows_for_recent_days(local_tz, days=30)
+    accounts = _build_accounts(
+        latest_billings,
+        daily_rows,
+        recent_rows=recent_rows,
+        local_tz=local_tz,
+        now=now,
+    )
+    payload: dict[str, object] = {
+        'accounts': accounts,
+        'financial_health': _build_financial_health(accounts),
+        'currency_breakdown': _build_currency_breakdown(
+            accounts,
+            exchange_rate=exchange_rate_info.get('exchange_rate'),
+        ),
+        'timezone': str(local_tz),
+    }
+    payload.update(exchange_rate_info)
+    _cache_set_safely(cache_key, payload, timeout=DASHBOARD_CACHE_TTL)
+    return payload

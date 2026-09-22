@@ -215,6 +215,22 @@ export const cloudBillingApi = {
     return response
   },
 
+  async getOverviewSummary(params = {}) {
+    const response = await apiClient.get(
+      '/v1/cloud-billing/billing-data/overview/summary/',
+      { params }
+    )
+    return response
+  },
+
+  async getOverviewAccounts(params = {}) {
+    const response = await apiClient.get(
+      '/v1/cloud-billing/billing-data/overview/accounts/',
+      { params }
+    )
+    return response
+  },
+
   // Alert Rule APIs
   async getAlertRules(params = {}) {
     const response = await apiClient.get('/v1/cloud-billing/alert-rules/', {

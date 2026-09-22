@@ -257,6 +257,15 @@ class BillingData(models.Model):
                 ],
                 name="cbill_list_latest_idx",
             ),
+            models.Index(
+                fields=[
+                    "provider",
+                    "account_id",
+                    "-day",
+                    "-collected_at",
+                ],
+                name="cbill_latest_billing_idx",
+            ),
         ]
         ordering = ["-period", "-hour"]
 
