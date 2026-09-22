@@ -33,7 +33,10 @@ export function quoteDeskErrorMessage(status, path = '', detail = '') {
   const url = String(path || '').toLowerCase()
   const text = String(detail || '').toLowerCase()
 
-  if (text.includes('quote_no already exists') || text.includes('invoice_no')) {
+  if (
+    (text.includes('quote_no') || text.includes('invoice_no')) &&
+    (text.includes('already exists') || text.includes('unique'))
+  ) {
     return message(
       '编号已存在，请更换一个唯一编号。',
       'This number is already in use. Please enter a unique number.',

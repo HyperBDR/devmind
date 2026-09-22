@@ -1,4 +1,7 @@
-import { quoteDeskErrorMessage } from '@/utils/quoteDeskErrors'
+import {
+  extractQuoteDeskErrorDetail,
+  quoteDeskErrorMessage,
+} from '@/utils/quoteDeskErrors'
 
 const TOKEN_KEY = 'access_token'
 const LEGACY_TOKEN_KEY = 'qmp_access_token'
@@ -77,7 +80,9 @@ function extractDetail(payload: unknown, fallback: string): string {
   const detail = candidates.find(Boolean)
   if (Array.isArray(detail)) return String(detail[0])
   if (detail && typeof detail === 'object') return JSON.stringify(detail)
-  return typeof detail === 'string' ? detail : fallback
+  if (typeof detail === 'string') return detail
+
+  return extractQuoteDeskErrorDetail(unwrapped ?? payload) || fallback
 }
 
 async function refreshAccessToken(): Promise<string> {
