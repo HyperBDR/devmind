@@ -46,6 +46,7 @@ def reparse_user_documents_after_login(user_id: int):
     assets = list(
         DocumentAsset.objects.filter(
             source__in=("feishu", "feishu_upload"),
+            doc_type__in=(DocumentType.PDF, DocumentType.EXCEL),
             created_by_email__iexact=user.email,
         )
         .exclude(file_name__startswith="~$")

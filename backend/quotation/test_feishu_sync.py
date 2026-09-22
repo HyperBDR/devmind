@@ -519,6 +519,15 @@ class FeishuAutomaticSyncTests(TestCase):
             source="feishu",
             created_by_email=self.user.email,
         )
+        DocumentAsset.objects.create(
+            doc_type=DocumentType.ATTACHMENT,
+            file_name="Signed.pdf",
+            mime_type="application/pdf",
+            storage_key="documents/signed.pdf",
+            size_bytes=8,
+            source="feishu",
+            created_by_email=self.user.email,
+        )
         with patch("quotation.tasks.parse_document_task.delay") as enqueue:
             result = reparse_user_documents_after_login.run(self.user.id)
 
