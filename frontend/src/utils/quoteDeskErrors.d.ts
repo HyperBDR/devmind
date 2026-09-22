@@ -1,3 +1,5 @@
+export function extractQuoteDeskErrorDetail(payload: unknown): string
+
 export function isQuoteDeskPath(path?: string): boolean
 
 export function quoteDeskErrorMessage(

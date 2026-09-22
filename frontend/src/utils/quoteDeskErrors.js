@@ -8,6 +8,22 @@ function message(zh, en) {
   return isEnglish() ? en : zh
 }
 
+export function extractQuoteDeskErrorDetail(payload) {
+  if (!payload || typeof payload !== 'object') return String(payload || '')
+
+  const direct = payload.detail ?? payload.message
+  if (direct) {
+    return typeof direct === 'string' ? direct : JSON.stringify(direct)
+  }
+
+  return Object.entries(payload)
+    .flatMap(([field, value]) => {
+      const values = Array.isArray(value) ? value : [value]
+      return values.map((item) => `${field}: ${String(item)}`)
+    })
+    .join(' ')
+}
+
 export function isQuoteDeskPath(path = '') {
   const value = String(path || '').toLowerCase()
   return value.includes('/v1/quotation') || value.includes('/v1/invoice')

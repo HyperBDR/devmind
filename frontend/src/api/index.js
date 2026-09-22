@@ -2,6 +2,7 @@ import axios from 'axios'
 import apiConfig from '@/config/api'
 import { shouldKeepAuthStateOnError } from '@/api/authErrors'
 import {
+  extractQuoteDeskErrorDetail,
   isQuoteDeskPath,
   quoteDeskErrorMessage,
 } from '@/utils/quoteDeskErrors'
@@ -82,10 +83,11 @@ api.interceptors.response.use(
     const originalRequest = error.config
 
     if (error.response && isQuoteDeskPath(originalRequest?.url)) {
+      const detail = extractQuoteDeskErrorDetail(error.response.data)
       const friendly = quoteDeskErrorMessage(
         error.response.status,
         originalRequest.url,
-        error.response.data?.detail || error.response.data?.message,
+        detail,
       )
       if (friendly) error.message = friendly
     }
