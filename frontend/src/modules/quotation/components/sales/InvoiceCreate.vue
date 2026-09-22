@@ -608,6 +608,7 @@ function payload(status: WritableInvoiceStatus): InvoiceCreatePayload {
       unit_price: Number(item.unitPrice),
     }))
   return {
+    ...(copyInvoiceId.value ? { copy_from_id: copyInvoiceId.value } : {}),
     invoice_no:
       form.numberingMode === InvoiceNumberingMode.AUTO
         ? ''

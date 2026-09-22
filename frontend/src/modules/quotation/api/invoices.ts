@@ -147,6 +147,7 @@ export interface InvoiceCreateItem {
 }
 
 export interface InvoiceCreatePayload {
+  copy_from_id?: string
   invoice_no: string
   numbering_mode: InvoiceNumberingMode
   product_line: string

@@ -128,6 +128,81 @@ class InvoiceApiTests(TestCase):
             ],
         )
 
+    def test_invoice_update_records_changed_fields(self):
+        created = self.client.post(
+            "/api/v1/invoice/invoices",
+            {
+                "invoice_date": date(2026, 9, 4).isoformat(),
+                "numbering_mode": "auto",
+                "product_line": "BDR",
+                "customer_name": "Before",
+                "currency": "USD",
+            },
+            format="json",
+        )
+
+        response = self.client.patch(
+            f"/api/v1/invoice/invoices/{created.data['id']}",
+            {"customer_name": "After"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        event = AuditEvent.objects.get(event_name="invoice.updated")
+        self.assertEqual(event.target_id, created.data["id"])
+        self.assertEqual(event.changes["fields"], ["customer_name"])
+
+    def test_invoice_copy_records_source_and_each_successful_save(self):
+        source = self.client.post(
+            "/api/v1/invoice/invoices",
+            {
+                "invoice_date": date(2026, 9, 4).isoformat(),
+                "numbering_mode": "auto",
+                "product_line": "BDR",
+                "customer_name": "Copy Source",
+                "currency": "USD",
+            },
+            format="json",
+        )
+        payload = {
+            "invoice_date": date(2026, 9, 5).isoformat(),
+            "numbering_mode": "auto",
+            "product_line": "BDR",
+            "customer_name": "Copied Invoice",
+            "currency": "USD",
+            "copy_from_id": source.data["id"],
+        }
+
+        first = self.client.post(
+            "/api/v1/invoice/invoices",
+            payload,
+            format="json",
+        )
+        second = self.client.post(
+            "/api/v1/invoice/invoices",
+            payload,
+            format="json",
+        )
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 201)
+        events = AuditEvent.objects.filter(event_name="invoice.copied")
+        self.assertEqual(events.count(), 2)
+        self.assertEqual(
+            set(events.values_list("target_id", flat=True)),
+            {first.data["id"], second.data["id"]},
+        )
+        self.assertEqual(
+            events.values_list("request_id", flat=True).distinct().count(),
+            2,
+        )
+        self.assertTrue(
+            all(
+                event.metadata["copy_from_id"] == source.data["id"]
+                for event in events
+            )
+        )
+
     def test_invoice_list_paginates_and_exposes_feishu_source_url(self):
         invoices = [
             Invoice.objects.create(

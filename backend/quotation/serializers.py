@@ -884,6 +884,12 @@ class QuotationDetailSerializer(QuotationSerializer):
 
 
 class QuotationCreateSerializer(serializers.Serializer):
+    copy_from_id = serializers.CharField(
+        allow_blank=True,
+        required=False,
+        write_only=True,
+        max_length=36,
+    )
     numbering_mode = serializers.ChoiceField(
         choices=("auto", "custom"),
         required=False,

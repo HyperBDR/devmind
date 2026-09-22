@@ -19,12 +19,14 @@ from quotation.access import (
     forbidden_response,
 )
 from quotation.audit import (
+    record_audit_event,
     quotation_audit_label,
     set_request_audit_change_details,
     set_request_audit_changed_fields,
     set_request_audit_target,
 )
 from quotation.models import (
+    AuditEvent,
     DocumentAsset,
     DocumentReplica,
     Quotation,
@@ -275,6 +277,26 @@ class QuotationListCreateView(APIView):
         ser = QuotationCreateSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         data = ser.validated_data
+        copy_from_id = str(data.pop("copy_from_id", "") or "")
+        copy_source = None
+        if copy_from_id:
+            copy_source = (
+                filter_accessible_quotations(
+                    request.user,
+                    Quotation.objects.all(),
+                )
+                .filter(
+                    pk=copy_from_id,
+                    source_type=QuotationSourceType.MANUAL,
+                )
+                .only("id")
+                .first()
+            )
+            if copy_source is None:
+                return Response(
+                    {"copy_from_id": "Quotation cannot be copied."},
+                    status=status.HTTP_409_CONFLICT,
+                )
         data["created_by_email"] = user_display_email(request.user)
         numbering_mode = data.pop("numbering_mode", "custom")
         draft_quote_no = data.pop("draft_quote_no", None)
@@ -305,6 +327,18 @@ class QuotationListCreateView(APIView):
         quotation = Quotation.objects.prefetch_related(
             "items", "documents__replicas", "versions"
         ).get(pk=quotation.pk)
+        if copy_source:
+            record_audit_event(
+                request=request,
+                module="quotation",
+                action="copy",
+                result=AuditEvent.RESULT_SUCCEEDED,
+                target_type="quotation",
+                target_id=quotation.id,
+                target_label=quotation_audit_label(quotation),
+                event_name="quotation.copied",
+                metadata={"copy_from_id": copy_source.id},
+            )
         return Response(QuotationSerializer(quotation).data, status=201)
 
 

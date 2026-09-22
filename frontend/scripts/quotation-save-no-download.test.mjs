@@ -126,6 +126,7 @@ test('copy opens a create form without creating a quotation first', () => {
   assert.ok(copyEnd > copyStart)
   assert.match(copyFlow, /getQuotationApi\(id\)/)
   assert.match(copyFlow, /copySourceQuote\.value = sourceQuote/)
+  assert.match(app, /createQuotationApi\(ownedQuote, copySourceQuote\.value\?\.id\)/)
   assert.match(copyFlow, /router\.push\('\/quotation\/create'\)/)
   assert.doesNotMatch(copyFlow, /copyQuotationApi/)
   assert.doesNotMatch(copyFlow, /refreshQuotations/)

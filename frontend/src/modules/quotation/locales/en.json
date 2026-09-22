@@ -1011,6 +1011,11 @@
         },
         "actions": {
           "create": "Created quote",
+          "copiedQuote": "Copied quote",
+          "copiedInvoice": "Copied invoice",
+          "createdInvoice": "Created invoice",
+          "updatedInvoice": "Updated invoice",
+          "copy": "Copied record",
           "update": "Updated record",
           "updatedQuote": "Updated quote",
           "addedCatalogItem": "Added catalog item",

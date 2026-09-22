@@ -41,7 +41,7 @@ def _classify(method: str, path: str):
     if re.fullmatch(r"quotations/[^/]+/copy", relative):
         return "quotation", "copy", "quotation"
     if relative == "quotations" and method == "POST":
-        return "quotation", "create", "quotation"
+        return None
     if quotation and method == "GET":
         return "quotation", "view", "quotation"
     if quotation and method in {"PUT", "PATCH"}:
@@ -231,7 +231,7 @@ def _is_automatic_generate_followup(
     action: str,
     target_id: str,
 ) -> bool:
-    """Return whether generate immediately follows a successful quote edit."""
+    """Return whether generate follows an already audited quote action."""
     if module != "quotation" or action != "generate" or not target_id:
         return False
     actor = getattr(request, "user", None)
@@ -240,7 +240,7 @@ def _is_automatic_generate_followup(
     return AuditEvent.objects.filter(
         actor=actor,
         module="quotation",
-        action="update",
+        action__in=("update", "copy"),
         result=AuditEvent.RESULT_SUCCEEDED,
         target_id=target_id,
         created_at__gte=timezone.now() - timedelta(seconds=60),

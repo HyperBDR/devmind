@@ -217,6 +217,25 @@ class InvoiceListCreateView(APIView):
             context={"request": request},
         )
         serializer.is_valid(raise_exception=True)
+        copy_from_id = str(
+            serializer.validated_data.pop("copy_from_id", "") or ""
+        )
+        copy_source = None
+        if copy_from_id:
+            copy_source = (
+                Invoice.objects.filter(
+                    invoice_visibility_filter(request.user),
+                    pk=copy_from_id,
+                    source_type=InvoiceSourceType.MANUAL,
+                )
+                .only("id")
+                .first()
+            )
+            if copy_source is None:
+                return Response(
+                    {"copy_from_id": "Invoice cannot be copied."},
+                    status=409,
+                )
         generated_document = None
         try:
             with transaction.atomic():
@@ -233,12 +252,24 @@ class InvoiceListCreateView(APIView):
             )
         except InvoicePdfRenderError as exc:
             return Response({"detail": str(exc)}, status=400)
-        if generated_document is not None:
+        if generated_document is not None and not copy_source:
             _record_document_audit(
                 request,
                 invoice,
                 generated_document,
                 "generate",
+            )
+        if copy_source:
+            record_audit_event(
+                request=request,
+                module="invoice",
+                action="copy",
+                result=AuditEvent.RESULT_SUCCEEDED,
+                target_type="invoice",
+                target_id=invoice.id,
+                target_label=invoice.invoice_no,
+                event_name="invoice.copied",
+                metadata={"copy_from_id": copy_source.id},
             )
         return Response(InvoiceSerializer(invoice).data, status=201)
 
@@ -295,6 +326,11 @@ class InvoiceDetailView(APIView):
             },
         )
         serializer.is_valid(raise_exception=True)
+        changed_fields = sorted(
+            str(field)
+            for field in request.data
+            if field != "revision_reason"
+        )
         generated_document = None
         try:
             with transaction.atomic():
@@ -336,6 +372,17 @@ class InvoiceDetailView(APIView):
                 "generate",
             )
             invoice = self.get_object(request, invoice.id)
+        record_audit_event(
+            request=request,
+            module="invoice",
+            action="update",
+            result=AuditEvent.RESULT_SUCCEEDED,
+            target_type="invoice",
+            target_id=invoice.id,
+            target_label=invoice.invoice_no,
+            event_name="invoice.updated",
+            changes={"fields": changed_fields},
+        )
         return Response(InvoiceSerializer(invoice).data)
 
     def delete(self, request, invoice_id):

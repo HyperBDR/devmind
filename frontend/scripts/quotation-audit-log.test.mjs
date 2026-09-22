@@ -118,6 +118,9 @@ test('Audit Log uses concise, native English product copy', () => {
   assert.equal(copy.readOnly, 'Read-only activity records')
   assert.equal(copy.actions.generate, 'Generated quote')
   assert.equal(copy.actions.updatedQuote, 'Updated quote')
+  assert.equal(copy.actions.copiedInvoice, 'Copied invoice')
+  assert.equal(copy.actions.createdInvoice, 'Created invoice')
+  assert.equal(copy.actions.updatedInvoice, 'Updated invoice')
   assert.equal(copy.actions.deletedQuote, 'Deleted quote')
   assert.equal(copy.actions.deletedCatalogItem, 'Deleted catalog item')
   assert.equal(copy.actions.archive, 'Archived file')
@@ -133,6 +136,7 @@ test('Audit Log uses concise, native English product copy', () => {
 test('Audit Log only offers approved business action filters', () => {
   for (const action of [
     'create',
+    'copy',
     'update',
     'delete',
     'generate',

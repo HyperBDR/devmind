@@ -30,6 +30,7 @@ export interface AuditEvent {
     created_quotation_count?: number
     updated_quotation_count?: number
     error_count?: number
+    copy_from_id?: string
     folder_count?: number
     folder_names?: string[]
   }
