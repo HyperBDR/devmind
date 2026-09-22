@@ -894,6 +894,36 @@ class TestBillingDataViewSet:
             for entry in response.data["by_provider"].values()
         )
 
+    def test_overview_summary_endpoint(self, api_client, billing_data):
+        """
+        Split overview summary endpoint returns summary and trend ranges.
+        """
+        url = (
+            "/api/v1/cloud-billing/billing-data/overview/summary/"
+            "?timezone=Asia/Shanghai"
+        )
+        response = api_client.get(url)
+
+        assert response.status_code == 200
+        assert "summary" in response.data
+        assert "trend_ranges" in response.data["summary"]
+        assert "exchange_rate" in response.data
+
+    def test_overview_accounts_endpoint(self, api_client, billing_data):
+        """
+        Split overview accounts endpoint returns the account section.
+        """
+        url = (
+            "/api/v1/cloud-billing/billing-data/overview/accounts/"
+            "?timezone=Asia/Shanghai"
+        )
+        response = api_client.get(url)
+
+        assert response.status_code == 200
+        assert "accounts" in response.data
+        assert "financial_health" in response.data
+        assert "currency_breakdown" in response.data
+
 
 @pytest.mark.django_db
 class TestAlertRuleViewSet:

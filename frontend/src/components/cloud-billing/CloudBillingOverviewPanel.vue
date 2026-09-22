@@ -3692,28 +3692,54 @@ async function submitRechargeApprovalFromDialog() {
 async function loadOverview() {
   loading.value = true
   error.value = ''
+  const fallback = createFallbackOverview()
+  const params = { timezone: selectedTimezone.value }
   try {
-    const response = await cloudBillingApi.getOverview({
-      timezone: selectedTimezone.value
-    })
-    const data = extractResponseData(response)
+    const [summaryResult, accountsResult] = await Promise.allSettled([
+      cloudBillingApi.getOverviewSummary(params),
+      cloudBillingApi.getOverviewAccounts(params)
+    ])
+    const summaryData =
+      summaryResult.status === 'fulfilled'
+        ? extractResponseData(summaryResult.value)
+        : null
+    const accountsData =
+      accountsResult.status === 'fulfilled'
+        ? extractResponseData(accountsResult.value)
+        : null
+
+    if (!summaryData && !accountsData) {
+      throw summaryResult.reason || accountsResult.reason || new Error()
+    }
+
     overview.value = {
-      ...createFallbackOverview(),
-      ...data,
+      ...fallback,
+      ...(summaryData || {}),
+      ...(accountsData || {}),
       summary: {
-        ...createFallbackOverview().summary,
-        ...(data?.summary || {})
+        ...fallback.summary,
+        ...(summaryData?.summary || {})
       },
       financial_health: {
-        ...createFallbackOverview().financial_health,
-        ...(data?.financial_health || {})
+        ...fallback.financial_health,
+        ...(accountsData?.financial_health || {})
       },
       currency_breakdown:
-        data?.currency_breakdown || createFallbackOverview().currency_breakdown,
-      accounts: data?.accounts || createFallbackOverview().accounts
+        accountsData?.currency_breakdown || fallback.currency_breakdown,
+      accounts: accountsData?.accounts || fallback.accounts
+    }
+
+    const failure =
+      summaryResult.status === 'rejected'
+        ? summaryResult.reason
+        : accountsResult.status === 'rejected'
+          ? accountsResult.reason
+          : null
+    if (failure) {
+      error.value = extractErrorMessage(failure, t('common.error'))
     }
   } catch (err) {
-    overview.value = createFallbackOverview()
+    overview.value = fallback
     error.value = extractErrorMessage(err, t('common.error'))
   } finally {
     overviewLoaded.value = true

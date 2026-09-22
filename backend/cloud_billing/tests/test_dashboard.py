@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
 from django.test import SimpleTestCase, TestCase
+from django.utils.translation import get_language
 
 from cloud_billing.dashboard import (
     LLM_PROVIDER_TYPES,
@@ -13,10 +14,14 @@ from cloud_billing.dashboard import (
     _build_currency_breakdown,
     _build_exchange_rate_info,
     _build_financial_health,
+    _dashboard_cache_key,
     _latest_billings,
     _recent_spend_from_snapshots,
     _payment_type_for_provider,
+    _resolve_dashboard_timezone,
     _build_trend_ranges,
+    build_dashboard_accounts,
+    build_dashboard_summary,
 )
 from cloud_billing.models import BillingData, CloudProvider
 
@@ -64,6 +69,124 @@ class LatestBillingsTests(TestCase):
         )
 
         self.assertEqual(_latest_billings(), [default_account])
+
+
+class LatestBillingsOrderingTests(TestCase):
+    def setUp(self):
+        self.provider = CloudProvider.objects.create(
+            name='aws-ordering',
+            provider_type='aws',
+            display_name='AWS Ordering',
+            config={},
+        )
+
+    def test_returns_latest_row_per_account(self):
+        BillingData.objects.create(
+            provider=self.provider,
+            period='2026-07',
+            day=datetime(2026, 7, 19).date(),
+            hour=9,
+            total_cost=Decimal('50.00'),
+            currency='CNY',
+            account_id='967',
+        )
+        newest = BillingData.objects.create(
+            provider=self.provider,
+            period='2026-07',
+            day=datetime(2026, 7, 20).date(),
+            hour=9,
+            total_cost=Decimal('100.00'),
+            currency='CNY',
+            account_id='967',
+        )
+
+        self.assertEqual(_latest_billings(), [newest])
+
+    def test_keeps_one_row_per_account(self):
+        first = BillingData.objects.create(
+            provider=self.provider,
+            period='2026-07',
+            day=datetime(2026, 7, 20).date(),
+            hour=8,
+            total_cost=Decimal('10.00'),
+            currency='CNY',
+            account_id='aaa',
+        )
+        second = BillingData.objects.create(
+            provider=self.provider,
+            period='2026-07',
+            day=datetime(2026, 7, 20).date(),
+            hour=8,
+            total_cost=Decimal('20.00'),
+            currency='CNY',
+            account_id='bbb',
+        )
+
+        self.assertEqual(_latest_billings(), [first, second])
+
+
+class DashboardSectionCacheTests(TestCase):
+    def test_summary_uses_cached_payload(self):
+        cached = {'summary': {'trend_ranges': {}}, 'timezone': 'UTC'}
+        with patch(
+            'cloud_billing.dashboard._cache_get_safely',
+            return_value=cached,
+        ):
+            self.assertIs(build_dashboard_summary('UTC'), cached)
+
+    def test_accounts_uses_cached_payload(self):
+        cached = {'accounts': [], 'financial_health': {}, 'timezone': 'UTC'}
+        with patch(
+            'cloud_billing.dashboard._cache_get_safely',
+            return_value=cached,
+        ):
+            self.assertIs(build_dashboard_accounts('UTC'), cached)
+
+    @patch('cloud_billing.dashboard._cache_set_safely')
+    @patch('cloud_billing.dashboard._cache_get_safely', return_value=None)
+    def test_summary_payload_is_cached(self, mock_get, mock_set):
+        build_dashboard_summary('UTC')
+
+        self.assertEqual(
+            mock_set.call_args[0][0],
+            _dashboard_cache_key(
+                'summary',
+                _resolve_dashboard_timezone('UTC'),
+                get_language(),
+            ),
+        )
+
+    @patch('cloud_billing.dashboard._cache_set_safely')
+    @patch('cloud_billing.dashboard._cache_get_safely', return_value=None)
+    def test_accounts_payload_is_cached(self, mock_get, mock_set):
+        build_dashboard_accounts('UTC')
+
+        self.assertEqual(
+            mock_set.call_args[0][0],
+            _dashboard_cache_key(
+                'accounts',
+                _resolve_dashboard_timezone('UTC'),
+                get_language(),
+            ),
+        )
+
+    def test_cache_key_varies_by_language(self):
+        local_tz = _resolve_dashboard_timezone('UTC')
+
+        self.assertNotEqual(
+            _dashboard_cache_key('summary', local_tz, 'en'),
+            _dashboard_cache_key('summary', local_tz, 'zh-hans'),
+        )
+
+    def test_cache_key_normalizes_invalid_timezone(self):
+        self.assertEqual(
+            _dashboard_cache_key(
+                'summary', _resolve_dashboard_timezone(None), 'en'
+            ),
+            _dashboard_cache_key(
+                'summary', _resolve_dashboard_timezone('Not/AZone'), 'en'
+            ),
+        )
 
 
 class ExchangeRateInfoTests(SimpleTestCase):
@@ -398,6 +521,68 @@ class AccountFundsTests(SimpleTestCase):
         self.assertIsNone(account['days_remaining'])
         self.assertFalse(account['has_days_remaining_reference'])
         self.assertFalse(account['is_data_stale'])
+
+    @patch('cloud_billing.dashboard.get_balance_support_info')
+    def test_overdrawn_prepaid_account_reports_zero_days(
+        self,
+        mock_balance_support,
+    ):
+        """Known prepaid debt must not show an optimistic day estimate."""
+        mock_balance_support.return_value = {'supported': True}
+        now = datetime(2026, 3, 20, 0, 0, tzinfo=dt_timezone.utc)
+        provider = SimpleNamespace(
+            id=40,
+            provider_type='huawei',
+            display_name='华为云',
+            tags=[],
+            notes='',
+            config={},
+            balance=Decimal('0.00'),
+            balance_currency='CNY',
+            last_collection_status='success',
+            last_collection_attempt_at=now,
+            consecutive_collection_failures=0,
+        )
+        latest_billings = [
+            SimpleNamespace(
+                provider=provider,
+                account_id='Onepro-test',
+                total_cost=Decimal('0.00'),
+                balance=Decimal('0.00'),
+                is_available=True,
+                currency='CNY',
+                service_costs={},
+                collected_at=now,
+            )
+        ]
+        recent_rows = [
+            SimpleNamespace(
+                provider_id=40,
+                account_id='Onepro-test',
+                day=datetime(2026, 3, 1 + index).date(),
+                period='2026-03',
+                hour=8,
+                collected_at=datetime(
+                    2026, 3, 1 + index, 8, 0, tzinfo=dt_timezone.utc
+                ),
+                hourly_cost=Decimal('10.00'),
+                total_cost=Decimal(str(10 * (index + 1))),
+            )
+            for index in range(7)
+        ]
+
+        accounts = _build_accounts(
+            latest_billings,
+            recent_rows,
+            recent_rows=recent_rows,
+            local_tz=dt_timezone.utc,
+            now=now,
+        )
+
+        account = accounts[0]
+        self.assertTrue(account['has_days_remaining_reference'])
+        self.assertEqual(account['days_remaining'], 0)
+        self.assertEqual(account['risk'], 'high')
 
     @patch('cloud_billing.dashboard.get_balance_support_info')
     def test_repeated_collection_failure_marks_account_data_stale(
