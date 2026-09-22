@@ -133,7 +133,7 @@ def _pdf_items(layout: str) -> list[ParsedQuotationItem]:
             last_item is not None
             and re.match(r"^\d+\s+", stripped)
             and not re.search(
-                r"(?:MYR|HK\$|RM|USD|HKD|CNY|RMB|EUR|GBP|[$¥￥€£])",
+                r"(?:MYR|US\$|HK\$|RM|USD|HKD|CNY|RMB|EUR|GBP|[$¥￥€£])",
                 stripped,
                 re.IGNORECASE,
             )
@@ -142,7 +142,7 @@ def _pdf_items(layout: str) -> list[ParsedQuotationItem]:
             continue
         marker_count = len(
             re.findall(
-                r"(?:MYR|HK\$|RM|USD|HKD|CNY|RMB|EUR|GBP|[$¥￥€£])",
+                r"(?:MYR|US\$|HK\$|RM|USD|HKD|CNY|RMB|EUR|GBP|[$¥￥€£])",
                 stripped,
                 re.I,
             )

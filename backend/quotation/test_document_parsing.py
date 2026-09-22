@@ -1711,6 +1711,19 @@ class StandardQuotationPdfParserTests(TestCase):
         )
         self.assertEqual(str(items[0].extended_price), "1785.0")
 
+    def test_flexible_pdf_parser_keeps_us_dollar_rows(self):
+        from quotation.services.document_parsing.flexible_parser import (
+            _pdf_items,
+        )
+
+        items = _pdf_items(
+            "1 HyperMotion License 22 US$ 105.0 0% US$ 105.0 US$ 2,310.0"
+        )
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].description, "HyperMotion License")
+        self.assertEqual(items[0].extended_price, Decimal("2310.0"))
+
     def test_flexible_pdf_parser_keeps_split_rows_separate(self):
         from quotation.services.document_parsing.flexible_parser import (
             _pdf_items,
