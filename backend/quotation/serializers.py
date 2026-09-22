@@ -433,6 +433,21 @@ class QuotationItemWriteSerializer(serializers.Serializer):
         list_price = attrs.get("list_price", Decimal("0"))
         discount = attrs.get("discount_percent", Decimal("0"))
         qty = attrs.get("qty", Decimal("1"))
+        if self.context.get("document_import") and {
+            "net_unit_price",
+            "extended_price",
+        }.issubset(attrs):
+            extended_price = attrs["extended_price"]
+            if extended_price > MAX_QUOTATION_AMOUNT:
+                raise serializers.ValidationError(
+                    {
+                        "extended_price": (
+                            "Ensure this value is less than or equal to "
+                            f"{MAX_QUOTATION_AMOUNT}."
+                        )
+                    }
+                )
+            return attrs
         net_unit_price = (
             list_price * (Decimal("1") - discount / Decimal("100"))
         ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -914,6 +929,7 @@ class QuotationCreateSerializer(serializers.Serializer):
         max_length=Quotation._meta.get_field("product_line_name").max_length,
     )
     project_name = serializers.CharField(
+        allow_blank=True,
         max_length=Quotation._meta.get_field("project_name").max_length,
     )
     currency = serializers.ChoiceField(
@@ -927,10 +943,11 @@ class QuotationCreateSerializer(serializers.Serializer):
         default="CIA",
     )
     payment_terms = serializers.CharField(
+        allow_blank=True,
         max_length=Quotation._meta.get_field("payment_terms").max_length,
     )
-    quote_date = serializers.DateField()
-    expire_date = serializers.DateField()
+    quote_date = serializers.DateField(required=False, allow_null=True)
+    expire_date = serializers.DateField(required=False, allow_null=True)
     tax_label = serializers.CharField(
         required=False,
         default="VAT",
@@ -1010,6 +1027,7 @@ class QuotationCreateSerializer(serializers.Serializer):
         max_length=settings.QUOTATION_MAX_SIGNATURE_LENGTH,
     )
     client_company = serializers.CharField(
+        allow_blank=True,
         max_length=Quotation._meta.get_field("client_company").max_length,
     )
     contact_person = serializers.CharField(
@@ -1046,12 +1064,11 @@ class QuotationCreateSerializer(serializers.Serializer):
     items = QuotationItemWriteSerializer(many=True, required=False)
 
     def validate(self, attrs):
-        if self.context.get("document_import") and not attrs.get("quote_no"):
-            raise serializers.ValidationError(
-                {"quote_no": "This field is required for document imports."}
-            )
         if not self.context.get("document_import"):
             for field in (
+                "project_name",
+                "client_company",
+                "payment_terms",
                 "contact_person",
                 "email",
                 "issuer_contact_name",
@@ -1061,7 +1078,11 @@ class QuotationCreateSerializer(serializers.Serializer):
                     raise serializers.ValidationError(
                         {field: "This field may not be blank."}
                     )
-        if attrs["expire_date"] < attrs["quote_date"]:
+        if (
+            attrs.get("quote_date")
+            and attrs.get("expire_date")
+            and attrs["expire_date"] < attrs["quote_date"]
+        ):
             raise serializers.ValidationError(
                 {"expire_date": "Expiry date cannot be before quote date."}
             )

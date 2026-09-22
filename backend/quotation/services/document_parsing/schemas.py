@@ -31,6 +31,8 @@ class ParsedQuotation(BaseModel):
     expire_date: date | None = None
     tax_label: str = "VAT"
     vat_rate: Decimal = Decimal("0")
+    tax_calculation_mode: str = "add"
+    deduction_amount: Decimal = Decimal("0")
     remarks_disclaimer: str = ""
     issuer_company_name: str = "OnePro Cloud Limited"
     issuer_contact_name: str = ""

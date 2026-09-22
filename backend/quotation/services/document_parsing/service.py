@@ -60,6 +60,14 @@ def _file_hash(path) -> str:
     return hash_file(path)
 
 
+def _has_optional_item(items) -> bool:
+    """Allow source totals that explicitly exclude optional line items."""
+    return any(
+        "optional" in str(item.description or "").casefold()
+        for item in items
+    )
+
+
 def _parser_for_asset(asset: DocumentAsset):
     file_name = asset.file_name.lower()
     doc_type = str(asset.doc_type or "").lower()
@@ -168,13 +176,18 @@ def parse_document_asset(
             status = DocumentParseStatus.NOT_QUOTATION
         elif (
             not parsed.quotation.items
-            or parsed.field_confidence.get("items") == 0
             or any(
                 error.get("field") == "items"
                 and error.get("code") == "required"
                 for error in parsed.validation_errors
                 if isinstance(error, dict)
             )
+            or any(
+                error.get("code") == "amount_mismatch"
+                for error in parsed.validation_errors
+                if isinstance(error, dict)
+            )
+            and not _has_optional_item(parsed.quotation.items)
         ):
             status = DocumentParseStatus.REVIEW_REQUIRED
         else:
@@ -459,6 +472,8 @@ def update_imported_quotation_from_parse(
             "expire_date",
             "tax_label",
             "vat_rate",
+            "tax_calculation_mode",
+            "deduction_amount",
             "remarks_disclaimer",
             "issuer_company_name",
             "issuer_contact_name",

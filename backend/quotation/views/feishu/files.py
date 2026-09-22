@@ -1273,6 +1273,9 @@ class FeishuLoginSyncView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        from quotation.tasks import reparse_user_documents_after_login
+
+        reparse_user_documents_after_login.delay(request.user.id)
         job, reused = enqueue_feishu_sync(
             actor=request.user,
             trigger="login",

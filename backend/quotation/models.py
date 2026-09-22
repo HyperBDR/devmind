@@ -527,8 +527,8 @@ class Quotation(TimeStampedModel):
     currency = models.CharField(max_length=10, default="USD")
     payment_term_option = models.CharField(max_length=40, default="CIA")
     payment_terms = models.CharField(max_length=255, blank=True, default="")
-    quote_date = models.DateField()
-    expire_date = models.DateField()
+    quote_date = models.DateField(null=True, blank=True)
+    expire_date = models.DateField(null=True, blank=True)
     tax_label = models.CharField(max_length=40, default="VAT")
     tax_calculation_mode = models.CharField(
         max_length=10,

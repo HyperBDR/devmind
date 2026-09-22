@@ -464,6 +464,10 @@ def complete_document_parse(
     extract_content: bool = True,
 ) -> ParsedDocumentData:
     """Complete partial template extraction with deterministic fallbacks."""
+    if "quotation template" in asset.file_name.casefold():
+        return _not_quotation_result(parsed or ParsedDocumentData(
+            quotation=ParsedQuotation()
+        ))
     if parsed is None:
         parsed = ParsedDocumentData(
             quotation=ParsedQuotation(),
@@ -620,7 +624,11 @@ def complete_document_parse(
     source_vat = Decimal(
         source_totals.get("vat_amount", "0") or "0"
     )
-    computed_grand = subtotal + source_vat
+    computed_grand = (
+        subtotal - source_vat
+        if quote.tax_calculation_mode == "subtract"
+        else subtotal + source_vat
+    ) - quote.deduction_amount
     source_totals.update(
         {
             "subtotal_before_vat": str(source_subtotal),

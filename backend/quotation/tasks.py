@@ -26,12 +26,53 @@ from quotation.models import (
 )
 from quotation.services.document_parsing.service import (
     parse_and_create_quotation,
+    parser_version_for_asset,
 )
 from quotation.services.feishu_sync import enqueue_feishu_sync
 
 logger = logging.getLogger(__name__)
 
 FEISHU_SYNC_LOCK_KEY = "quotation:feishu:archive-folder-sync"
+
+
+@shared_task(name="quotation.tasks.reparse_user_documents_after_login")
+def reparse_user_documents_after_login(user_id: int):
+    """Queue one parser-version upgrade pass after user login."""
+    from django.contrib.auth import get_user_model
+
+    user = get_user_model().objects.filter(pk=user_id).only("email").first()
+    if user is None or not user.email:
+        return {"queued": 0}
+    assets = list(
+        DocumentAsset.objects.filter(
+            source__in=("feishu", "feishu_upload"),
+            created_by_email__iexact=user.email,
+        )
+        .exclude(file_name__startswith="~$")
+        .prefetch_related("parse_results")
+    )
+    version_key = ",".join(
+        sorted({parser_version_for_asset(asset) for asset in assets})
+    )
+    if not cache.add(
+        f"quotation:login-reparse:{user_id}:{version_key}",
+        True,
+        timeout=3600,
+    ):
+        return {"queued": 0, "deduplicated": True}
+    queued = 0
+    for asset in assets:
+        version = parser_version_for_asset(asset)
+        latest = max(
+            asset.parse_results.all(),
+            key=lambda result: (result.created_at, result.id),
+            default=None,
+        )
+        if latest and latest.parser_version == version:
+            continue
+        parse_document_task.delay(asset.id, user_id)
+        queued += 1
+    return {"queued": queued}
 
 
 @shared_task(
