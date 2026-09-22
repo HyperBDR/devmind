@@ -152,6 +152,30 @@ class InvoiceApiTests(TestCase):
         self.assertEqual(event.target_id, created.data["id"])
         self.assertEqual(event.changes["fields"], ["customer_name"])
 
+    def test_invoice_noop_update_does_not_record_changed_fields(self):
+        created = self.client.post(
+            "/api/v1/invoice/invoices",
+            {
+                "invoice_date": date(2026, 9, 4).isoformat(),
+                "numbering_mode": "auto",
+                "product_line": "BDR",
+                "customer_name": "Unchanged",
+                "currency": "USD",
+            },
+            format="json",
+        )
+
+        response = self.client.patch(
+            f"/api/v1/invoice/invoices/{created.data['id']}",
+            {"customer_name": "Unchanged"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(
+            AuditEvent.objects.filter(event_name="invoice.updated").exists()
+        )
+
     def test_invoice_copy_records_source_and_each_successful_save(self):
         source = self.client.post(
             "/api/v1/invoice/invoices",

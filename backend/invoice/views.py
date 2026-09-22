@@ -73,6 +73,20 @@ def _record_document_audit(request, invoice, document, action):
     )
 
 
+def _invoice_items_snapshot(invoice):
+    return tuple(
+        (
+            item.line_no,
+            item.product_code,
+            item.product_name,
+            item.description,
+            item.quantity,
+            item.unit_price,
+        )
+        for item in invoice.items.all().order_by("line_no", "id")
+    )
+
+
 def _require_capability(request, capability: str, message: str) -> None:
     if not has_invoice_capability(request.user, capability):
         raise PermissionDenied(message)
@@ -326,7 +340,7 @@ class InvoiceDetailView(APIView):
             },
         )
         serializer.is_valid(raise_exception=True)
-        changed_fields = sorted(
+        requested_fields = sorted(
             str(field)
             for field in request.data
             if field != "revision_reason"
@@ -337,6 +351,16 @@ class InvoiceDetailView(APIView):
                 invoice = Invoice.objects.select_for_update().prefetch_related(
                     "items", "documents"
                 ).get(pk=invoice.id)
+                before_values = {
+                    field: getattr(invoice, field)
+                    for field in requested_fields
+                    if field != "items"
+                }
+                before_items = (
+                    _invoice_items_snapshot(invoice)
+                    if "items" in requested_fields
+                    else None
+                )
                 if formal_revision:
                     record_invoice_revision(
                         invoice,
@@ -345,6 +369,15 @@ class InvoiceDetailView(APIView):
                     )
                     serializer.instance = invoice
                 invoice = serializer.save()
+                changed_fields = [
+                    field
+                    for field in requested_fields
+                    if (
+                        _invoice_items_snapshot(invoice) != before_items
+                        if field == "items"
+                        else getattr(invoice, field) != before_values[field]
+                    )
+                ]
                 if (
                     invoice.status
                     in {InvoiceStatus.ISSUED, InvoiceStatus.PAID}
@@ -372,17 +405,18 @@ class InvoiceDetailView(APIView):
                 "generate",
             )
             invoice = self.get_object(request, invoice.id)
-        record_audit_event(
-            request=request,
-            module="invoice",
-            action="update",
-            result=AuditEvent.RESULT_SUCCEEDED,
-            target_type="invoice",
-            target_id=invoice.id,
-            target_label=invoice.invoice_no,
-            event_name="invoice.updated",
-            changes={"fields": changed_fields},
-        )
+        if changed_fields:
+            record_audit_event(
+                request=request,
+                module="invoice",
+                action="update",
+                result=AuditEvent.RESULT_SUCCEEDED,
+                target_type="invoice",
+                target_id=invoice.id,
+                target_label=invoice.invoice_no,
+                event_name="invoice.updated",
+                changes={"fields": changed_fields},
+            )
         return Response(InvoiceSerializer(invoice).data)
 
     def delete(self, request, invoice_id):
