@@ -138,10 +138,17 @@ class InvoiceSerializer(serializers.ModelSerializer):
         allow_blank=True,
         max_length=settings.INVOICE_MAX_SIGNATURE_LENGTH,
     )
+    copy_from_id = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        write_only=True,
+        max_length=36,
+    )
 
     class Meta:
         model = Invoice
         fields = [
+            "copy_from_id",
             "id",
             "invoice_no",
             "revision_no",

@@ -97,6 +97,51 @@ class QuotationAuditEventTests(TestCase):
         )
         self.assertEqual(AuditEvent.objects.count(), 2)
 
+    def test_quotation_copy_create_records_source(self):
+        source = self.api.post(
+            "/api/v1/quotation/quotations",
+            {
+                "project_name": "Copy source",
+                "payment_terms": "CIA",
+                "quote_date": "2026-09-04",
+                "expire_date": "2026-10-04",
+                "issuer_contact_name": "Audit User",
+                "issuer_contact_email": self.user.email,
+                "client_company": "Example",
+                "contact_person": "Customer",
+                "email": "customer@example.com",
+                "items": [],
+            },
+            format="json",
+        )
+        self.assertEqual(source.status_code, 201)
+
+        copied = self.api.post(
+            "/api/v1/quotation/quotations",
+            {
+                "project_name": "Copied quote",
+                "payment_terms": "CIA",
+                "quote_date": "2026-09-05",
+                "expire_date": "2026-10-05",
+                "issuer_contact_name": "Audit User",
+                "issuer_contact_email": self.user.email,
+                "client_company": "Example",
+                "contact_person": "Customer",
+                "email": "customer@example.com",
+                "items": [],
+                "copy_from_id": source.data["id"],
+            },
+            format="json",
+        )
+
+        self.assertEqual(copied.status_code, 201)
+        event = AuditEvent.objects.get(event_name="quotation.copied")
+        self.assertEqual(event.target_id, copied.data["id"])
+        self.assertEqual(
+            event.metadata["copy_from_id"],
+            source.data["id"],
+        )
+
     def test_automatic_description_catalog_creates_are_not_audited(self):
         payload = {
             "version": "audit-test",
@@ -206,7 +251,7 @@ class QuotationAuditEventTests(TestCase):
             (
                 "POST",
                 "/api/v1/quotation/quotations",
-                ("quotation", "create", "quotation"),
+                None,
             ),
             (
                 "PUT",

@@ -736,11 +736,15 @@ export async function getQuotationFormContext(
   };
 }
 
-export async function createQuotation(quote: Quotation): Promise<Quotation> {
+export async function createQuotation(
+  quote: Quotation,
+  copyFromId?: string,
+): Promise<Quotation> {
   const created = await apiRequest<ApiQuotation>('/quotations', {
     method: 'POST',
     body: JSON.stringify({
       ...mapQuotationToCreatePayload(quote),
+      ...(copyFromId ? { copy_from_id: copyFromId } : {}),
     }),
   });
   return mapApiQuotation(created);

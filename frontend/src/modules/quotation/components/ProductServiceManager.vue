@@ -376,9 +376,11 @@ watch(
             <FileText class="h-4 w-4 text-dm-text-tertiary" />
             <span class="min-w-0 flex-1 truncate">{{ t('quotation.pages.catalog.attachmentLibrary') }}</span>
           </button>
-          <button type="button" class="catalog-tree-item" :class="subTab === 'attachments' ? 'catalog-tree-item-active' : ''" @click="setSubTab('attachments')">
-            <span class="min-w-0 flex-1 truncate">{{ t('quotation.pages.catalog.publicAttachments') }}</span>
-          </button>
+          <div class="ml-4 border-l border-dm-border-light pl-2">
+            <button type="button" class="catalog-tree-item" :class="subTab === 'attachments' ? 'catalog-tree-item-active' : ''" @click="setSubTab('attachments')">
+              <span class="min-w-0 flex-1 truncate">{{ t('quotation.pages.catalog.publicAttachments') }}</span>
+            </button>
+          </div>
         </div>
 
       </aside>

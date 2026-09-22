@@ -1011,6 +1011,11 @@
         },
         "actions": {
           "create": "创建报价单",
+          "copiedQuote": "复制报价单",
+          "copiedInvoice": "复制发票",
+          "createdInvoice": "创建发票",
+          "updatedInvoice": "修改发票",
+          "copy": "复制记录",
           "update": "更新记录",
           "updatedQuote": "修改报价单",
           "addedCatalogItem": "新增目录配置",

@@ -51,6 +51,7 @@ const moduleAliases: Record<string, string> = {
 }
 const actionOptions = [
   'create',
+  'copy',
   'update',
   'delete',
   'generate',
@@ -191,8 +192,14 @@ function actionLabel(value: string, module = '') {
   if (value === 'update' && moduleKey === 'quotation') {
     return t('quotation.pages.audit.actions.updatedQuote')
   }
+  if (value === 'copy' && moduleKey === 'quotation') {
+    return t('quotation.pages.audit.actions.copiedQuote')
+  }
   if (moduleKey === 'invoice') {
     const invoiceActions: Record<string, string> = {
+      copy: 'copiedInvoice',
+      create: 'createdInvoice',
+      update: 'updatedInvoice',
       generate: 'generatedInvoice',
       download: 'downloadedInvoice',
     }
@@ -221,6 +228,7 @@ function eventNameLabel(eventName: string) {
   const rawAction = parts[parts.length - 1] || module
   const actionAliases: Record<string, string> = {
     created: 'create',
+    copied: 'copy',
     updated: 'update',
     deleted: 'delete',
     generated: 'generate',

@@ -75,6 +75,7 @@ ALLOWED_METADATA_KEYS = {
     "catalog_item_type",
     "created_count",
     "created_quotation_count",
+    "copy_from_id",
     "duration_ms",
     "error_count",
     "fields",
@@ -133,6 +134,9 @@ EVENT_NAMES = {
         "permissions.view_expiry_changed"
     ),
     ("permissions", "revoke_view"): "permissions.view_revoked",
+    ("invoice", "create"): "invoice.created",
+    ("invoice", "copy"): "invoice.copied",
+    ("invoice", "update"): "invoice.updated",
 }
 
 BUSINESS_AUDIT_OPERATIONS = frozenset(
@@ -147,6 +151,9 @@ BUSINESS_AUDIT_OPERATIONS = frozenset(
         ("document", "upload"),
         ("feishu", "import"),
         ("feishu", "upload"),
+        ("invoice", "copy"),
+        ("invoice", "create"),
+        ("invoice", "update"),
         ("quotation", "create"),
         ("quotation", "copy"),
         ("quotation", "delete"),
@@ -170,6 +177,9 @@ BUSINESS_AUDIT_EVENT_NAMES = frozenset(
         "invoice.generated",
         "invoice.uploaded_to_feishu",
         "invoice.deleted",
+        "invoice.created",
+        "invoice.updated",
+        "invoice.copied",
         "quotation.created",
         "quotation.copied",
         "quotation.deleted",
