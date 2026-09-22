@@ -1,3 +1,5 @@
+import { quoteDeskErrorMessage } from '@/utils/quoteDeskErrors'
+
 const TOKEN_KEY = 'access_token'
 const LEGACY_TOKEN_KEY = 'qmp_access_token'
 const REFRESH_TOKEN_KEY = 'refresh_token'
@@ -183,7 +185,9 @@ export async function apiRequest<T>(
 
   if (!response.ok) {
     const fallback = `Request failed (${response.status})`
-    throw new ApiError(extractDetail(payload, fallback), response.status, unwrapResponse(payload))
+    const detail = extractDetail(payload, fallback)
+    const friendly = quoteDeskErrorMessage(response.status, path, detail)
+    throw new ApiError(friendly || detail, response.status, unwrapResponse(payload))
   }
 
   return unwrapResponse<T>(payload)

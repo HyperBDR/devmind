@@ -175,13 +175,21 @@ const routes = [
     path: '/quotation/sales/dashboard',
     name: 'QuoteDeskSalesDashboard',
     component: () => import('@/pages/QuotationSales.vue'),
-    meta: { requiresAuth: true, requiredFeature: 'sales_management' }
+    meta: {
+      requiresAuth: true,
+      requiredFeature: 'sales_management',
+      requiredInvoiceCapability: 'view'
+    }
   },
   {
     path: '/quotation/sales/invoices',
     name: 'QuoteDeskInvoiceList',
     component: () => import('@/pages/QuotationSales.vue'),
-    meta: { requiresAuth: true, requiredFeature: 'sales_management' }
+    meta: {
+      requiresAuth: true,
+      requiredFeature: 'sales_management',
+      requiredInvoiceCapability: 'view'
+    }
   },
   {
     path: '/quotation/sales/invoices/:invoiceId/edit',
@@ -197,7 +205,11 @@ const routes = [
     path: '/quotation/sales/invoices/:invoiceId',
     name: 'QuoteDeskInvoiceDetail',
     component: () => import('@/pages/QuotationSales.vue'),
-    meta: { requiresAuth: true, requiredFeature: 'sales_management' }
+    meta: {
+      requiresAuth: true,
+      requiredFeature: 'sales_management',
+      requiredInvoiceCapability: 'view'
+    }
   },
   {
     path: '/quotation/sales/create',
@@ -513,7 +525,7 @@ router.beforeEach(async (to, from, next) => {
         to.meta.requiredInvoiceCapability
       )
     ) {
-      next('/quotation/sales/invoices')
+      next(getLandingPath(userStore.userInfo))
       return
     }
 
