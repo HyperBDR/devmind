@@ -1,6 +1,11 @@
 import axios from 'axios'
 import apiConfig from '@/config/api'
 import { shouldKeepAuthStateOnError } from '@/api/authErrors'
+import {
+  extractQuoteDeskErrorDetail,
+  isQuoteDeskPath,
+  quoteDeskErrorMessage,
+} from '@/utils/quoteDeskErrors'
 
 function getCookie(name) {
   const value = `; ${document.cookie}`
@@ -76,6 +81,16 @@ api.interceptors.response.use(
   },
   async (error) => {
     const originalRequest = error.config
+
+    if (error.response && isQuoteDeskPath(originalRequest?.url)) {
+      const detail = extractQuoteDeskErrorDetail(error.response.data)
+      const friendly = quoteDeskErrorMessage(
+        error.response.status,
+        originalRequest.url,
+        detail,
+      )
+      if (friendly) error.message = friendly
+    }
 
     // Handle 401 Unauthorized errors
     if (error.response?.status === 401 && !originalRequest._retry) {
