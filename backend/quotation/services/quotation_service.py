@@ -55,6 +55,7 @@ QUOTATION_ITEM_BUSINESS_FIELDS = (
     "line_no",
     "type",
     "item_id",
+    "currency",
     "name",
     "description",
     "qty",

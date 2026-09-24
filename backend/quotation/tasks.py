@@ -16,6 +16,7 @@ from quotation.metrics import record_export_operation, record_storage_operation
 from quotation.models import (
     DocumentAsset,
     DocumentParseStatus,
+    DocumentType,
     FeishuSyncState,
     FeishuSyncStatus,
     RemoteFileCleanup,
