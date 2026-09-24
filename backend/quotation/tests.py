@@ -525,6 +525,43 @@ class QuotationVersionHistoryTests(TestCase):
         assert response.status_code == 200, response.data
         assert response.data["quote_no"] == "BDR150726_R4"
 
+    def test_line_item_currency_change_creates_revision(self):
+        quotation = build_quotation(
+            data=self._base_quote_data("BDR150726"),
+            items_data=[
+                {
+                    "line_no": 1,
+                    "type": "Software",
+                    "item_id": "SKU-1",
+                    "currency": "USD",
+                    "name": "First",
+                    "description": "First item",
+                    "qty": Decimal("1"),
+                    "list_price": Decimal("100"),
+                    "discount_percent": Decimal("0"),
+                    "net_unit_price": Decimal("100"),
+                    "extended_price": Decimal("100"),
+                }
+            ],
+        )
+        generated = self._generate(quotation)
+        api = generated["api"]
+
+        quotation.refresh_from_db()
+        changed = self._update_payload(quotation)
+        changed["items"][0]["currency"] = "EUR"
+        response = api.put(
+            f"/api/v1/quotation/quotations/{quotation.id}",
+            changed,
+            format="json",
+        )
+
+        assert response.status_code == 200, response.data
+        assert response.data["quote_no"] == "BDR150726_R1"
+        assert response.data["versions"][-1]["snapshot"]["items"][0][
+            "currency"
+        ] == "EUR"
+
     def test_custom_and_existing_revision_numbers_keep_their_root(self):
         custom = build_quotation(
             data=self._base_quote_data("CUSTOM-2026"),

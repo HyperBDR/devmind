@@ -1,6 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from decimal import Decimal
+from threading import Barrier, Lock
 from unittest import skipUnless
 from unittest.mock import patch
 
@@ -21,6 +22,7 @@ from quotation.services.quotation_service import (
     build_quotation,
     create_version_snapshot,
     formalize_quotation,
+    get_next_auto_quote_number,
     update_quotation,
 )
 
@@ -892,6 +894,76 @@ class QuotationConcurrencyTests(TransactionTestCase):
             (201, "BDR150726"),
             (201, "BDR150726.1"),
         ]
+
+    @skipUnless(
+        connection.vendor == "postgresql",
+        "formal quotation allocation requires PostgreSQL",
+    )
+    def test_concurrent_auto_drafts_formalize_with_distinct_numbers(self):
+        user = User.objects.create_user(
+            username="formalize-draft-user",
+            email="formalize-draft@example.com",
+            password="password",
+        )
+        api = APIClient()
+        api.force_authenticate(user=user)
+        draft_ids = []
+        for _ in range(2):
+            payload = quote_payload("ignored-by-auto-numbering")
+            payload["numbering_mode"] = "auto"
+            response = api.post(
+                "/api/v1/quotation/quotations",
+                payload,
+                format="json",
+            )
+            assert response.status_code == 201, response.data
+            draft_ids.append(response.data["id"])
+
+        allocation_barrier = Barrier(2)
+        allocation_lock = Lock()
+        allocation_calls = 0
+
+        def overlap_first_allocations(product_line, quote_date):
+            nonlocal allocation_calls
+            quote_no = get_next_auto_quote_number(
+                product_line,
+                quote_date,
+            )
+            with allocation_lock:
+                allocation_calls += 1
+                wait_for_overlap = allocation_calls <= 2
+            if wait_for_overlap:
+                allocation_barrier.wait(timeout=10)
+            return quote_no
+
+        def formalize_draft(draft_id):
+            close_old_connections()
+            try:
+                thread_api = APIClient()
+                thread_api.force_authenticate(user=user)
+                response = thread_api.post(
+                    f"/api/v1/quotation/quotations/{draft_id}/generate",
+                    {"numbering_mode": "auto"},
+                    format="json",
+                )
+                return response.status_code, response.data
+            finally:
+                close_old_connections()
+
+        with patch(
+            "quotation.services.quotation_service.get_next_auto_quote_number",
+            side_effect=overlap_first_allocations,
+        ):
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                results = list(executor.map(formalize_draft, draft_ids))
+
+        assert all(status == 200 for status, _ in results), results
+        assert sorted(data["quote_no"] for _, data in results) == [
+            "BDR150726",
+            "BDR150726.1",
+        ]
+        assert all(data["status"] == "generated" for _, data in results)
+        assert all(data["version_current"] == 1 for _, data in results)
 
     @skipUnless(
         connection.vendor == "postgresql",

@@ -464,14 +464,12 @@ const trendPeriods = computed(() =>
 const trendSeries = computed(() => {
   const rows = analytics.value?.trends[trendGrain] || []
   return {
-    quote: rows.map((row) => row.quoteAmount),
-    accepted: rows.map((row) => row.wonAmount)
+    quote: rows.map((row) => row.quoteAmount)
   }
 })
 
 const hasTrendData = computed(
   () => trendSeries.value.quote.some((value) => value > 0)
-    || trendSeries.value.accepted.some((value) => value > 0)
 )
 
 const trendLineData = computed<ChartData<'line'>>(() => ({
@@ -487,18 +485,6 @@ const trendLineData = computed<ChartData<'line'>>(() => ({
       pointRadius: 3,
       pointHoverRadius: 5,
       borderWidth: 2
-    },
-    {
-      label: t('quotation.pages.dashboard.chartTrendAccepted'),
-      data: trendSeries.value.accepted,
-      borderColor: '#4f8f88',
-      backgroundColor: '#4f8f88',
-      fill: false,
-      tension: 0,
-      pointRadius: 3,
-      pointHoverRadius: 5,
-      borderWidth: 2,
-      borderDash: [5, 4]
     }
   ]
 }))
