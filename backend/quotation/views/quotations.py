@@ -278,6 +278,7 @@ class QuotationListCreateView(APIView):
         ser.is_valid(raise_exception=True)
         data = ser.validated_data
         copy_from_id = str(data.pop("copy_from_id", "") or "")
+        will_generate = data.pop("will_generate", False)
         copy_source = None
         if copy_from_id:
             copy_source = (
@@ -339,7 +340,22 @@ class QuotationListCreateView(APIView):
                 event_name="quotation.copied",
                 metadata={"copy_from_id": copy_source.id},
             )
-        return Response(QuotationSerializer(quotation).data, status=201)
+        elif not will_generate:
+            record_audit_event(
+                request=request,
+                module="quotation",
+                action="create",
+                result=AuditEvent.RESULT_SUCCEEDED,
+                target_type="quotation",
+                target_id=quotation.id,
+                target_label=quotation_audit_label(quotation),
+            )
+        response = Response(
+            QuotationSerializer(quotation).data,
+            status=status.HTTP_201_CREATED,
+        )
+        response._quotation_audit_handled = True
+        return response
 
 
 class QuotationFormContextView(APIView):

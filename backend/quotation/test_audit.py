@@ -102,6 +102,7 @@ class QuotationAuditEventTests(TestCase):
             "/api/v1/quotation/quotations",
             {
                 "project_name": "Copy source",
+                "numbering_mode": "auto",
                 "payment_terms": "CIA",
                 "quote_date": "2026-09-04",
                 "expire_date": "2026-10-04",
@@ -110,11 +111,29 @@ class QuotationAuditEventTests(TestCase):
                 "client_company": "Example",
                 "contact_person": "Customer",
                 "email": "customer@example.com",
-                "items": [],
+                "items": [
+                    {
+                        "line_no": 1,
+                        "type": "Software",
+                        "name": "Audit test product",
+                        "description": "Annual plan",
+                        "qty": "1.00",
+                        "list_price": "100.00",
+                        "discount_percent": "0.00",
+                    }
+                ],
             },
             format="json",
         )
         self.assertEqual(source.status_code, 201)
+        self.assertEqual(
+            list(
+                AuditEvent.objects.filter(
+                    target_id=source.data["id"],
+                ).values_list("action", flat=True)
+            ),
+            ["create"],
+        )
 
         copied = self.api.post(
             "/api/v1/quotation/quotations",
@@ -135,11 +154,139 @@ class QuotationAuditEventTests(TestCase):
         )
 
         self.assertEqual(copied.status_code, 201)
+        self.assertEqual(
+            AuditEvent.objects.filter(target_id=copied.data["id"]).count(),
+            1,
+        )
         event = AuditEvent.objects.get(event_name="quotation.copied")
         self.assertEqual(event.target_id, copied.data["id"])
         self.assertEqual(
             event.metadata["copy_from_id"],
             source.data["id"],
+        )
+
+    def test_generated_copy_is_recorded_once_after_save(self):
+        source = self.api.post(
+            "/api/v1/quotation/quotations",
+            {
+                "project_name": "Copy source",
+                "payment_terms": "CIA",
+                "quote_date": "2026-09-04",
+                "expire_date": "2026-10-04",
+                "issuer_contact_name": "Audit User",
+                "issuer_contact_email": self.user.email,
+                "client_company": "Example",
+                "contact_person": "Customer",
+                "email": "customer@example.com",
+                "items": [
+                    {
+                        "line_no": 1,
+                        "type": "Software",
+                        "name": "Audit test product",
+                        "description": "Annual plan",
+                        "qty": "1.00",
+                        "list_price": "100.00",
+                        "discount_percent": "0.00",
+                    }
+                ],
+            },
+            format="json",
+        )
+        copied = self.api.post(
+            "/api/v1/quotation/quotations",
+            {
+                "project_name": "Generated copy",
+                "numbering_mode": "auto",
+                "payment_terms": "CIA",
+                "quote_date": "2026-09-05",
+                "expire_date": "2026-10-05",
+                "issuer_contact_name": "Audit User",
+                "issuer_contact_email": self.user.email,
+                "client_company": "Example",
+                "contact_person": "Customer",
+                "email": "customer@example.com",
+                "items": [
+                    {
+                        "line_no": 1,
+                        "type": "Software",
+                        "name": "Audit test product",
+                        "description": "Annual plan",
+                        "qty": "1.00",
+                        "list_price": "100.00",
+                        "discount_percent": "0.00",
+                    }
+                ],
+                "copy_from_id": source.data["id"],
+                "will_generate": True,
+            },
+            format="json",
+        )
+        self.assertEqual(copied.status_code, 201)
+
+        generated = self.api.post(
+            f"/api/v1/quotation/quotations/{copied.data['id']}/generate",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(generated.status_code, 200)
+        self.assertEqual(
+            list(
+                AuditEvent.objects.filter(
+                    target_id=copied.data["id"],
+                ).values_list("action", flat=True)
+            ),
+            ["copy"],
+        )
+
+    def test_generated_creation_is_recorded_once(self):
+        created = self.api.post(
+            "/api/v1/quotation/quotations",
+            {
+                "project_name": "Generated quote",
+                "numbering_mode": "auto",
+                "payment_terms": "CIA",
+                "quote_date": "2026-09-04",
+                "expire_date": "2026-10-04",
+                "issuer_contact_name": "Audit User",
+                "issuer_contact_email": self.user.email,
+                "client_company": "Example",
+                "contact_person": "Customer",
+                "email": "customer@example.com",
+                "items": [
+                    {
+                        "line_no": 1,
+                        "type": "Software",
+                        "name": "Audit test product",
+                        "description": "Annual plan",
+                        "qty": "1.00",
+                        "list_price": "100.00",
+                        "discount_percent": "0.00",
+                    }
+                ],
+                "will_generate": True,
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201)
+        self.assertFalse(
+            AuditEvent.objects.filter(target_id=created.data["id"]).exists()
+        )
+
+        generated = self.api.post(
+            f"/api/v1/quotation/quotations/{created.data['id']}/generate",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(generated.status_code, 200)
+        self.assertEqual(
+            list(
+                AuditEvent.objects.filter(
+                    target_id=created.data["id"],
+                ).values_list("action", flat=True)
+            ),
+            ["generate"],
         )
 
     def test_automatic_description_catalog_creates_are_not_audited(self):
@@ -251,7 +398,7 @@ class QuotationAuditEventTests(TestCase):
             (
                 "POST",
                 "/api/v1/quotation/quotations",
-                None,
+                ("quotation", "create", "quotation"),
             ),
             (
                 "PUT",
@@ -281,7 +428,7 @@ class QuotationAuditEventTests(TestCase):
             (
                 "POST",
                 "/api/v1/quotation/quotations/quote-id/exports",
-                ("quotation", "generate", "quotation"),
+                ("quotation", "export", "quotation"),
             ),
         ]
         for method, path, expected in cases:
@@ -874,6 +1021,26 @@ class QuotationAuditEventTests(TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertEqual(event.target_type, "quotation")
         self.assertEqual(event.target_label, "BDR2600001")
+
+    def test_accepted_export_is_logged_after_async_completion(self):
+        path = "/api/v1/quotation/quotations/quote-id/exports"
+        factory = RequestFactory()
+        request = factory.post(path)
+        request.user = self.user
+        request.resolver_match = resolve(path)
+        middleware = RequestIdMiddleware(
+            QuotationAuditMiddleware(
+                lambda _request: Response(
+                    {"job_id": "job-id"},
+                    status=202,
+                )
+            )
+        )
+
+        response = middleware(request)
+
+        self.assertEqual(response.status_code, 202)
+        self.assertFalse(AuditEvent.objects.exists())
 
     def test_sensitive_values_are_removed_from_audit_payload(self):
         request = RequestFactory().post("/", HTTP_AUTHORIZATION="Bearer bad")
