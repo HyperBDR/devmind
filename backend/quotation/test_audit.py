@@ -2,6 +2,7 @@ from decimal import Decimal
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
+from django.db import DatabaseError
 from django.test import RequestFactory, TestCase
 from django.urls import resolve
 from quotation.audit import record_audit_event
@@ -96,6 +97,33 @@ class QuotationAuditEventTests(TestCase):
             "HyperBDR Monthly License",
         )
         self.assertEqual(AuditEvent.objects.count(), 2)
+
+    @patch(
+        "quotation.views.quotations.record_audit_event",
+        side_effect=DatabaseError("audit storage unavailable"),
+    )
+    def test_create_succeeds_when_audit_storage_fails(self, _record_audit):
+        response = self.api.post(
+            "/api/v1/quotation/quotations",
+            {
+                "project_name": "Audit failure test",
+                "payment_terms": "CIA",
+                "quote_date": "2026-09-04",
+                "expire_date": "2026-10-04",
+                "issuer_contact_name": "Audit User",
+                "issuer_contact_email": self.user.email,
+                "client_company": "Example",
+                "contact_person": "Customer",
+                "email": "customer@example.com",
+                "items": [],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(
+            Quotation.objects.filter(pk=response.data["id"]).exists()
+        )
 
     def test_quotation_copy_create_records_source(self):
         source = self.api.post(
