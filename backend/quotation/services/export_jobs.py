@@ -132,6 +132,9 @@ def _enqueue_export(job_id: str) -> None:
             error_message="Quotation export could not be queued",
             finished_at=timezone.now(),
         )
+        from quotation.services.export_pipeline import _record_export_audit
+
+        _record_export_audit(job_id)
         return
     ExportJob.objects.filter(pk=job_id).update(celery_task_id=result.id)
 

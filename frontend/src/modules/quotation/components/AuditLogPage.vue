@@ -55,6 +55,7 @@ const actionOptions = [
   'update',
   'delete',
   'generate',
+  'export',
   'upload',
   'download',
   'import',
@@ -194,6 +195,9 @@ function actionLabel(value: string, module = '') {
   }
   if (value === 'copy' && moduleKey === 'quotation') {
     return t('quotation.pages.audit.actions.copiedQuote')
+  }
+  if (value === 'export' && moduleKey === 'quotation') {
+    return t('quotation.pages.audit.actions.exportedQuote')
   }
   if (moduleKey === 'invoice') {
     const invoiceActions: Record<string, string> = {

@@ -18,6 +18,7 @@ from rest_framework.test import APIClient
 from quotation.metrics import export_metrics_snapshot
 from quotation.models import (
     EXPORT_ARCHIVE_SYNC_STAGE,
+    AuditEvent,
     DocumentAsset,
     DocumentParseResult,
     DocumentParseStatus,
@@ -43,6 +44,7 @@ from quotation.services.export_archive import (
     update_export_upload_tracking,
 )
 from quotation.services.export_jobs import create_export_job
+from quotation.services.export_pipeline import _record_export_audit
 from quotation.services.export_renderer import (
     CURRENT_RENDERER_VERSION,
     PdfConversionBusyError,
@@ -158,9 +160,27 @@ class QuotationExportApiTests(QuotationExportFixture):
         self.assertEqual(job.template_version, job.template.version)
         self.assertEqual(job.formats, ["pdf", "xlsx"])
         self.assertNotEqual(job.idempotency_key, "")
+        self.assertFalse(
+            AuditEvent.objects.filter(action="export").exists()
+        )
         apply_async.assert_called_once_with(
             args=[job.id],
             queue="quotation_render",
+        )
+
+        ExportJob.objects.filter(pk=job.id).update(
+            status=ExportJobStatus.COMPLETED,
+        )
+        _record_export_audit(job.id)
+        _record_export_audit(job.id)
+
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                action="export",
+                target_id=self.quotation.id,
+                result=AuditEvent.RESULT_SUCCEEDED,
+            ).count(),
+            1,
         )
 
     @patch("quotation.tasks.render_quotation_export_task.apply_async")

@@ -905,6 +905,11 @@ class QuotationCreateSerializer(serializers.Serializer):
         write_only=True,
         max_length=36,
     )
+    will_generate = serializers.BooleanField(
+        required=False,
+        default=False,
+        write_only=True,
+    )
     numbering_mode = serializers.ChoiceField(
         choices=("auto", "custom"),
         required=False,
