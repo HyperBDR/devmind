@@ -69,7 +69,6 @@ def data_source(db):
         api_timeout=30,
         api_retry_count=3,
         api_retry_delay=2,
-        collect_interval=3600,
     )
 
 

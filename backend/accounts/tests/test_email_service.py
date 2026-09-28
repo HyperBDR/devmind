@@ -11,7 +11,10 @@ class EmailDeliveryOptionsTests(SimpleTestCase):
         DEFAULT_FROM_EMAIL='noreply@example.com',
     )
     def test_falls_back_to_django_settings_when_runtime_smtp_disabled(self):
-        with patch('accounts.services.email.get_config', return_value={'enable': False}):
+        with patch(
+            'accounts.services.email._get_runtime_smtp_config',
+            return_value={'enable': False},
+        ):
             from_email, connection = get_email_delivery_options()
 
         assert from_email == 'env-user@example.com'
@@ -32,7 +35,10 @@ class EmailDeliveryOptionsTests(SimpleTestCase):
         }
 
         with (
-            patch('accounts.services.email.get_config', return_value=smtp_config),
+            patch(
+                'accounts.services.email._get_runtime_smtp_config',
+                return_value=smtp_config,
+            ),
             patch('accounts.services.email.get_connection', return_value='smtp-connection') as mock_connection,
         ):
             from_email, connection = get_email_delivery_options()
