@@ -595,6 +595,8 @@ class ModelPriceSyncAgentRunner(AgentRunner):
             source_map[source_id]
             for source_id in normalized
             if source_id in source_map
+            and source_map[source_id].collection_method
+            == PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
         ]
 
 

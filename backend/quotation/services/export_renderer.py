@@ -33,6 +33,7 @@ from openpyxl.utils import (
 )
 from openpyxl.workbook.defined_name import DefinedName
 from openpyxl.worksheet.cell_range import CellRange
+from openpyxl.worksheet.pagebreak import Break
 from openpyxl.writer.excel import ExcelWriter
 from PIL import Image as PillowImage
 from PIL import UnidentifiedImageError
@@ -47,7 +48,7 @@ from quotation.services.storage import (
 LEGACY_DEFAULT_TEMPLATE_NAME = "DevMind standard quotation"
 DEFAULT_TEMPLATE_NAME = "DevMind managed standard quotation"
 DEFAULT_TEMPLATE_VERSION = 2
-CURRENT_RENDERER_VERSION = "quotation-preview-xlsx-v8"
+CURRENT_RENDERER_VERSION = "quotation-preview-xlsx-v9"
 DEFAULT_WORKSHEET = "Quotation"
 
 
@@ -1326,24 +1327,81 @@ def render_quotation_xlsx(
     merged(row, 1, 7, "")
     sheet.row_dimensions[row].height = 9
     row += 1
-    merged(row, 1, 7, "Additional Notes & Disclaimers:", font=bold)
-    row += 1
+    notes = str(value("remarks_disclaimer"))
+    wrapped_notes = [
+        wrapped_line
+        for line in (
+            notes.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+            or [""]
+        )
+        for wrapped_line in (
+            textwrap.wrap(
+                line,
+                width=60,
+                replace_whitespace=False,
+                drop_whitespace=False,
+                break_on_hyphens=False,
+            )
+            or [""]
+        )
+    ]
+    # ponytail: six 60-character lines fit; retune if PDF fonts change.
+    notes_chunks = [
+        wrapped_notes[index : index + 6]
+        for index in range(0, len(wrapped_notes), 6)
+    ]
+    page_width = 595 - (
+        sheet.page_margins.left + sheet.page_margins.right
+    ) * 72
+    page_height = 842 - (
+        sheet.page_margins.top + sheet.page_margins.bottom
+    ) * 72
+    sheet_width = sum((width * 7 + 5) * 0.75 for width in widths)
+    page_scale = min(1, page_width / sheet_width)
+    page_capacity = page_height / page_scale
+    used_height = sum(
+        sheet.row_dimensions[index].height
+        or sheet.sheet_format.defaultRowHeight
+        for index in range(1, row)
+    )
+    remaining_height = page_capacity - used_height % page_capacity
+    title_height = 18
+    first_chunk_height = max(30, len(notes_chunks[0]) * 12)
+    if remaining_height < title_height + first_chunk_height + 12:
+        sheet.row_breaks.append(Break(id=row - 1))
     merged(
         row,
         1,
         7,
-        value("remarks_disclaimer"),
-        font=Font(name="Arial", size=9, color="334155"),
-        border=cell_border,
-        fill=muted_fill,
-        alignment=Alignment(vertical="top", wrap_text=True),
+        "Additional Notes & Disclaimers:",
+        font=bold,
     )
-    notes_lines = estimate_wrapped_lines(
-        str(value("remarks_disclaimer")),
-        width=100,
-    )
-    sheet.row_dimensions[row].height = max(30, notes_lines * 12)
+    sheet.row_dimensions[row].height = title_height
     row += 1
+    for index, chunk in enumerate(notes_chunks):
+        notes_border = Border(
+            left=thin,
+            right=thin,
+            top=thin if index == 0 else Side(style=None),
+            bottom=(
+                thin
+                if index == len(notes_chunks) - 1
+                else Side(style=None)
+            ),
+        )
+        merged(
+            row,
+            1,
+            7,
+            "\n".join(chunk),
+            font=Font(name="Arial", size=9, color="334155"),
+            border=notes_border,
+            fill=muted_fill,
+            alignment=Alignment(vertical="top", wrap_text=True),
+        )
+        line_count = len(chunk)
+        sheet.row_dimensions[row].height = max(30, line_count * 12)
+        row += 1
     for _ in range(2):
         merged(row, 1, 7, "")
         sheet.row_dimensions[row].height = 12

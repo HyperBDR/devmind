@@ -113,8 +113,12 @@ class AccessProfileTests(TestCase):
             access_profile['visible_features'],
             [
                 'workspace',
-                'admin_console',
                 'operations_console',
+                'hyperbdr_dashboard',
+                'llm_ops',
+                'data_ops',
+                'admin_console',
+                'sales_work_orders',
             ],
         )
 
@@ -143,6 +147,7 @@ class AccessProfileTests(TestCase):
                 'data_ops',
                 'admin_console',
                 'sales_work_orders',
+                'quotation_management',
             ],
         )
         self.assertTrue(

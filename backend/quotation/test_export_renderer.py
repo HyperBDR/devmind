@@ -101,8 +101,15 @@ class QuotationTemplateRendererTests(TestCase):
         self.assertEqual(sheet["G31"].number_format, "#,##0")
         self.assertEqual(sheet["G33"].value, 330)
         self.assertEqual(sheet["D32"].value, "GST Amount (10%):")
-        self.assertEqual(sheet["A37"].value, "Immutable snapshot")
+        title_row = 36
         notes_row = 37
+        self.assertEqual(
+            sheet.cell(title_row, 1).value,
+            "Additional Notes & Disclaimers:",
+        )
+        self.assertEqual(sheet.cell(notes_row, 1).value, "Immutable snapshot")
+        self.assertIsNone(sheet.cell(title_row, 1).border.left)
+        self.assertIsNotNone(sheet.cell(notes_row, 1).border.left.style)
         acceptance_row = next(
             cell.row
             for row in sheet.iter_rows()
@@ -235,17 +242,7 @@ class QuotationTemplateRendererTests(TestCase):
 
     def test_long_notes_receive_height_for_wrapped_content(self):
         template = ensure_default_template()
-        notes = (
-            "This quotation is based on the information currently provided and "
-            "collected during the pre-sales stage. "
-            "Any changes to scope, environment, requirements, or deployment "
-            "complexity may result in adjustments to pricing and delivery "
-            "timelines.\n\n"
-            "The Professional Services scope covers product-level installation, "
-            "configuration, and deployment activities only. The customer is "
-            "responsible for ensuring the target environment is fully prepared "
-            "prior to implementation."
-        )
+        notes = "\n".join(f"Remark paragraph {index}." for index in range(25))
 
         content = render_quotation_xlsx(
             template,
@@ -254,13 +251,35 @@ class QuotationTemplateRendererTests(TestCase):
 
         workbook = load_workbook(io.BytesIO(content), data_only=False)
         sheet = workbook["Quotation"]
-        notes_row = next(
+        title_row = next(
             cell.row
             for row in sheet.iter_rows()
             for cell in row
             if cell.value == "Additional Notes & Disclaimers:"
-        ) + 1
-        self.assertGreater(sheet.row_dimensions[notes_row].height, 30)
+        )
+        notes_row = title_row + 1
+        self.assertIsNone(sheet.cell(title_row, 1).border.left)
+        self.assertIsNotNone(sheet.cell(notes_row, 1).border.left.style)
+        note_cells = []
+        for row in range(notes_row, sheet.max_row + 1):
+            value = sheet.cell(row, 1).value
+            if row > notes_row and value in (None, ""):
+                break
+            note_cells.append(value)
+        self.assertEqual(
+            "\n".join(
+                line
+                for cell in note_cells
+                for line in str(cell).splitlines()
+            ),
+            notes,
+        )
+        self.assertTrue(
+            all(
+                sheet.row_dimensions[notes_row + offset].height <= 84
+                for offset in range(len(note_cells))
+            )
+        )
         workbook.close()
 
     def test_default_template_upgrades_legacy_active_version(self):

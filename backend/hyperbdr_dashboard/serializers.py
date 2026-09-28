@@ -29,9 +29,13 @@ class DataSourceSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         payload = super().to_representation(instance)
-        # Password is stored as plaintext; return it as-is for read operations
-        payload["password"] = instance.password or ""
+        payload["password"] = ""
         return payload
+
+    def update(self, instance, validated_data):
+        if not validated_data.get("password"):
+            validated_data.pop("password", None)
+        return super().update(instance, validated_data)
 
 
 class TenantSerializer(serializers.ModelSerializer):

@@ -30,6 +30,14 @@ def get_translation_language_code(language):
     return mapping.get(normalized, normalized)
 
 
+def _get_runtime_smtp_config():
+    try:
+        from app_config.utils import get_config
+    except Exception:
+        return {}
+    return get_config('smtp_config', default={}) or {}
+
+
 def get_email_delivery_options():
     """
     Resolve outbound email settings from runtime SMTP config when available.
@@ -37,16 +45,7 @@ def get_email_delivery_options():
     Falls back to Django settings so password reset still works in environments
     that only use environment variables.
     """
-    get_config = None
-    try:
-        from app_config.utils import get_config as runtime_get_config
-        get_config = runtime_get_config
-    except Exception:
-        get_config = None
-
-    smtp_config = {}
-    if get_config is not None:
-        smtp_config = get_config('smtp_config', default={}) or {}
+    smtp_config = _get_runtime_smtp_config()
 
     use_runtime_smtp = bool(
         smtp_config.get('enable') and smtp_config.get('host')

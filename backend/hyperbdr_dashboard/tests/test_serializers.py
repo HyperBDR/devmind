@@ -49,7 +49,6 @@ def test_data_source_serializer_preserves_password_on_blank_update(data_source):
             "api_timeout": data_source.api_timeout,
             "api_retry_count": data_source.api_retry_count,
             "api_retry_delay": data_source.api_retry_delay,
-            "collect_interval": data_source.collect_interval,
         },
     )
 

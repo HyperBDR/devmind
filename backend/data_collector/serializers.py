@@ -94,7 +94,7 @@ class CollectorConfigSerializer(serializers.ModelSerializer):
             for key in _default_runtime_state():
                 if key not in runtime:
                     runtime[key] = None
-        platform = self.initial_data.get("platform") or getattr(
+        platform = getattr(self, "initial_data", {}).get("platform") or getattr(
             getattr(self, "instance", None),
             "platform",
             None,
