@@ -1548,6 +1548,8 @@ def render_quotation_xlsx(
     sheet.print_area = f"A1:G{row}"
     sheet.page_setup.orientation = "portrait"
     sheet.page_setup.paperSize = sheet.PAPERSIZE_A4
+    sheet.page_margins.left = 0.75
+    sheet.page_margins.right = 0.75
     sheet.page_setup.fitToWidth = 1
     sheet.page_setup.fitToHeight = 0
     sheet.sheet_properties.pageSetUpPr.fitToPage = True
