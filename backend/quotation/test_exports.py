@@ -47,6 +47,7 @@ from quotation.services.export_jobs import create_export_job
 from quotation.services.export_pipeline import _record_export_audit
 from quotation.services.export_renderer import (
     CURRENT_RENDERER_VERSION,
+    PREVIOUS_RENDERER_VERSION,
     PdfConversionBusyError,
     PdfConversionError,
     build_default_template_bytes,
@@ -1085,6 +1086,7 @@ class QuotationExportTaskTests(QuotationExportFixture):
         render_xlsx.assert_called_once_with(
             job.template,
             job.quotation_version.snapshot_json,
+            renderer_version=CURRENT_RENDERER_VERSION,
         )
         convert_pdf.assert_called_once_with(
             b"PK\x03\x04-preview-layout",
@@ -1136,6 +1138,7 @@ class QuotationExportTaskTests(QuotationExportFixture):
         render_xlsx.assert_called_once_with(
             job.template,
             later_version.snapshot_json,
+            renderer_version=CURRENT_RENDERER_VERSION,
         )
 
     @patch(
@@ -1374,6 +1377,26 @@ class QuotationExportTaskTests(QuotationExportFixture):
         self.assertEqual(job.error_code, "renderer_version_unsupported")
         self.assertEqual(job.renderer_version, "openpyxl-libreoffice-v1")
         self.assertEqual(job.assets.count(), 0)
+
+    def test_queued_v9_job_still_renders_with_its_pinned_renderer(self):
+        job = self.create_job(["xlsx"])
+        ExportJob.objects.filter(pk=job.id).update(
+            renderer_version=PREVIOUS_RENDERER_VERSION
+        )
+
+        result = render_quotation_export_task.run(job.id)
+
+        job.refresh_from_db()
+        self.assertEqual(result["status"], ExportJobStatus.COMPLETED)
+        self.assertEqual(job.renderer_version, PREVIOUS_RENDERER_VERSION)
+        excel_asset = job.assets.get(doc_type="excel")
+        self.assertEqual(
+            excel_asset.renderer_version,
+            PREVIOUS_RENDERER_VERSION,
+        )
+        self.assertTrue(
+            resolve_document_path(excel_asset.storage_key).is_file()
+        )
 
     @override_settings(QUOTATION_RENDERER_VERSION="openpyxl-libreoffice-v1")
     def test_new_job_ignores_legacy_renderer_environment_setting(self):

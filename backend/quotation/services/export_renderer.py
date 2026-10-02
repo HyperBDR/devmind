@@ -50,6 +50,7 @@ LEGACY_DEFAULT_TEMPLATE_NAME = "DevMind standard quotation"
 DEFAULT_TEMPLATE_NAME = "DevMind managed standard quotation"
 DEFAULT_TEMPLATE_VERSION = 2
 CURRENT_RENDERER_VERSION = "quotation-preview-xlsx-v10"
+PREVIOUS_RENDERER_VERSION = "quotation-preview-xlsx-v9"
 DEFAULT_WORKSHEET = "Quotation"
 
 
@@ -797,6 +798,8 @@ def _image_anchor(
 def render_quotation_xlsx(
     template: QuotationTemplate,
     snapshot: dict,
+    *,
+    renderer_version: str = CURRENT_RENDERER_VERSION,
 ) -> bytes:
     """Render the spreadsheet using the live quotation preview layout."""
     del template
@@ -1364,20 +1367,49 @@ def render_quotation_xlsx(
     page_width = 595 - (
         sheet.page_margins.left + sheet.page_margins.right
     ) * 72
-    notes_font_size = 6.75
-    # ponytail: average glyph width; measured font metrics if fonts change.
-    notes_wrap_width = page_width / (notes_font_size * 0.45)
-    wrapped_notes = [
-        wrapped_line
-        for line in (
-            notes.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-            or [""]
+    if renderer_version == PREVIOUS_RENDERER_VERSION:
+        notes_font_size = 9
+        wrapped_notes = [
+            wrapped_line
+            for line in (
+                notes.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+                or [""]
+            )
+            for wrapped_line in (
+                textwrap.wrap(
+                    line,
+                    width=60,
+                    replace_whitespace=False,
+                    drop_whitespace=False,
+                    break_on_hyphens=False,
+                )
+                or [""]
+            )
+        ]
+        note_min_height = 30
+        title_font = bold
+    else:
+        notes_font_size = 6.75
+        # ponytail: average glyph width; measured font metrics if fonts change.
+        notes_wrap_width = page_width / (notes_font_size * 0.45)
+        wrapped_notes = [
+            wrapped_line
+            for line in (
+                notes.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+                or [""]
+            )
+            for wrapped_line in _wrap_disclaimer_line(
+                line,
+                width=notes_wrap_width,
+            )
+        ]
+        note_min_height = 18
+        title_font = Font(
+            name="Arial",
+            size=8.25,
+            bold=True,
+            color="0F172A",
         )
-        for wrapped_line in _wrap_disclaimer_line(
-            line,
-            width=notes_wrap_width,
-        )
-    ]
     notes_chunks = [
         wrapped_notes[index : index + 6]
         for index in range(0, len(wrapped_notes), 6)
@@ -1395,7 +1427,7 @@ def render_quotation_xlsx(
     )
     remaining_height = page_capacity - used_height % page_capacity
     title_height = 18
-    first_chunk_height = max(18, len(notes_chunks[0]) * 12)
+    first_chunk_height = max(note_min_height, len(notes_chunks[0]) * 12)
     if remaining_height < title_height + first_chunk_height + 12:
         sheet.row_breaks.append(Break(id=row - 1))
     merged(
@@ -1403,12 +1435,7 @@ def render_quotation_xlsx(
         1,
         7,
         "Additional Notes & Disclaimers:",
-        font=Font(
-            name="Arial",
-            size=8.25,
-            bold=True,
-            color="0F172A",
-        ),
+        font=title_font,
     )
     sheet.row_dimensions[row].height = title_height
     row += 1
@@ -1438,7 +1465,10 @@ def render_quotation_xlsx(
             alignment=Alignment(vertical="top", wrap_text=True),
         )
         line_count = len(chunk)
-        sheet.row_dimensions[row].height = max(18, line_count * 12)
+        sheet.row_dimensions[row].height = max(
+            note_min_height,
+            line_count * 12,
+        )
         row += 1
     for _ in range(2):
         merged(row, 1, 7, "")
