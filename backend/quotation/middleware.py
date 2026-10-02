@@ -29,6 +29,7 @@ AUDIT_IGNORED_FIELDS = {
     "async",
     "notes",
     "skip_version",
+    "will_generate",
 }
 
 
@@ -41,7 +42,7 @@ def _classify(method: str, path: str):
     if re.fullmatch(r"quotations/[^/]+/copy", relative):
         return "quotation", "copy", "quotation"
     if relative == "quotations" and method == "POST":
-        return None
+        return "quotation", "create", "quotation"
     if quotation and method == "GET":
         return "quotation", "view", "quotation"
     if quotation and method in {"PUT", "PATCH"}:
@@ -51,7 +52,7 @@ def _classify(method: str, path: str):
     if re.fullmatch(r"quotations/[^/]+/generate", relative):
         return "quotation", "generate", "quotation"
     if re.fullmatch(r"quotations/[^/]+/exports", relative):
-        return "quotation", "generate", "quotation"
+        return "quotation", "export", "quotation"
     if re.fullmatch(r"exports/[^/]+/retry-upload", relative):
         return "replica", "sync_started", "quotation"
     if re.fullmatch(r"exports/[^/]+", relative) and method == "GET":
@@ -283,6 +284,8 @@ class QuotationAuditMiddleware:
                 action,
                 response.status_code,
             ):
+                return response
+            if action == "export" and response.status_code < 400:
                 return response
             payload = _response_payload(response)
             changed_fields = list(

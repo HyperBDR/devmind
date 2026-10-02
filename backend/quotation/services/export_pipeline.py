@@ -1,17 +1,21 @@
 from __future__ import annotations
 
+from hashlib import sha256
+from io import BytesIO
 import logging
 import re
-from io import BytesIO
-from hashlib import sha256
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import NAMESPACE_URL, uuid5
 
 from django.conf import settings
 from django.db import DatabaseError, transaction
 from django.utils import timezone
 from pypdf import PdfReader, PdfWriter
+
+from quotation.audit import quotation_audit_label, record_audit_event
 from quotation.models import (
+    AuditEvent,
     DocumentAsset,
     DocumentParseResult,
     DocumentParseStatus,
@@ -42,6 +46,63 @@ from quotation.services.storage import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _record_export_audit(job_id: str) -> None:
+    """Record one terminal quotation export result."""
+    job = ExportJob.objects.select_related(
+        "quotation",
+        "requested_by",
+    ).get(pk=job_id)
+    if job.status not in {
+        ExportJobStatus.COMPLETED,
+        ExportJobStatus.UPLOAD_QUEUED,
+        ExportJobStatus.UPLOAD_FAILED,
+        ExportJobStatus.RENDER_FAILED,
+    }:
+        return
+    succeeded = job.status != ExportJobStatus.RENDER_FAILED
+    result = (
+        AuditEvent.RESULT_SUCCEEDED
+        if succeeded
+        else AuditEvent.RESULT_FAILED
+    )
+    request_id = job.request_id
+    trace_id = job.trace_id or request_id
+    request = SimpleNamespace(
+        user=job.requested_by,
+        META={
+            "HTTP_X_REQUEST_ID": request_id,
+            "HTTP_X_TRACE_ID": trace_id,
+            "HTTP_IDEMPOTENCY_KEY": (
+                f"quotation-export:{job.id}:{result}"
+            ),
+        },
+        audit_request_id=request_id,
+        audit_trace_id=trace_id,
+    )
+    try:
+        record_audit_event(
+            request=request,
+            module="quotation",
+            action="export",
+            result=result,
+            target_type="quotation",
+            target_id=job.quotation_id,
+            target_label=quotation_audit_label(job.quotation),
+            summary="" if succeeded else "Quotation export failed",
+            reason_code="" if succeeded else "export_failed",
+            error_code="" if succeeded else job.error_code,
+            metadata={
+                "formats": job.formats,
+                "status_code": 200 if succeeded else 500,
+            },
+        )
+    except DatabaseError:
+        logger.exception(
+            "quotation_export_audit_failed",
+            extra={"export_job_id": job.id},
+        )
 
 
 def _original_import_excel_bytes(job: ExportJob) -> bytes | None:
@@ -330,6 +391,7 @@ def render_export_job(job_id: str) -> dict:
         )
         .get()
     )
+    _record_export_audit(job.id)
     return {"job_id": job.id, "status": current_status}
 
 
@@ -384,6 +446,7 @@ def mark_render_failed(job_id: str, exc: Exception) -> None:
         error_message=str(exc)[:500],
         finished_at=timezone.now(),
     )
+    _record_export_audit(job_id)
 
 
 def reset_render_for_retry(job_id: str, exc: Exception) -> None:

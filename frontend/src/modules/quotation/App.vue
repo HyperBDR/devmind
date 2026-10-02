@@ -749,7 +749,11 @@ async function handleSaveQuotation(newQuote: Quotation) {
       ? await updateQuotationApi(ownedQuote, {
           notes: t('quotation.app.versionNotesEditQuote'),
         })
-      : await createQuotationApi(ownedQuote, copySourceQuote.value?.id)
+      : await createQuotationApi(
+          ownedQuote,
+          copySourceQuote.value?.id,
+          willGenerate,
+        )
 
     saveContactTitle(auth.currentUser.email, ownedQuote.issuerContactTitle)
 

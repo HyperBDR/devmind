@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime
 from decimal import Decimal
 
-from django.db import IntegrityError, transaction
+from django.db import DatabaseError, IntegrityError, transaction
 from django.db.models import CharField, Prefetch, Q, Value
 from django.db.models.deletion import ProtectedError
 from django.db.models.functions import Coalesce
@@ -68,6 +69,8 @@ from quotation.services.quotation_service import (
     get_next_auto_quote_number,
     update_quotation,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _ensure_access(user, quotation: Quotation) -> Response | None:
@@ -278,6 +281,7 @@ class QuotationListCreateView(APIView):
         ser.is_valid(raise_exception=True)
         data = ser.validated_data
         copy_from_id = str(data.pop("copy_from_id", "") or "")
+        will_generate = data.pop("will_generate", False)
         copy_source = None
         if copy_from_id:
             copy_source = (
@@ -327,19 +331,40 @@ class QuotationListCreateView(APIView):
         quotation = Quotation.objects.prefetch_related(
             "items", "documents__replicas", "versions"
         ).get(pk=quotation.pk)
-        if copy_source:
-            record_audit_event(
-                request=request,
-                module="quotation",
-                action="copy",
-                result=AuditEvent.RESULT_SUCCEEDED,
-                target_type="quotation",
-                target_id=quotation.id,
-                target_label=quotation_audit_label(quotation),
-                event_name="quotation.copied",
-                metadata={"copy_from_id": copy_source.id},
+        try:
+            if copy_source:
+                record_audit_event(
+                    request=request,
+                    module="quotation",
+                    action="copy",
+                    result=AuditEvent.RESULT_SUCCEEDED,
+                    target_type="quotation",
+                    target_id=quotation.id,
+                    target_label=quotation_audit_label(quotation),
+                    event_name="quotation.copied",
+                    metadata={"copy_from_id": copy_source.id},
+                )
+            elif not will_generate:
+                record_audit_event(
+                    request=request,
+                    module="quotation",
+                    action="create",
+                    result=AuditEvent.RESULT_SUCCEEDED,
+                    target_type="quotation",
+                    target_id=quotation.id,
+                    target_label=quotation_audit_label(quotation),
+                )
+        except DatabaseError:
+            logger.exception(
+                "quotation_creation_audit_failed",
+                extra={"quotation_id": str(quotation.id)},
             )
-        return Response(QuotationSerializer(quotation).data, status=201)
+        response = Response(
+            QuotationSerializer(quotation).data,
+            status=status.HTTP_201_CREATED,
+        )
+        response._quotation_audit_handled = True
+        return response
 
 
 class QuotationFormContextView(APIView):
