@@ -8,6 +8,7 @@ import {
   getCurrencySymbol,
   type PreviewUser,
 } from '../utils/quotationPreviewModel'
+import { wrapQuotationDisclaimer } from '../utils/quotationDisclaimer'
 import { useQuotationI18n } from '../composables/useQuotationI18n'
 
 const { t } = useQuotationI18n()
@@ -45,6 +46,13 @@ function highlightCellClass(changed: boolean): string {
 }
 
 const model = computed(() => buildQuotationPreviewModel(props.quote, { currentUser: props.currentUser }))
+const previewDisclaimer = computed(() =>
+  wrapQuotationDisclaimer(model.value.remarksDisclaimer || ''),
+)
+// Match the A4 printable width used by the XLSX-to-PDF renderer.
+const previewFrameWidth = computed(() =>
+  props.scale === 'compact' ? '697px' : '721px',
+)
 const totalsLabelSpan = computed(() => {
   const labels = [
     'Software subscription subtotal:',
@@ -99,7 +107,8 @@ const moneyTotalCellClass =
 
 <template>
   <section
-    class="relative mx-auto w-full max-w-[980px] border border-slate-200 bg-white text-slate-900 shadow-sm"
+    :style="{ width: previewFrameWidth }"
+    class="relative mx-auto w-fit max-w-none shrink-0 border border-slate-200 bg-white text-slate-900 shadow-sm"
     :class="padding"
   >
     <img
@@ -431,19 +440,26 @@ const moneyTotalCellClass =
           <td colspan="7" class="px-1.5 py-1 align-middle" />
         </tr>
         <tr>
-          <td colspan="7" class="px-1.5 py-1 font-semibold align-middle">Additional Notes & Disclaimers:</td>
+          <td
+            colspan="7"
+            class="px-1.5 py-1 text-[11px] font-semibold align-middle"
+            style="font-family: Arial, Helvetica, sans-serif;"
+          >
+            Additional Notes & Disclaimers:
+          </td>
         </tr>
         <tr>
           <td
             colspan="7"
             :class="[
-              'whitespace-pre-line border border-slate-300 px-1.5 py-1 text-[9px] leading-relaxed align-middle',
+              'whitespace-pre-line border border-slate-300 px-1.5 py-1 text-[9px] leading-[16px] align-middle',
               isHeaderChanged('remarksDisclaimer')
                 ? 'bg-rose-50 text-rose-700 font-semibold'
                 : 'bg-slate-50 text-slate-700',
             ]"
+            style="font-family: Arial, Helvetica, sans-serif;"
           >
-            {{ model.remarksDisclaimer }}
+            {{ previewDisclaimer }}
           </td>
         </tr>
         <tr class="h-3">
