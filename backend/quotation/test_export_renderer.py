@@ -19,6 +19,7 @@ from quotation.services.export_renderer import (
     TemplateValidationError,
     _build_managed_template_bytes,
     _signature_image,
+    _wrap_disclaimer_line,
     build_default_template_bytes,
     convert_xlsx_to_pdf,
     convert_attachment_to_pdf,
@@ -108,6 +109,8 @@ class QuotationTemplateRendererTests(TestCase):
             "Additional Notes & Disclaimers:",
         )
         self.assertEqual(sheet.cell(notes_row, 1).value, "Immutable snapshot")
+        self.assertEqual(sheet.cell(title_row, 1).font.sz, 8.25)
+        self.assertEqual(sheet.cell(notes_row, 1).font.sz, 6.75)
         self.assertIsNone(sheet.cell(title_row, 1).border.left)
         self.assertIsNotNone(sheet.cell(notes_row, 1).border.left.style)
         acceptance_row = next(
@@ -239,6 +242,49 @@ class QuotationTemplateRendererTests(TestCase):
 
         self.assertGreater(estimate_wrapped_lines(notes, width=24), 1)
         self.assertEqual(estimate_wrapped_lines("first\nsecond", width=24), 2)
+
+    def test_disclaimer_wrap_preserves_full_width_characters_and_spaces(self):
+        notes = "  备注内容 " * 30
+
+        wrapped = _wrap_disclaimer_line(notes, width=60)
+
+        self.assertEqual("".join(wrapped), notes)
+        self.assertGreater(len(wrapped), 1)
+
+    def test_preview_length_disclaimer_is_not_hard_wrapped(self):
+        template = ensure_default_template()
+        notes = (
+            "Please note that the quoted price does not include any cloud "
+            "resource consumption costs. All prices quoted are exclusive of "
+            "VAT and any applicable taxes."
+        )
+
+        content = render_quotation_xlsx(
+            template,
+            {"remarks_disclaimer": notes},
+        )
+
+        workbook = load_workbook(io.BytesIO(content), data_only=False)
+        sheet = workbook["Quotation"]
+        title_row = next(
+            cell.row
+            for row in sheet.iter_rows()
+            for cell in row
+            if cell.value == "Additional Notes & Disclaimers:"
+        )
+        notes_cell = sheet.cell(title_row + 1, 1)
+        self.assertEqual(notes_cell.value, notes)
+        self.assertEqual(notes_cell.font.sz, 6.75)
+        self.assertEqual(sheet.cell(title_row, 1).font.sz, 8.25)
+        workbook.close()
+
+    def test_long_cjk_disclaimer_lines_are_width_bounded(self):
+        notes = "备" * 100
+
+        wrapped = _wrap_disclaimer_line(notes, width=60)
+
+        self.assertEqual("".join(wrapped), notes)
+        self.assertTrue(all(len(line) <= 26 for line in wrapped))
 
     def test_long_notes_receive_height_for_wrapped_content(self):
         template = ensure_default_template()

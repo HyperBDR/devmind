@@ -7,6 +7,7 @@ import os
 import signal
 import subprocess
 import textwrap
+import unicodedata
 from collections.abc import Iterator
 from contextlib import contextmanager
 from copy import copy
@@ -48,7 +49,7 @@ from quotation.services.storage import (
 LEGACY_DEFAULT_TEMPLATE_NAME = "DevMind standard quotation"
 DEFAULT_TEMPLATE_NAME = "DevMind managed standard quotation"
 DEFAULT_TEMPLATE_VERSION = 2
-CURRENT_RENDERER_VERSION = "quotation-preview-xlsx-v9"
+CURRENT_RENDERER_VERSION = "quotation-preview-xlsx-v10"
 DEFAULT_WORKSHEET = "Quotation"
 
 
@@ -60,6 +61,38 @@ def estimate_wrapped_lines(value: str, *, width: int) -> int:
         max(1, len(textwrap.wrap(line, width=safe_width)) if line else 1)
         for line in lines
     )
+
+
+def _wrap_disclaimer_line(line: str, *, width: float) -> list[str]:
+    """Wrap disclaimer text by approximate glyph width, preserving spaces."""
+    wrapped = []
+    start = 0
+    while start < len(line):
+        end = start
+        last_space = None
+        used_width = 0.0
+        while end < len(line):
+            char = line[end]
+            char_width = (
+                2.25
+                if unicodedata.east_asian_width(char) in {"F", "W"}
+                else 1
+            )
+            if used_width + char_width > width:
+                break
+            used_width += char_width
+            end += 1
+            if char.isspace():
+                last_space = end
+        if end == len(line):
+            wrapped.append(line[start:end])
+            break
+        end = last_space if last_space and last_space > start else end
+        wrapped.append(line[start:end])
+        start = end
+    return wrapped or [""]
+
+
 REQUIRED_TEMPLATE_NAMES = {
     "billing_company",
     "billing_contact",
@@ -1328,31 +1361,27 @@ def render_quotation_xlsx(
     sheet.row_dimensions[row].height = 9
     row += 1
     notes = str(value("remarks_disclaimer"))
+    page_width = 595 - (
+        sheet.page_margins.left + sheet.page_margins.right
+    ) * 72
+    notes_font_size = 6.75
+    # ponytail: average glyph width; measured font metrics if fonts change.
+    notes_wrap_width = page_width / (notes_font_size * 0.45)
     wrapped_notes = [
         wrapped_line
         for line in (
             notes.replace("\r\n", "\n").replace("\r", "\n").split("\n")
             or [""]
         )
-        for wrapped_line in (
-            textwrap.wrap(
-                line,
-                width=60,
-                replace_whitespace=False,
-                drop_whitespace=False,
-                break_on_hyphens=False,
-            )
-            or [""]
+        for wrapped_line in _wrap_disclaimer_line(
+            line,
+            width=notes_wrap_width,
         )
     ]
-    # ponytail: six 60-character lines fit; retune if PDF fonts change.
     notes_chunks = [
         wrapped_notes[index : index + 6]
         for index in range(0, len(wrapped_notes), 6)
     ]
-    page_width = 595 - (
-        sheet.page_margins.left + sheet.page_margins.right
-    ) * 72
     page_height = 842 - (
         sheet.page_margins.top + sheet.page_margins.bottom
     ) * 72
@@ -1366,7 +1395,7 @@ def render_quotation_xlsx(
     )
     remaining_height = page_capacity - used_height % page_capacity
     title_height = 18
-    first_chunk_height = max(30, len(notes_chunks[0]) * 12)
+    first_chunk_height = max(18, len(notes_chunks[0]) * 12)
     if remaining_height < title_height + first_chunk_height + 12:
         sheet.row_breaks.append(Break(id=row - 1))
     merged(
@@ -1374,7 +1403,12 @@ def render_quotation_xlsx(
         1,
         7,
         "Additional Notes & Disclaimers:",
-        font=bold,
+        font=Font(
+            name="Arial",
+            size=8.25,
+            bold=True,
+            color="0F172A",
+        ),
     )
     sheet.row_dimensions[row].height = title_height
     row += 1
@@ -1394,13 +1428,17 @@ def render_quotation_xlsx(
             1,
             7,
             "\n".join(chunk),
-            font=Font(name="Arial", size=9, color="334155"),
+            font=Font(
+                name="Arial",
+                size=notes_font_size,
+                color="334155",
+            ),
             border=notes_border,
             fill=muted_fill,
             alignment=Alignment(vertical="top", wrap_text=True),
         )
         line_count = len(chunk)
-        sheet.row_dimensions[row].height = max(30, line_count * 12)
+        sheet.row_dimensions[row].height = max(18, line_count * 12)
         row += 1
     for _ in range(2):
         merged(row, 1, 7, "")
