@@ -88,6 +88,7 @@ class InvoiceListQuerySerializer(serializers.Serializer):
         required=False,
     )
     region = serializers.CharField(max_length=120, required=False)
+    salesperson = serializers.CharField(max_length=255, required=False)
     sales_owner = serializers.CharField(max_length=255, required=False)
     status = serializers.ChoiceField(
         choices=InvoiceStatus.choices,
@@ -110,9 +111,19 @@ class InvoiceListQuerySerializer(serializers.Serializer):
     def validate(self, attrs):
         invoice_from = attrs.get("invoice_from")
         invoice_to = attrs.get("invoice_to")
+        salesperson = attrs.get("salesperson")
+        sales_owner = attrs.get("sales_owner")
         if invoice_from and invoice_to and invoice_from > invoice_to:
             raise serializers.ValidationError(
                 {"invoice_to": "must be on or after invoice_from"}
+            )
+        if (
+            salesperson
+            and sales_owner
+            and salesperson.casefold() != sales_owner.casefold()
+        ):
+            raise serializers.ValidationError(
+                {"salesperson": "must match sales_owner when both are set"}
             )
         return attrs
 

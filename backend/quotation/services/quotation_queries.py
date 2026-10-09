@@ -77,7 +77,9 @@ def filter_quotation_list(
 
     salesperson = filters.get("salesperson")
     if salesperson:
-        queryset = queryset.filter(issuer_contact_name=salesperson)
+        queryset = queryset.filter(
+            issuer_contact_name__iexact=salesperson.strip()
+        )
 
     created_from = filters.get("created_from")
     if created_from:

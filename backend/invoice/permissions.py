@@ -146,6 +146,12 @@ def _granted_invoice_document_ids(user):
     ).values_list("invoice_id", flat=True)
 
 
+def invoice_responsible_person_filter(name) -> Q:
+    """Match either invoice responsibility field by the full name."""
+    name = name.strip()
+    return Q(contact_person__iexact=name) | Q(sales_owner__iexact=name)
+
+
 def invoice_visibility_filter(user) -> Q:
     """Return the invoice rows visible to a user by their Invoice role."""
     if get_invoice_access_role(user) == InvoiceAccessRole.ADMIN:
@@ -162,7 +168,7 @@ def invoice_visibility_filter(user) -> Q:
     names.discard("")
     owner_filter = Q()
     for name in names:
-        owner_filter |= Q(sales_owner__iexact=name)
+        owner_filter |= invoice_responsible_person_filter(name)
     return (
         Q(created_by=user)
         | owner_filter

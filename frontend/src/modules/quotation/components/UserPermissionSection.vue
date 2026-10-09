@@ -1,10 +1,15 @@
 <script setup lang="ts">
-import { computed, reactive, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import {
   ShieldCheck,
-  UserCog
+  UserCog,
+  X,
 } from 'lucide-vue-next'
 
+import type {
+  CreatedMcpRobotCredential,
+  McpRobotScope,
+} from '../api/mcpRobots'
 import type {
   InvoiceAccessContext,
   InvoiceAccessRecord,
@@ -20,6 +25,8 @@ import { useQuotationI18n } from '../composables/useQuotationI18n'
 const props = defineProps<{
   context: QuotationMembershipContext
   invoiceContext: InvoiceAccessContext
+  generatingUserId: number | null
+  generatedToken: CreatedMcpRobotCredential | null
   loading: boolean
   saving: boolean
 }>()
@@ -38,12 +45,16 @@ const emit = defineEmits<{
     invoiceExpiresAt: string
     currentInvoiceExpiresAt: string | null
   }]
+  'generate-token': [userId: number]
+  'close-token': []
 }>()
 
 const { t } = useQuotationI18n()
 const roleDrafts = reactive<Record<number, QuotationMembershipRole | ''>>({})
 const invoiceRoleDrafts = reactive<Record<number, InvoiceAccessRole | ''>>({})
 const invoiceExpiryDrafts = reactive<Record<number, string>>({})
+const copiedToken = ref(false)
+const copyFailed = ref(false)
 
 const roleOptions = computed(() => [
   {
@@ -74,6 +85,14 @@ const invoicePermissions = computed(
       permission
     ])
   )
+)
+
+watch(
+  () => props.generatedToken?.id,
+  () => {
+    copiedToken.value = false
+    copyFailed.value = false
+  },
 )
 
 function toLocalDateTime(value: string | null): string {
@@ -174,6 +193,44 @@ function hasChanges(member: QuotationMembershipRecord) {
     || invoiceExpiryChanged(member)
 }
 
+function memberScopes(member: QuotationMembershipRecord): McpRobotScope[] {
+  const scopes: McpRobotScope[] = []
+  if (member.role) scopes.push('quotation:read')
+  if (invoicePermission(member)?.status === 'active') {
+    scopes.push('invoice:read')
+  }
+  return scopes
+}
+
+function scopeLabel(scope: McpRobotScope): string {
+  return scope === 'quotation:read'
+    ? t('quotation.pages.permissions.mcpQuotationRead')
+    : t('quotation.pages.permissions.mcpInvoiceRead')
+}
+
+function formatExpiry(value: string | null) {
+  if (!value) return t('quotation.pages.permissions.noExpiry')
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+  }).format(new Date(value))
+}
+
+async function copyToken() {
+  if (!props.generatedToken) return
+  try {
+    await navigator.clipboard.writeText(props.generatedToken.token)
+    copiedToken.value = true
+    copyFailed.value = false
+  } catch {
+    copiedToken.value = false
+    copyFailed.value = true
+  }
+}
+
+function selectToken(event: FocusEvent) {
+  if (event.target instanceof HTMLInputElement) event.target.select()
+}
+
 function saveChanges(member: QuotationMembershipRecord) {
   const permission = invoicePermission(member)
   emit('save', {
@@ -210,6 +267,9 @@ function saveChanges(member: QuotationMembershipRecord) {
       <p class="mt-2 text-xs text-dm-text-tertiary">
         {{ t('quotation.pages.permissions.platformAccessHint') }}
       </p>
+      <p class="mt-2 text-xs text-dm-text-tertiary">
+        {{ t('quotation.pages.permissions.mcpTokenHint') }}
+      </p>
       <div class="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs">
         <span class="text-dm-text-secondary">
           <strong class="font-semibold text-dm-text">
@@ -238,14 +298,14 @@ function saveChanges(member: QuotationMembershipRecord) {
     >
       {{ t('quotation.pages.permissions.noManagedUsers') }}
     </div>
-    <div v-else class="overflow-hidden">
-      <table class="dm-table workspace-access-table table-fixed">
+    <div v-else class="overflow-x-auto">
+      <table class="dm-table workspace-access-table min-w-[1100px] table-fixed">
         <colgroup>
-          <col class="w-[22%]">
-          <col class="w-[22%]">
-          <col class="w-[22%]">
-          <col class="w-[18%]">
-          <col class="w-[16%]">
+          <col>
+          <col>
+          <col>
+          <col>
+          <col class="w-[256px]">
         </colgroup>
         <thead class="bg-dm-surface text-dm-text-secondary">
           <tr>
@@ -253,7 +313,7 @@ function saveChanges(member: QuotationMembershipRecord) {
             <th>{{ t('quotation.pages.permissions.platformColumn') }}</th>
             <th>{{ t('quotation.pages.permissions.invoiceColumn') }}</th>
             <th>{{ t('quotation.pages.permissions.expiryLabel') }}</th>
-            <th class="text-right">
+            <th>
               {{ t('quotation.pages.permissions.actionsColumn') }}
             </th>
           </tr>
@@ -326,16 +386,29 @@ function saveChanges(member: QuotationMembershipRecord) {
                 :aria-label="t('quotation.pages.permissions.expiryLabel')"
               >
             </td>
-            <td class="text-right">
-              <div class="flex justify-end">
+            <td>
+              <div class="flex flex-nowrap items-center gap-2">
                 <button
                   type="button"
-                  class="dm-btn-primary whitespace-nowrap px-2.5 py-2 text-sm"
+                  class="dm-btn-primary shrink-0 whitespace-nowrap px-2.5 py-2 text-sm"
                   :disabled="saving || !hasChanges(member)"
                   @click="saveChanges(member)"
                 >
                   <ShieldCheck class="h-4 w-4" />
                   {{ t('quotation.pages.permissions.saveWorkspaceAccess') }}
+                </button>
+                <button
+                  type="button"
+                  class="dm-btn-default shrink-0 whitespace-nowrap px-2.5 py-2 text-sm disabled:opacity-50"
+                  :disabled="saving || generatingUserId !== null || memberScopes(member).length === 0 || hasChanges(member)"
+                  @click="emit('generate-token', member.user_id)"
+                >
+                  <span
+                    v-if="generatingUserId === member.user_id"
+                    class="h-4 w-4 animate-spin rounded-full border-2 border-current border-r-transparent"
+                  />
+                  <ShieldCheck v-else class="h-4 w-4" />
+                  {{ t('quotation.pages.permissions.generateMcpToken') }}
                 </button>
               </div>
             </td>
@@ -344,6 +417,88 @@ function saveChanges(member: QuotationMembershipRecord) {
       </table>
     </div>
   </section>
+
+  <Teleport to="body">
+    <div
+      v-if="generatedToken"
+      class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-[2px]"
+      role="presentation"
+      @click.self="emit('close-token')"
+    >
+      <div
+        class="w-full max-w-xl rounded-xl border border-dm-border-light bg-white p-5 shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="mcp-token-title"
+      >
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <h2 id="mcp-token-title" class="text-lg font-bold text-dm-text">
+              {{ t('quotation.pages.permissions.mcpTokenGenerated') }}
+            </h2>
+            <p class="mt-1 text-sm text-dm-text-secondary">
+              {{ t('quotation.pages.permissions.mcpTokenOneTime') }}
+            </p>
+          </div>
+          <button
+            type="button"
+            class="rounded-md p-1.5 text-dm-text-tertiary hover:bg-slate-100"
+            :aria-label="t('quotation.common.close')"
+            @click="emit('close-token')"
+          >
+            <X class="h-5 w-5" />
+          </button>
+        </div>
+        <div class="mt-4 flex flex-wrap gap-2">
+          <span
+            v-for="scope in generatedToken.scopes"
+            :key="scope"
+            class="rounded-full bg-blue-50 px-3 py-1 text-sm text-blue-800"
+          >
+            {{ scopeLabel(scope) }}
+          </span>
+        </div>
+        <p class="mt-3 text-sm text-dm-text-secondary">
+          {{ t('quotation.pages.permissions.mcpTokenExpiryLabel') }}
+          {{ formatExpiry(generatedToken.expires_at) }}
+        </p>
+        <label class="mt-4 block text-sm font-medium text-dm-text">
+          {{ t('quotation.pages.permissions.mcpTokenLabel') }}
+          <input
+            :value="generatedToken.token"
+            readonly
+            class="dm-input mt-1 font-mono text-sm"
+            @focus="selectToken"
+          >
+        </label>
+        <div class="mt-4 flex justify-end gap-2">
+          <button
+            type="button"
+            class="dm-btn-default px-4 py-2 text-sm"
+            @click="emit('close-token')"
+          >
+            {{ t('quotation.common.close') }}
+          </button>
+          <button
+            type="button"
+            class="dm-btn-primary px-4 py-2 text-sm"
+            @click="copyToken"
+          >
+            {{ copiedToken
+              ? t('quotation.pages.permissions.mcpTokenCopied')
+              : t('quotation.pages.permissions.copyMcpToken') }}
+          </button>
+        </div>
+        <p
+          v-if="copyFailed"
+          class="mt-3 text-sm text-red-700"
+          role="alert"
+        >
+          {{ t('quotation.pages.permissions.mcpTokenCopyFailed') }}
+        </p>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>

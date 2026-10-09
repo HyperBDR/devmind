@@ -92,7 +92,16 @@ services:
         condition: service_completed_successfully
       postgresql:
         condition: service_healthy
-    command: development
+    command:
+      - python
+      - -m
+      - uvicorn
+      - core.asgi:application
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --reload
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health"]
       interval: 30s

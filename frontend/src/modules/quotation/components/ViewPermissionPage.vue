@@ -46,6 +46,10 @@ import {
   type QuotationMembershipRole,
   type ViewPermissionContext,
 } from '../api/viewPermissions'
+import {
+  createMcpRobotCredential,
+  type CreatedMcpRobotCredential,
+} from '../api/mcpRobots'
 import { useQuotationI18n } from '../composables/useQuotationI18n'
 import FormSelect, { type FormSelectOption } from './FormSelect.vue'
 import UserPermissionSection from './UserPermissionSection.vue'
@@ -98,6 +102,8 @@ const membershipContext = ref<QuotationMembershipContext>({
   members: [],
   role_options: [],
 })
+const generatedToken = ref<CreatedMcpRobotCredential | null>(null)
+const generatingUserId = ref<number | null>(null)
 const loading = ref(false)
 const saving = ref(false)
 const decidingId = ref<number | null>(null)
@@ -288,6 +294,38 @@ async function saveWorkspaceAccess(payload: WorkspaceAccessPayload) {
       : t('quotation.pages.permissions.workspaceAccessFailed')
   } finally {
     saving.value = false
+  }
+}
+
+async function generateMcpToken(userId: number) {
+  const member = membershipContext.value.members.find(
+    (item) => item.user_id === userId,
+  )
+  if (!member) return
+
+  const invoicePermission = invoiceAccessContext.value.permissions.find(
+    (item) => item.user_id === userId && item.status === 'active',
+  )
+  if (!member.role && !invoicePermission) {
+    error.value = t('quotation.pages.permissions.mcpTokenNoAccess')
+    return
+  }
+
+  generatingUserId.value = userId
+  resetFeedback()
+  try {
+    const credential = await createMcpRobotCredential({
+      name: `MCP - ${member.name}`,
+      user_id: userId,
+      expires_in_days: 90,
+    })
+    generatedToken.value = credential
+  } catch (err: unknown) {
+    error.value = err instanceof Error
+      ? err.message
+      : t('quotation.pages.permissions.mcpTokenCreateFailed')
+  } finally {
+    generatingUserId.value = null
   }
 }
 
@@ -595,9 +633,13 @@ watch([uploadUserId, uploadFolderToken], () => {
       <UserPermissionSection
         :context="membershipContext"
         :invoice-context="invoiceAccessContext"
+        :generating-user-id="generatingUserId"
+        :generated-token="generatedToken"
         :loading="loading"
         :saving="saving"
         @save="saveWorkspaceAccess"
+        @generate-token="generateMcpToken"
+        @close-token="generatedToken = null"
       />
       <ViewGrantSection
         :context="viewContext"

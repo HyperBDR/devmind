@@ -429,7 +429,7 @@ class QuotationListAPITests(TestCase):
 
         response = self.api.get(
             self.url,
-            {"salesperson": "Taylor Sales"},
+            {"salesperson": "  tAYlor sALES  "},
         )
 
         assert [row["id"] for row in response.data["items"]] == [

@@ -21,6 +21,10 @@ urlpatterns = [
     # Returns a simple 'OK' response to indicate the application is running
     path('health', lambda _: JsonResponse({'health': 'OK'}, status=200)),
 
+    # MCP OAuth user consent API
+    path('api/v1/mcp/oauth/', include('mcp_server.oauth_urls')),
+    path('api/v1/mcp/robots/', include('mcp_server.robot_urls')),
+
     # API Schema endpoint
     # Provides the OpenAPI schema in JSON format
     path('api/schema', schema_view, name='schema'),
