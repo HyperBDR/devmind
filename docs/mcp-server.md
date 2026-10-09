@@ -89,9 +89,20 @@ the configured resource URI.
 
 ## Production configuration
 
-Set explicit HTTPS URLs in the DevMind runtime environment. Use the same
-public DevMind host by default; configure separate endpoint hosts only when
-the respective clients can reach them:
+MCP configuration is generated automatically at startup, including during
+normal image-based upgrades. Existing deployments do not need to add MCP
+variables to `.env`, and startup does not rewrite the file.
+
+With `DJANGO_DEBUG=false`, the default origin is derived from `SITE_DOMAIN`,
+then `FRONTEND_URL`. Localhost and example domains are skipped. If neither
+provides a usable host, the hosted DevMind default is
+`https://tower.oneprocloud.com`. Inferred origins always use HTTPS, and all
+endpoint paths and allowed hosts are generated from them. Existing explicit
+MCP values take precedence; empty values use the generated defaults.
+
+Other installations can reuse their existing site configuration or set
+`MCP_OAUTH_CLIENT_BASE_URL` and `MCP_OAUTH_BROWSER_BASE_URL`. For deployments
+with separate public endpoints, individual overrides remain supported:
 
 ```env
 MCP_OAUTH_ISSUER_URL=https://devmind.example.com/
@@ -107,7 +118,9 @@ MCP_ALLOWED_HOSTS=devmind.example.com:*
 
 Production startup rejects HTTP OAuth URLs. Nginx must proxy `/mcp`, OAuth
 endpoints, and `/.well-known/` to the backend. It must route the consent page
-to the frontend. Add every configured API hostname to `MCP_ALLOWED_HOSTS`.
+to the frontend. Allowed hosts are derived from the effective endpoint URLs
+unless `MCP_ALLOWED_HOSTS` is explicitly set; custom lists must include the API
+host.
 
 ## Local Docker configuration
 
