@@ -89,9 +89,20 @@ the configured resource URI.
 
 ## Production configuration
 
-Set explicit HTTPS URLs in the DevMind runtime environment. Use the same
-public DevMind host by default; configure separate endpoint hosts only when
-the respective clients can reach them:
+MCP configuration is generated automatically at startup, including during
+normal image-based upgrades. Existing deployments do not need to add MCP
+variables to `.env`, and startup does not rewrite the file.
+
+With `DJANGO_DEBUG=false`, the default origin is derived from `SITE_DOMAIN`,
+then `FRONTEND_URL`. Localhost and example domains are skipped. If neither
+provides a usable host, the hosted DevMind default is
+`https://tower.oneprocloud.com`. Inferred origins always use HTTPS, and all
+endpoint paths and allowed hosts are generated from them. Existing explicit
+MCP values take precedence; empty values use the generated defaults.
+
+Other installations can reuse their existing site configuration or set
+`MCP_OAUTH_CLIENT_BASE_URL` and `MCP_OAUTH_BROWSER_BASE_URL`. For deployments
+with separate public endpoints, individual overrides remain supported:
 
 ```env
 MCP_OAUTH_ISSUER_URL=https://devmind.example.com/
@@ -102,12 +113,15 @@ MCP_OAUTH_REGISTRATION_ENDPOINT_URL=https://devmind.example.com/register
 MCP_OAUTH_REVOCATION_ENDPOINT_URL=https://devmind.example.com/revoke
 MCP_OAUTH_CONSENT_URL=https://devmind.example.com/oauth/mcp/authorize
 MCP_OAUTH_SCOPES=mcp:read
-MCP_ALLOWED_HOSTS=devmind.example.com:*
 ```
 
 Production startup rejects HTTP OAuth URLs. Nginx must proxy `/mcp`, OAuth
 endpoints, and `/.well-known/` to the backend. It must route the consent page
-to the frontend. Add every configured API hostname to `MCP_ALLOWED_HOSTS`.
+to the frontend. Allowed hosts are derived from the effective endpoint URLs
+unless `MCP_ALLOWED_HOSTS` is explicitly set; custom lists must include the API
+host. Generated allowlists include both the bare hostname and its `:*`
+port pattern: production Nginx forwards a bare Host, while direct clients may
+include a port. IPv6 addresses retain square brackets in both forms.
 
 ## Local Docker configuration
 
@@ -125,7 +139,6 @@ MCP_OAUTH_REGISTRATION_ENDPOINT_URL=http://host.docker.internal:18000/register
 MCP_OAUTH_REVOCATION_ENDPOINT_URL=http://host.docker.internal:18000/revoke
 MCP_OAUTH_CONSENT_URL=http://localhost:18000/oauth/mcp/authorize
 MCP_OAUTH_SCOPES=mcp:read
-MCP_ALLOWED_HOSTS=localhost:*,127.0.0.1:*,host.docker.internal:*
 ```
 
 These HTTP URLs are accepted only with `DJANGO_DEBUG=true`. From the host
