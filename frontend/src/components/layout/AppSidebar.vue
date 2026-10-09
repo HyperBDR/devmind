@@ -648,7 +648,7 @@
         <div
           v-if="
             isQuotationPlatform &&
-            userStore.userHasFeature('sales_management')
+            userStore.userHasInvoiceCapability('view')
           "
           class="menu-group"
           :class="collapsed && !isMobile ? 'menu-group-collapsed' : ''"
