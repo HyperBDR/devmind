@@ -102,7 +102,7 @@ class InvoiceApiTests(TestCase):
                 "search": "migration",
                 "customer": "Acme Ltd",
                 "region": "Malaysia",
-                "sales_owner": "Taylor Sales",
+                "salesperson": "  tAYlor sALES  ",
                 "status": InvoiceStatus.ISSUED,
                 "source_type": InvoiceSourceType.FEISHU,
                 "invoice_contact": "Alex Buyer",
@@ -127,6 +127,58 @@ class InvoiceApiTests(TestCase):
                 {"name": "Alex Buyer", "email": ""},
             ],
         )
+        legacy_response = self.client.get(
+            "/api/v1/invoice/invoices",
+            {"sales_owner": "Taylor Sales"},
+        )
+        self.assertEqual(legacy_response.status_code, 200)
+        self.assertEqual(
+            [row["id"] for row in legacy_response.data["items"]],
+            [matching.id],
+        )
+
+    def test_handler_and_salesperson_filters_return_the_same_records(self):
+        expected = set()
+        for number, handler, owner in (
+            ("INV-HANDLER", "Carrol Yu", ""),
+            ("INV-OWNER", "", "Carrol Yu"),
+            ("INV-BOTH", "Carrol Yu", "Carrol Yu"),
+            ("INV-PARTIAL", "Carrol", "Carol Yu"),
+        ):
+            invoice = Invoice.objects.create(
+                invoice_no=number,
+                invoice_date=date(2025, 7, 15),
+                customer_name="Acme Ltd",
+                contact_person=handler,
+                sales_owner=owner,
+                created_by=self.user,
+            )
+            if number != "INV-PARTIAL":
+                expected.add(str(invoice.id))
+        Invoice.objects.create(
+            invoice_no="INV-OTHER-MONTH",
+            invoice_date=date(2025, 8, 1),
+            contact_person="Carrol Yu",
+            created_by=self.user,
+        )
+
+        for field in ("salesperson", "sales_owner", "invoice_contact"):
+            with self.subTest(field=field):
+                response = self.client.get(
+                    "/api/v1/invoice/invoices",
+                    {
+                        field: "  cARROL yU  ",
+                        "customer": "Acme Ltd",
+                        "invoice_from": "2025-07-01",
+                        "invoice_to": "2025-07-31",
+                    },
+                )
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.data["total"], 3)
+                self.assertEqual(
+                    {str(row["id"]) for row in response.data["items"]},
+                    expected,
+                )
 
     def test_invoice_update_records_changed_fields(self):
         created = self.client.post(

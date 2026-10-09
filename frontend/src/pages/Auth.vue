@@ -144,7 +144,13 @@ const handleLogin = async () => {
     // Wait for navigation to complete before clearing loading
     // If navigation succeeds, component will unmount, so loading will be cleared automatically
     try {
-      await router.push(userStore.getUserLandingPath())
+      const mcpOAuthReturn = sessionStorage.getItem('mcp_oauth_return')
+      if (mcpOAuthReturn?.startsWith('/oauth/mcp/authorize?')) {
+        sessionStorage.removeItem('mcp_oauth_return')
+        await router.push(mcpOAuthReturn)
+      } else {
+        await router.push(userStore.getUserLandingPath())
+      }
     } catch (navigationError) {
       // Navigation failed (e.g., route doesn't exist), clear loading
       console.error('Navigation error:', navigationError)

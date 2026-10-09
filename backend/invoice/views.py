@@ -20,6 +20,7 @@ from invoice.permissions import (
     HasInvoiceImportAccess,
     InvoiceCapability,
     has_invoice_capability,
+    invoice_responsible_person_filter,
     invoice_visibility_filter,
 )
 from invoice.services.analytics import sales_dashboard
@@ -174,7 +175,6 @@ class InvoiceListCreateView(APIView):
         for field in (
             "customer_name",
             "region",
-            "sales_owner",
             "status",
             "source_type",
             "currency",
@@ -183,9 +183,16 @@ class InvoiceListCreateView(APIView):
             value = filters.get(filter_key)
             if value:
                 queryset = queryset.filter(**{field: value})
+        salesperson = filters.get("salesperson") or filters.get(
+            "sales_owner"
+        )
+        if salesperson:
+            queryset = queryset.filter(
+                invoice_responsible_person_filter(salesperson)
+            )
         if filters.get("invoice_contact"):
             queryset = queryset.filter(
-                contact_person=filters["invoice_contact"],
+                invoice_responsible_person_filter(filters["invoice_contact"])
             )
         if filters.get("invoice_contact_email"):
             queryset = queryset.filter(

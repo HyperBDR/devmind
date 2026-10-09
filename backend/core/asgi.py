@@ -9,8 +9,8 @@ https://docs.djangoproject.com/en/5.1/howto/deployment/asgi/
 
 import os
 
-from django.core.asgi import get_asgi_application
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings")
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings')
+from mcp_server.server import build_asgi_app
 
-application = get_asgi_application()
+application = build_asgi_app()

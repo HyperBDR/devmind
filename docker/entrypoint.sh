@@ -21,7 +21,6 @@ ERROR_LOG="${LOG_BASE_DIR}/gunicorn_error.log"
 CELERY_LOG="/var/log/celery/celery.log"
 
 WORKERS=${WORKERS:-1}
-THREADS=${THREADS:-1}
 REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
 REDIS_HEALTHCHECK_URL=${REDIS_HEALTHCHECK_URL:-${CELERY_BROKER_URL:-$REDIS_URL}}
 DB_ENGINE=${DB_ENGINE:-sqlite}
@@ -142,16 +141,15 @@ run_runtime_initialization() {
 
 # --- Process Starters ---
 start_gunicorn() {
-    log "Starting Gunicorn..."
-    exec gunicorn core.wsgi:application \
+    log "Starting Gunicorn with Uvicorn ASGI workers..."
+    exec gunicorn core.asgi:application \
         --name backend \
         --bind 0.0.0.0:8000 \
-        --workers $WORKERS \
-        --threads $THREADS \
-        --worker-class gthread \
+        --workers "$WORKERS" \
+        --worker-class uvicorn.workers.UvicornWorker \
         --log-level info \
-        --access-logfile $ACCESS_LOG \
-        --error-logfile $ERROR_LOG
+        --access-logfile "$ACCESS_LOG" \
+        --error-logfile "$ERROR_LOG"
 }
 
 start_celery_worker() {

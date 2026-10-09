@@ -21,6 +21,7 @@ from .database import *
 # Import module-specific configurations
 from .accounts import *
 from .ai_services import *
+from .mcp_server import *
 
 from .logging_config import configure_logging
 
@@ -175,6 +176,7 @@ INSTALLED_APPS += [
     'sals',
     'quotation',
     'invoice',
+    'mcp_server',
     'agentcore_metering.adapters.django',
     'agentcore_task.adapters.django',
     'agentcore_notifier.adapters.django',

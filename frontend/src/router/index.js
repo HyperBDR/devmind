@@ -19,6 +19,11 @@ const routes = [
     meta: { requiresGuest: true }
   },
   {
+    path: '/oauth/mcp/authorize',
+    name: 'McpOAuthAuthorize',
+    component: () => import('@/pages/McpOAuthAuthorize.vue')
+  },
+  {
     path: '/auth-unavailable',
     name: 'AuthUnavailable',
     component: () => import('@/pages/AuthUnavailable.vue')

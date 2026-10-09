@@ -1,0 +1,196 @@
+# DevMind MCP OAuth
+
+DevMind exposes a read-only MCP HTTP resource at `/mcp` and provides OAuth
+Authorization Code with PKCE (`S256`) and Dynamic Client Registration (DCR).
+Each user signs into DevMind and approves the client. MCP tools use that
+DevMind user's existing permissions. OAuth clients supply their own redirect
+URIs during registration; DevMind validates and stores them.
+
+OAuth URLs come from deployment configuration, never from the incoming HTTP
+`Host` header. The authorization endpoint and consent page are browser-facing.
+Issuer discovery, registration, token, revocation, and MCP resource endpoints
+must be reachable by the MCP client service. Those addresses may differ in a
+split local Docker setup.
+
+## Invoice responsibility searches
+
+Invoice handler and sales owner are equivalent search aliases. Use the
+`search_invoices.salesperson` argument for either name: the backend matches
+the full name against `contact_person` OR `sales_owner`, ignoring case and
+surrounding input whitespace. It does not match partial names. REST invoice
+filters `invoice_contact`, `salesperson`, and `sales_owner` use the same rule.
+Date, customer, and other filters still apply together with the user's
+existing visibility scope. An invoice matching both fields is counted once.
+The MCP response marks `responsibility_fields_equivalent: true`; its `total`
+applies to both aliases even when an original responsibility field is empty.
+
+## Read-only robot credentials
+
+MCP administrators can issue a robot credential for clients that need a
+fixed, read-only identity instead of a browser OAuth login. The credential
+is bound to an active DevMind account. MCP queries still apply that account's
+current quotation or invoice permissions, and the credential's module scopes
+further restrict which read tools it can call.
+
+Use an active DevMind service account with only the required module access as
+the robot principal. This is a service identity, not an individual user's
+delegated login.
+
+Only authenticated DevMind staff can manage credentials:
+
+- `GET /api/v1/mcp/robots/` lists credential metadata, never token values.
+- `POST /api/v1/mcp/robots/` creates a credential and returns its token once.
+- `DELETE /api/v1/mcp/robots/<credential-id>/` revokes it immediately.
+
+Create a quotation-only robot credential with:
+
+```json
+{
+  "name": "Quotation reader",
+  "user_id": 123,
+  "scopes": ["quotation:read"],
+  "expires_in_days": 90
+}
+```
+
+Use `invoice:read` for an invoice-only credential, or include both module
+scopes when the same robot needs both. The lifetime defaults to 90 days and
+can be set from 1 to 365 days. The returned value is a bearer token; store it
+in the MCP client's secret configuration and send it as
+`Authorization: Bearer <token>`. DevMind stores only a SHA-256 digest, and the
+raw token is never returned by list or revoke operations.
+
+To rotate a token, create a replacement credential, update the MCP client's
+secret, then revoke the old credential. MCP robot credentials are read-only;
+they cannot invoke write operations.
+
+## Endpoints
+
+With issuer `https://devmind.example.com/` and resource
+`https://devmind.example.com/mcp`:
+
+- MCP endpoint: `https://devmind.example.com/mcp`
+- Protected Resource Metadata (resource path):
+  `https://devmind.example.com/.well-known/oauth-protected-resource/mcp`
+- Protected Resource Metadata (origin alias):
+  `https://devmind.example.com/.well-known/oauth-protected-resource`
+- Authorization Server Metadata:
+  `https://devmind.example.com/.well-known/oauth-authorization-server`
+- DCR: `/register`
+- Authorization: `/authorize`
+- Token: `/token`
+- Revocation: `/revoke`
+- Consent page: `/oauth/mcp/authorize`
+
+The standard metadata path is derived from the Issuer. For an Issuer with a
+path, the Authorization Server Metadata route follows RFC 8414's well-known
+path construction. The protected-resource path metadata remains derived from
+the configured resource URI.
+
+## Production configuration
+
+Set explicit HTTPS URLs in the DevMind runtime environment. Use the same
+public DevMind host by default; configure separate endpoint hosts only when
+the respective clients can reach them:
+
+```env
+MCP_OAUTH_ISSUER_URL=https://devmind.example.com/
+MCP_OAUTH_RESOURCE_URL=https://devmind.example.com/mcp
+MCP_OAUTH_AUTHORIZATION_ENDPOINT_URL=https://devmind.example.com/authorize
+MCP_OAUTH_TOKEN_ENDPOINT_URL=https://devmind.example.com/token
+MCP_OAUTH_REGISTRATION_ENDPOINT_URL=https://devmind.example.com/register
+MCP_OAUTH_REVOCATION_ENDPOINT_URL=https://devmind.example.com/revoke
+MCP_OAUTH_CONSENT_URL=https://devmind.example.com/oauth/mcp/authorize
+MCP_OAUTH_SCOPES=mcp:read
+MCP_ALLOWED_HOSTS=devmind.example.com:*
+```
+
+Production startup rejects HTTP OAuth URLs. Nginx must proxy `/mcp`, OAuth
+endpoints, and `/.well-known/` to the backend. It must route the consent page
+to the frontend. Add every configured API hostname to `MCP_ALLOWED_HOSTS`.
+
+## Local Docker configuration
+
+The browser uses `localhost`; a client running in another Docker container
+uses the host-published DevMind port through `host.docker.internal`. Do not
+put the container-only hostname in `MCP_OAUTH_AUTHORIZATION_ENDPOINT_URL` or
+`MCP_OAUTH_CONSENT_URL`.
+
+```env
+MCP_OAUTH_ISSUER_URL=http://host.docker.internal:18000/
+MCP_OAUTH_RESOURCE_URL=http://host.docker.internal:18000/mcp
+MCP_OAUTH_AUTHORIZATION_ENDPOINT_URL=http://localhost:18000/authorize
+MCP_OAUTH_TOKEN_ENDPOINT_URL=http://host.docker.internal:18000/token
+MCP_OAUTH_REGISTRATION_ENDPOINT_URL=http://host.docker.internal:18000/register
+MCP_OAUTH_REVOCATION_ENDPOINT_URL=http://host.docker.internal:18000/revoke
+MCP_OAUTH_CONSENT_URL=http://localhost:18000/oauth/mcp/authorize
+MCP_OAUTH_SCOPES=mcp:read
+MCP_ALLOWED_HOSTS=localhost:*,127.0.0.1:*,host.docker.internal:*
+```
+
+These HTTP URLs are accepted only with `DJANGO_DEBUG=true`. From the host
+browser, open the OAuth metadata and authorization URLs using `localhost`.
+From the MCP client container, open the Issuer metadata, registration, token,
+and MCP resource URLs using `host.docker.internal`. If the client shares the
+DevMind Docker network, its service name and container port can be used for
+the client-facing URLs instead.
+
+## Metadata examples
+
+Authorization Server Metadata:
+
+```json
+{
+  "issuer": "https://devmind.example.com/",
+  "authorization_endpoint": "https://devmind.example.com/authorize",
+  "token_endpoint": "https://devmind.example.com/token",
+  "registration_endpoint": "https://devmind.example.com/register",
+  "revocation_endpoint": "https://devmind.example.com/revoke",
+  "response_types_supported": ["code"],
+  "grant_types_supported": ["authorization_code", "refresh_token"],
+  "code_challenge_methods_supported": ["S256"],
+  "token_endpoint_auth_methods_supported": [
+    "client_secret_basic",
+    "client_secret_post",
+    "none"
+  ],
+  "scopes_supported": ["mcp:read"]
+}
+```
+
+Protected Resource Metadata for `/mcp`:
+
+```json
+{
+  "resource": "https://devmind.example.com/mcp",
+  "authorization_servers": ["https://devmind.example.com/"],
+  "scopes_supported": ["mcp:read"],
+  "resource_name": "DevMind MCP"
+}
+```
+
+Currently `mcp:read` is the implemented scope. Startup rejects unsupported
+scope configuration instead of advertising permissions that tools do not
+enforce. Tokens are opaque, stored by digest, issuer-bound, resource-bound,
+short-lived, and authorized against the user's DevMind permissions on each
+request. Refresh tokens rotate on use. No OAuth signing key or per-client
+account mapping is required.
+
+Run the normal Django migrations during deployment. MCP has one initial
+replacement migration that creates the six final models directly, without
+creating obsolete external-identity mapping tables.
+
+The replacement declares the previous MCP migrations `0001` through `0008`
+in `replaces`. Environments that already applied all eight keep their tables,
+OAuth clients, and robot credentials; Django recognizes the completed chain
+without recreating tables. Do not delete migration records, drop tables, or
+use `--fake` for this upgrade.
+
+Before upgrading an existing development environment, inspect
+`python manage.py showmigrations mcp_server` using its previous checkout.
+Only a fresh environment or a fully completed `0001`–`0008` chain is supported
+by this replacement. If only part of the old chain was applied, stop and
+complete that chain on the previous version first; its `0005` must remove the
+redundant `RemoveField(user)` operation before the whole mapping table is
+deleted. Back up the database before that repair. Do not deploy this
+replacement over a partially applied chain.
