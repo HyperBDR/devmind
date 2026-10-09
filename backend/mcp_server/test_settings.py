@@ -34,7 +34,7 @@ class McpSettingsTests(unittest.TestCase):
             self.assertEqual(settings[key], origin + path)
         self.assertEqual(settings["MCP_OAUTH_SCOPES"], ["mcp:read"])
         host = origin.split("://", 1)[1].split(":", 1)[0]
-        self.assertEqual(settings["MCP_ALLOWED_HOSTS"], [f"{host}:*"])
+        self.assertEqual(settings["MCP_ALLOWED_HOSTS"], [host, f"{host}:*"])
 
     def test_existing_production_env_needs_no_mcp_variables(self):
         self.assert_origin(load_settings(), "https://tower.oneprocloud.com")
@@ -81,7 +81,10 @@ class McpSettingsTests(unittest.TestCase):
         )
         self.assertEqual(
             settings["MCP_ALLOWED_HOSTS"],
-            ["localhost:*", "127.0.0.1:*", "host.docker.internal:*"],
+            [
+                "localhost", "localhost:*", "127.0.0.1", "127.0.0.1:*",
+                "host.docker.internal", "host.docker.internal:*",
+            ],
         )
 
     def test_explicit_endpoints_and_allowed_hosts_are_preserved(self):
@@ -110,7 +113,20 @@ class McpSettingsTests(unittest.TestCase):
         )
         self.assertEqual(
             settings["MCP_ALLOWED_HOSTS"],
-            ["api.company.test:*", "web.company.test:*"],
+            [
+                "api.company.test", "api.company.test:*",
+                "web.company.test", "web.company.test:*",
+            ],
+        )
+
+    def test_ipv6_hosts_keep_brackets_with_and_without_ports(self):
+        settings = load_settings(
+            MCP_OAUTH_CLIENT_BASE_URL="https://[2001:db8::1]",
+            MCP_OAUTH_BROWSER_BASE_URL="https://[2001:db8::1]",
+        )
+        self.assertEqual(
+            settings["MCP_ALLOWED_HOSTS"],
+            ["[2001:db8::1]", "[2001:db8::1]:*"],
         )
 
     def test_empty_mcp_values_use_defaults(self):

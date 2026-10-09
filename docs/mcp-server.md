@@ -113,14 +113,15 @@ MCP_OAUTH_REGISTRATION_ENDPOINT_URL=https://devmind.example.com/register
 MCP_OAUTH_REVOCATION_ENDPOINT_URL=https://devmind.example.com/revoke
 MCP_OAUTH_CONSENT_URL=https://devmind.example.com/oauth/mcp/authorize
 MCP_OAUTH_SCOPES=mcp:read
-MCP_ALLOWED_HOSTS=devmind.example.com:*
 ```
 
 Production startup rejects HTTP OAuth URLs. Nginx must proxy `/mcp`, OAuth
 endpoints, and `/.well-known/` to the backend. It must route the consent page
 to the frontend. Allowed hosts are derived from the effective endpoint URLs
 unless `MCP_ALLOWED_HOSTS` is explicitly set; custom lists must include the API
-host.
+host. Generated allowlists include both the bare hostname and its `:*`
+port pattern: production Nginx forwards a bare Host, while direct clients may
+include a port. IPv6 addresses retain square brackets in both forms.
 
 ## Local Docker configuration
 
@@ -138,7 +139,6 @@ MCP_OAUTH_REGISTRATION_ENDPOINT_URL=http://host.docker.internal:18000/register
 MCP_OAUTH_REVOCATION_ENDPOINT_URL=http://host.docker.internal:18000/revoke
 MCP_OAUTH_CONSENT_URL=http://localhost:18000/oauth/mcp/authorize
 MCP_OAUTH_SCOPES=mcp:read
-MCP_ALLOWED_HOSTS=localhost:*,127.0.0.1:*,host.docker.internal:*
 ```
 
 These HTTP URLs are accepted only with `DJANGO_DEBUG=true`. From the host

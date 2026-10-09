@@ -71,7 +71,10 @@ MCP_OAUTH_SCOPES = [
     if scope.strip()
 ]
 _default_hosts = (
-    ["localhost:*", "127.0.0.1:*", "host.docker.internal:*"]
+    [
+        "localhost", "localhost:*", "127.0.0.1", "127.0.0.1:*",
+        "host.docker.internal", "host.docker.internal:*",
+    ]
     if _development else []
 )
 for _url in (
@@ -85,9 +88,10 @@ for _url in (
 ):
     _host = urlsplit(_url).hostname
     if _host:
-        _host_pattern = f"[{_host}]:*" if ":" in _host else f"{_host}:*"
-        if _host_pattern not in _default_hosts:
-            _default_hosts.append(_host_pattern)
+        _host = f"[{_host}]" if ":" in _host else _host
+        for _host_pattern in (_host, f"{_host}:*"):
+            if _host_pattern not in _default_hosts:
+                _default_hosts.append(_host_pattern)
 MCP_ALLOWED_HOSTS = [
     host.strip()
     for host in _setting(
