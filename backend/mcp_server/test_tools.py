@@ -159,6 +159,40 @@ class McpToolIdentityTests(TransactionTestCase):
             subject=subject,
         )["results"]
 
+    def test_dotted_user_owns_full_sales_name_with_pagination(self):
+        user = self.users[0]
+        user.username = "Evelyn.chee"
+        user.save(update_fields=["username"])
+        for index in range(12):
+            quote = self._quotation(f"Q-DOTTED-{index}", user)
+            quote.issuer_contact_name = "Evelyn Chee"
+            quote.created_by_email = "importer@example.com"
+            quote.save(update_fields=[
+                "issuer_contact_name", "created_by_email",
+            ])
+        response = self._search_quotation_page(
+            "2026-08", salesperson=" evelyn.chee ", offset=10,
+        )
+        self.assertEqual(response["total"], 12)
+        self.assertEqual(len(response["results"]), 2)
+        self.assertFalse(response["has_more"])
+        other = self._search_quotation_page(
+            "", salesperson="Evelyn Chee", subject="user-b",
+        )
+        self.assertEqual(other["total"], 0)
+
+    def test_colliding_mcp_user_cannot_claim_normalized_sales_name(self):
+        user = self.users[0]
+        user.username = "Evelyn.chee"
+        user.save(update_fields=["username"])
+        quote = self._quotation("Q-COLLIDING", user)
+        quote.issuer_contact_name = "Evelyn Chee"
+        quote.created_by_email = "importer@example.com"
+        quote.save(update_fields=["issuer_contact_name", "created_by_email"])
+        User.objects.create_user("Evelyn Chee")
+        result = self._search_quotation_page("", salesperson="Evelyn Chee")
+        self.assertEqual(result["total"], 0)
+
     def _search_quotation_page(
         self,
         query,
