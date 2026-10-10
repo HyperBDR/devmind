@@ -6,22 +6,31 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from subprocess import TimeoutExpired
 from types import SimpleNamespace
 from unittest.mock import patch
 from uuid import uuid4
 
 import pymupdf
-from accounts.models import Role
 from django.contrib.auth.models import User
 from django.test import TransactionTestCase, override_settings
-from invoice.models import Invoice, InvoiceAccessGrant, InvoiceAccessRole
-from mcp_server import server as mcp_server_tools
 from mcp.server.auth.middleware.auth_context import auth_context_var
 from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
 from mcp.server.auth.provider import AccessToken
+from starlette.testclient import TestClient
+
+from accounts.models import Role
+from core.pdf_ocr import PdfOcrError
+from invoice.models import (
+    Invoice,
+    InvoiceAccessGrant,
+    InvoiceAccessRole,
+    InvoiceDocument,
+    InvoiceItem,
+)
+from mcp_server import server as mcp_server_tools
 from mcp_server.models import McpDocumentPage, McpOAuthToken
 from quotation import models as quotation_models
-from starlette.testclient import TestClient
 
 
 class McpToolIdentityTests(TransactionTestCase):
@@ -187,6 +196,7 @@ class McpToolIdentityTests(TransactionTestCase):
         offset=0,
         salesperson="",
         subject="user-a",
+        summary=False,
     ):
         context = self._context(subject)
         return json.loads(
@@ -195,8 +205,145 @@ class McpToolIdentityTests(TransactionTestCase):
                 limit=limit,
                 offset=offset,
                 salesperson=salesperson,
+                summary=summary,
                 ctx=context,
             )
+        )
+
+    def _pdf_asset(self, quote, **fields):
+        return quotation_models.DocumentAsset.objects.create(
+            quotation=quote,
+            doc_type=quotation_models.DocumentType.PDF,
+            file_name=f"{quote.quote_no}.pdf",
+            mime_type="application/pdf",
+            storage_key=f"test/{quote.id}.pdf",
+            content_hash="a" * 64,
+            **fields,
+        )
+
+    def test_missing_pdf_marks_search_incomplete_without_leaking_other_user(
+        self,
+    ):
+        visible = self._pdf_asset(self.quotes[0])
+        hidden = self._pdf_asset(self.quotes[1])
+        with tempfile.TemporaryDirectory() as directory:
+            with patch(
+                "quotation.services.storage.resolve_document_path",
+                return_value=Path(directory) / "missing.pdf",
+            ) as resolve:
+                result = json.loads(
+                    mcp_server_tools.search_pdf_content(
+                        "keyword", "quotations", ctx=self._context()
+                    )
+                )
+        resolve.assert_called_once_with(visible.storage_key)
+        self.assertEqual(result["results"], [])
+        self.assertFalse(result["search_complete"])
+        self.assertEqual(result["document_count"], 1)
+        self.assertEqual(result["unavailable_document_count"], 1)
+        self.assertEqual(
+            result["unavailable_documents"][0]["reason"], "file_missing"
+        )
+        self.assertNotIn(hidden.pk, json.dumps(result))
+
+    def test_partial_pdf_search_keeps_valid_matches(self):
+        cached = self._pdf_asset(self.quotes[0])
+        quote = self._quotation("Q-MISSING", self.users[0])
+        self._pdf_asset(quote)
+        McpDocumentPage.objects.create(
+            quotation_asset=cached,
+            content_hash=cached.content_hash,
+            page_number=1,
+            text="keyword remains searchable",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            with patch(
+                "quotation.services.storage.resolve_document_path",
+                return_value=Path(directory) / "missing.pdf",
+            ):
+                result = json.loads(
+                    mcp_server_tools.search_pdf_content(
+                        "keyword", "quotations", ctx=self._context()
+                    )
+                )
+        self.assertFalse(result["search_complete"])
+        self.assertEqual(len(result["results"]), 1)
+        self.assertEqual(result["results"][0]["document_id"], cached.pk)
+
+    def test_pdf_extraction_failures_are_reported(self):
+        self._pdf_asset(self.quotes[0])
+        cases = (
+            (PdfOcrError("unreadable scan"), "ocr_failed"),
+            (TimeoutExpired("tesseract", 30), "ocr_timeout"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "scan.pdf"
+            with pymupdf.open() as pdf:
+                pdf.new_page()
+                pdf.save(path)
+            for error, reason in cases:
+                with self.subTest(reason=reason):
+                    with patch(
+                        "quotation.services.storage.resolve_document_path",
+                        return_value=path,
+                    ), patch.object(
+                        mcp_server_tools,
+                        "extract_pdf_text_with_ocr",
+                        side_effect=error,
+                    ):
+                        result = json.loads(
+                            mcp_server_tools.search_pdf_content(
+                                "keyword",
+                                "quotations",
+                                ctx=self._context(),
+                            )
+                        )
+                    self.assertFalse(result["search_complete"])
+                    self.assertEqual(
+                        result["unavailable_documents"][0]["reason"], reason
+                    )
+
+    def test_unreadable_pdf_reports_partial_search(self):
+        self._pdf_asset(self.quotes[0])
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "broken.pdf"
+            path.write_bytes(b"not a pdf")
+            with patch(
+                "quotation.services.storage.resolve_document_path",
+                return_value=path,
+            ):
+                result = json.loads(
+                    mcp_server_tools.search_pdf_content(
+                        "keyword", "quotations", ctx=self._context()
+                    )
+                )
+        self.assertFalse(result["search_complete"])
+        self.assertEqual(
+            result["unavailable_documents"][0]["reason"], "pdf_unreadable"
+        )
+
+    def test_missing_invoice_pdf_marks_search_incomplete(self):
+        invoice = Invoice.objects.get(invoice_no="INV-mcp-alice")
+        document = InvoiceDocument.objects.create(
+            invoice=invoice,
+            file_name="missing.pdf",
+            storage_key="missing.pdf",
+            document_type="pdf",
+            status="active",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            with override_settings(INVOICE_STORAGE=directory):
+                result = json.loads(
+                    mcp_server_tools.search_pdf_content(
+                        "keyword", "invoices", ctx=self._context()
+                    )
+                )
+        self.assertFalse(result["search_complete"])
+        self.assertEqual(
+            result["unavailable_documents"][0]["document_id"], document.pk
+        )
+        self.assertEqual(
+            result["unavailable_documents"][0]["reason"], "file_missing"
         )
 
     def test_pdf_search_returns_authorized_quotation_pages(self):
@@ -233,6 +380,7 @@ class McpToolIdentityTests(TransactionTestCase):
                 self.assertEqual(hit["record_id"], self.quotes[0].pk)
                 self.assertEqual(hit["page"], 2)
                 self.assertIn("searchablekeyword", hit["snippet"])
+                self.assertTrue(result["search_complete"])
 
     def test_first_pdf_search_indexes_only_authorized_quotation(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -264,6 +412,7 @@ class McpToolIdentityTests(TransactionTestCase):
                 )
             resolve.assert_called_once_with(assets[0].storage_key)
             self.assertEqual(len(result["results"]), 1)
+            self.assertTrue(result["search_complete"])
             self.assertEqual(
                 result["results"][0]["document_id"], assets[0].pk
             )
@@ -969,6 +1118,102 @@ class McpToolIdentityTests(TransactionTestCase):
         self.assertNotEqual(acme.invoice_no, other_customer.invoice_no)
         self.assertNotEqual(acme.invoice_no, other_month.invoice_no)
 
+    def test_invoice_summary_pagination_is_compact_and_authorized(self):
+        expected = {
+            self._invoice(
+                f"INV-SUMMARY-{index:02d}",
+                self.users[0],
+                invoice_date=date(2025, 7, 1),
+            ).invoice_no
+            for index in range(25)
+        }
+        hidden = self._invoice(
+            "INV-SUMMARY-HIDDEN",
+            self.users[1],
+            invoice_date=date(2025, 7, 1),
+        )
+        first = self._search_invoice_page(
+            "2025年7月", limit=100, summary=True
+        )
+        second = self._search_invoice_page(
+            "2025年7月", limit=20, offset=20, summary=True
+        )
+        self.assertEqual(first["total"], 25)
+        self.assertEqual(first["limit"], 20)
+        self.assertEqual(len(first["results"]), 20)
+        self.assertTrue(first["has_more"])
+        self.assertEqual(len(second["results"]), 5)
+        self.assertFalse(second["has_more"])
+        numbers = {
+            item["invoice_no"]
+            for item in first["results"] + second["results"]
+        }
+        self.assertEqual(numbers, expected)
+        self.assertNotIn(hidden.invoice_no, numbers)
+        self.assertNotIn("items", first["results"][0])
+        self.assertNotIn("bank_account_number", first["results"][0])
+        self.assertEqual(
+            first["query_context"]["date_filter"],
+            {
+                "type": "month",
+                "start": "2025-07-01",
+                "end_exclusive": "2025-08-01",
+            },
+        )
+
+    def test_invoice_summary_keeps_detail_tool_and_legacy_response(self):
+        invoice = self._invoice(
+            "INV-SUMMARY-DETAIL",
+            self.users[0],
+            invoice_date=date(2025, 7, 1),
+        )
+        InvoiceItem.objects.create(
+            invoice=invoice,
+            line_no=1,
+            product_name="License",
+            quantity=2,
+            unit_price=100,
+            total_amount=200,
+        )
+        summary = self._search_invoice_page(
+            "2025年7月", summary=True
+        )
+        legacy = self._search_invoice_page("2025年7月")
+        self.assertNotIn("items", summary["results"][0])
+        self.assertEqual(legacy["limit"], 1)
+        self.assertEqual(
+            legacy["results"][0]["items"][0]["product_name"], "License"
+        )
+        detail = json.loads(
+            mcp_server_tools.get_invoice(
+                invoice.pk, ctx=self._context()
+            )
+        )
+        self.assertEqual(detail["items"], legacy["results"][0]["items"])
+
+    def test_empty_search_describes_applied_date_and_visibility(self):
+        for query in ("2025年7月", "2025-07", "July 2025"):
+            with self.subTest(query=query):
+                response = self._search_invoice_page(query, summary=True)
+                self.assertEqual(response["total"], 0)
+                self.assertEqual(response["result_status"], "complete")
+                self.assertEqual(
+                    response["query_context"]["visibility_scope"],
+                    "authorized_user",
+                )
+                self.assertEqual(
+                    response["query_context"]["date_filter"]["start"],
+                    "2025-07-01",
+                )
+        quote_page = self._search_quotation_page("2025年7月")
+        self.assertEqual(quote_page["result_status"], "complete")
+        self.assertEqual(
+            quote_page["query_context"]["date_filter"]["start"],
+            "2025-07-01",
+        )
+        invalid = self._search_invoice_page("2025年13月", summary=True)
+        self.assertEqual(invalid["result_status"], "invalid_date")
+
     def test_invoice_month_pagination_returns_every_record_once(self):
         expected = {
             self._invoice(
@@ -1237,6 +1482,16 @@ class McpToolIdentityTests(TransactionTestCase):
                     "authorization": f"Bearer {self._bearer_token('user-a')}",
                 },
             )
+            request["params"]["arguments"]["summary"] = True
+            summary_response = client.post(
+                "/mcp",
+                json=request,
+                headers={
+                    "accept": "application/json, text/event-stream",
+                    "host": "localhost:8000",
+                    "authorization": f"Bearer {self._bearer_token('user-a')}",
+                },
+            )
 
         self.assertEqual(response.status_code, 200, response.text)
         event = json.loads(response.text.split("data: ", 1)[1])
@@ -1250,6 +1505,15 @@ class McpToolIdentityTests(TransactionTestCase):
             [item["invoice_no"] for item in result["results"]],
             [invoice.invoice_no],
         )
+        self.assertEqual(summary_response.status_code, 200)
+        summary_event = json.loads(
+            summary_response.text.split("data: ", 1)[1]
+        )
+        summary_result = json.loads(
+            summary_event["result"]["content"][0]["text"]
+        )
+        self.assertEqual(summary_result["limit"], 20)
+        self.assertNotIn("items", summary_result["results"][0])
 
     def test_initialize_requires_oauth_bearer(self):
         app = mcp_server_tools.build_asgi_app()
