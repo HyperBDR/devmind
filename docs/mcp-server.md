@@ -24,6 +24,32 @@ existing visibility scope. An invoice matching both fields is counted once.
 The MCP response marks `responsibility_fields_equivalent: true`; its `total`
 applies to both aliases even when an original responsibility field is empty.
 
+## Query summaries and incomplete PDF searches
+
+For invoice lists and monthly summaries, call `search_invoices` with
+`summary=true` and `limit=20`. This returns up to 20 compact records per
+page instead of full invoice details and line items. Follow the returned
+`limit`, `offset`, and `has_more` for pagination, then call `get_invoice`
+only when full details are needed. The default `summary=false` preserves
+the existing one-record-per-page response, including line items.
+
+Structured searches include `query_context`, which describes the applied
+date filter and the authorized user's visibility scope. A successful
+`result_status=complete` with `total=0` means no matching visible records;
+do not retry alternate date formats or widen the date range just to confirm
+that empty result. `result_status=invalid_date` is distinct from a valid
+empty search.
+
+PDF searches retain available matches and return `search_complete=false`
+when some authorized documents cannot be searched. Inspect
+`unavailable_document_count` and `unavailable_documents` for file-missing,
+unreadable PDF, or OCR failure/timeout reasons. The document sample is
+limited to 20 entries; `unavailable_documents_truncated` indicates that
+more entries were omitted. Empty results from an incomplete search do not
+prove the absence of matching content. Valid cached text remains searchable
+when the original file is unavailable. Search does not download or restore
+missing files; storage reconciliation is a separate operation.
+
 ## Read-only robot credentials
 
 MCP administrators can issue a robot credential for clients that need a

@@ -4,17 +4,18 @@ import calendar
 import json
 import re
 from datetime import date
+from subprocess import TimeoutExpired
 from urllib.parse import urlsplit
 
 import pymupdf
-from django.contrib.auth import get_user_model
-from core.pdf_ocr import PdfOcrError, extract_pdf_text_with_ocr
-from core.pdf_text import PdfTextExtractionError
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.db.models import F, Q
-from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.auth.middleware.auth_context import get_access_token
+from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+
+from core.pdf_ocr import PdfOcrError, extract_pdf_text_with_ocr
 
 mcp = MCPServer(
     "DevMind Quote Desk",
@@ -52,7 +53,15 @@ mcp = MCPServer(
         "same salesperson argument for invoice handler, responsible person, "
         "or sales owner queries. The returned invoice total applies to "
         "both aliases. Never re-filter invoice results or recalculate total "
-        "from raw contact_person/sales_owner values; either can be empty."
+        "from raw contact_person/sales_owner values; either can be empty. "
+        "For invoice lists and monthly summaries, call search_invoices with "
+        "summary=true and limit=20; use get_invoice only for requested "
+        "details. A successful empty result applies to the authorized user's "
+        "visible records. Trust query_context.date_filter; do not retry "
+        "alternate date formats or broaden the date range to verify zero "
+        "results. If PDF search_complete is false, report incomplete search "
+        "and its unavailable_documents; empty results do not prove there "
+        "is no matching PDF content."
     ),
 )
 
@@ -471,6 +480,53 @@ def _quotation_summary(quote):
     }
 
 
+def _query_context(
+    *, parsed_date=None, parsed_month=None, parsed_year=None, salesperson=""
+):
+    """Describe the applied filters without exposing inaccessible data."""
+    date_filter = None
+    if parsed_month:
+        start, end, _ = parsed_month
+        date_filter = {
+            "type": "month",
+            "start": start.isoformat() if start else None,
+            "end_exclusive": end.isoformat() if end else None,
+        }
+    elif parsed_date:
+        requested, has_year, _ = parsed_date
+        date_filter = {
+            "type": "date" if has_year else "month_day",
+            "value": (
+                requested.isoformat()
+                if has_year
+                else requested.strftime("%m-%d")
+            ),
+        }
+    elif parsed_year:
+        date_filter = {"type": "year", "value": parsed_year[0]}
+    return {
+        "visibility_scope": "authorized_user",
+        "date_filter": date_filter,
+        "salesperson": salesperson,
+    }
+
+
+def _invoice_summary(invoice):
+    """Return compact list fields; full details remain in get_invoice."""
+    return {
+        "id": invoice.id,
+        "invoice_no": invoice.invoice_no,
+        "document_kind": invoice.document_kind,
+        "status": invoice.status,
+        "invoice_date": invoice.invoice_date,
+        "customer_name": invoice.customer_name,
+        "currency": invoice.currency,
+        "total_amount": invoice.total_amount,
+        "contact_person": invoice.contact_person,
+        "sales_owner": invoice.sales_owner,
+    }
+
+
 def _invoice_data(invoice, *, include_items=False):
     result = {
         "id": invoice.id,
@@ -585,6 +641,11 @@ def search_quotations(
         )
     parsed_date = _parse_quotation_date(query)
     parsed_month = _parse_quotation_month(query) if not parsed_date else None
+    query_context = _query_context(
+        parsed_date=parsed_date,
+        parsed_month=parsed_month,
+        salesperson=salesperson,
+    )
     text_query = query
     if parsed_date:
         text_query = (
@@ -604,6 +665,8 @@ def search_quotations(
                 "offset": _offset(offset),
                 "limit": _limit(limit),
                 "has_more": False,
+                "query_context": query_context,
+                "result_status": "invalid_date",
             }
         )
 
@@ -675,6 +738,8 @@ def search_quotations(
             "offset": page_offset,
             "limit": page_limit,
             "has_more": page_offset + len(page) < total,
+            "query_context": query_context,
+            "result_status": "complete",
         }
     )
 
@@ -710,6 +775,7 @@ def search_invoices(
     offset: int = 0,
     salesperson: str = "",
     ctx: Context = None,
+    summary: bool = False,
 ):
     """Search invoices and receipts in the user's invoice visibility scope.
 
@@ -726,13 +792,17 @@ def search_invoices(
     contact_person/sales_owner values: either field can be empty. This searches
     invoices and receipts, not quotations or business orders.
 
-    Each page contains one complete invoice to fit MCP clients that bound
-    remote tool results. Use offset and total, limit, and has_more to read
-    every page before summarizing a month. Keep all fields and line items in
-    results. When total is positive, present the invoice records. Only report
+    For lists and monthly summaries, use summary=true and limit=20. Summary
+    pages contain up to 20 compact records; use get_invoice for full details.
+    The default summary=false preserves one complete invoice per page for
+    MCP clients that bound remote tool results. Use offset, total, limit,
+    and has_more to read every page before summarizing a month. When total
+    is positive, present the invoice records. Only report
     no matching invoices after all pages are read and total is zero. Do not
     replace MCP results with document search. Distinguish permission errors
-    from empty results and tool errors.
+    from empty results and tool errors. query_context describes the applied
+    date filter and authorized-user visibility scope. A complete empty
+    result needs no alternate date formats or broader verification queries.
     """
     from invoice import permissions as invoice_permissions
     from invoice.models import Invoice
@@ -772,7 +842,13 @@ def search_invoices(
             f"{query[parsed_year[1][1]:]}"
         )
 
-    page_limit = _limit(limit, maximum=1)
+    query_context = _query_context(
+        parsed_date=parsed_date,
+        parsed_month=parsed_month,
+        parsed_year=parsed_year,
+        salesperson=salesperson,
+    )
+    page_limit = _limit(limit, maximum=20 if summary else 1)
     page_offset = _offset(offset)
     if parsed_month and parsed_month[0] is None:
         return _json(
@@ -782,6 +858,8 @@ def search_invoices(
                 "offset": page_offset,
                 "limit": page_limit,
                 "has_more": False,
+                "query_context": query_context,
+                "result_status": "invalid_date",
             }
         )
     if (
@@ -796,6 +874,8 @@ def search_invoices(
                 "offset": page_offset,
                 "limit": page_limit,
                 "has_more": False,
+                "query_context": query_context,
+                "result_status": "invalid_date",
             }
         )
 
@@ -838,21 +918,28 @@ def search_invoices(
                 | Q(items__description__icontains=term)
             )
         queryset = queryset.filter(condition).distinct()
-    queryset = queryset.prefetch_related("items").order_by(
-        "-invoice_date", "-created_at", "-id"
-    )
+    if not summary:
+        queryset = queryset.prefetch_related("items")
+    queryset = queryset.order_by("-invoice_date", "-created_at", "-id")
     total = queryset.count()
     page = list(queryset[page_offset : page_offset + page_limit])
     return _json(
         {
             "results": [
-                _invoice_data(invoice, include_items=True) for invoice in page
+                (
+                    _invoice_summary(invoice)
+                    if summary
+                    else _invoice_data(invoice, include_items=True)
+                )
+                for invoice in page
             ],
             "total": total,
             "offset": page_offset,
             "limit": page_limit,
             "has_more": page_offset + len(page) < total,
             "responsibility_fields_equivalent": True,
+            "query_context": query_context,
+            "result_status": "complete",
         }
     )
 
@@ -925,6 +1012,7 @@ def _query_terms(query: str) -> list[str]:
 
 
 def _index_pdf(*, asset=None, invoice_document=None):
+    """Index a PDF, returning a reason when its text is unavailable."""
     from core.file_hash import hash_file
     from mcp_server.models import McpDocumentPage
 
@@ -940,8 +1028,11 @@ def _index_pdf(*, asset=None, invoice_document=None):
         path = invoice_storage().resolve(invoice_document.storage_key)
         relation = {"invoice_document": invoice_document}
     if not path.is_file():
-        return
-    content_hash = record.content_hash or hash_file(path)
+        return "file_missing"
+    try:
+        content_hash = record.content_hash or hash_file(path)
+    except OSError:
+        return "file_unreadable"
     pages = McpDocumentPage.objects.filter(
         **relation,
         content_hash=content_hash,
@@ -955,15 +1046,19 @@ def _index_pdf(*, asset=None, invoice_document=None):
                 (index, page.get_text("text", sort=True).strip())
                 for index, page in enumerate(pdf, start=1)
             ]
-    except Exception as exc:
-        raise PdfTextExtractionError(
-            f"Unable to read PDF: {type(exc).__name__}"
-        ) from exc
+    except FileNotFoundError:
+        return "file_missing"
+    except Exception:
+        return "pdf_unreadable"
     if not any(text for _, text in extracted):
         try:
             extracted = [(0, extract_pdf_text_with_ocr(path))]
-        except (PdfOcrError, TimeoutError):
-            return
+        except (TimeoutExpired, TimeoutError):
+            return "ocr_timeout"
+        except PdfOcrError:
+            return "ocr_failed"
+    if not any(text for _, text in extracted):
+        return "text_unavailable"
     McpDocumentPage.objects.bulk_create(
         [
             McpDocumentPage(
@@ -997,6 +1092,9 @@ def search_pdf_content(
 
     document_type accepts all, quotations, or invoices. Results quote the
     matching source PDF and page; use the record tool for structured fields.
+    search_complete=false means some authorized PDFs could not be searched.
+    Keep existing matches and report unavailable_documents; an empty partial
+    search does not prove that no PDF contains the requested content.
     """
     from accounts.access import get_effective_feature_keys
     from mcp_server.models import McpDocumentPage
@@ -1008,7 +1106,13 @@ def search_pdf_content(
         _require_robot_scope("invoice:read")
     terms = _query_terms(query)
     if not terms:
-        return _json({"results": []})
+        return _json(
+            {
+                "results": [],
+                "search_complete": False,
+                "error": "A searchable query term is required.",
+            }
+        )
     if document_type not in {"all", "quotations", "invoices"}:
         return _json(
             {"error": "document_type must be all, quotations, or invoices."}
@@ -1016,6 +1120,8 @@ def search_pdf_content(
     quote_access = "quotation_management" in get_effective_feature_keys(user)
 
     pages = McpDocumentPage.objects.none()
+    unavailable = []
+    document_count = 0
     if document_type in {"all", "quotations"} and quote_access:
         from quotation import models as quotation_models
         from quotation.access import filter_accessible_documents
@@ -1053,16 +1159,30 @@ def search_pdf_content(
                 quotation_asset__in=quote_assets
             ).values_list("quotation_asset_id", "content_hash")
         )
+        failed_assets = []
         # ponytail: lazy indexing adds first-query latency; move this to
         # ingestion jobs when the accessible PDF corpus grows.
         for asset in quote_assets.iterator(chunk_size=100):
+            document_count += 1
             if (
                 asset.content_hash
                 and (asset.id, asset.content_hash) in indexed
             ):
                 continue
-            _index_pdf(asset=asset)
-        pages = McpDocumentPage.objects.filter(quotation_asset__in=quote_assets)
+            reason = _index_pdf(asset=asset)
+            if reason:
+                failed_assets.append(asset.pk)
+                unavailable.append(
+                    {
+                        "document_type": "quotation",
+                        "document_id": asset.pk,
+                        "file_name": asset.file_name,
+                        "reason": reason,
+                    }
+                )
+        pages = McpDocumentPage.objects.filter(
+            quotation_asset__in=quote_assets
+        ).exclude(quotation_asset_id__in=failed_assets)
 
     if document_type in {"all", "invoices"}:
         from invoice import permissions as invoice_permissions
@@ -1081,18 +1201,30 @@ def search_pdf_content(
                     invoice_document__in=visible_invoices
                 ).values_list("invoice_document_id", "content_hash")
             )
+            failed_documents = []
             # ponytail: lazy indexing adds first-query latency; move this to
             # ingestion jobs when the accessible PDF corpus grows.
             for document in visible_invoices.iterator(chunk_size=100):
+                document_count += 1
                 if (
                     document.content_hash
                     and (document.id, document.content_hash) in indexed
                 ):
                     continue
-                _index_pdf(invoice_document=document)
+                reason = _index_pdf(invoice_document=document)
+                if reason:
+                    failed_documents.append(document.pk)
+                    unavailable.append(
+                        {
+                            "document_type": "invoice",
+                            "document_id": document.pk,
+                            "file_name": document.file_name,
+                            "reason": reason,
+                        }
+                    )
             pages = pages | McpDocumentPage.objects.filter(
                 invoice_document__in=visible_invoices
-            )
+            ).exclude(invoice_document_id__in=failed_documents)
 
     match = Q()
     for term in terms:
@@ -1138,7 +1270,16 @@ def search_pdf_content(
         )
         hits.append(hit)
     hits.sort(key=lambda hit: hit["score"], reverse=True)
-    return _json({"results": hits[: _limit(limit)]})
+    return _json(
+        {
+            "results": hits[: _limit(limit)],
+            "search_complete": not unavailable,
+            "document_count": document_count,
+            "unavailable_document_count": len(unavailable),
+            "unavailable_documents": unavailable[:20],
+            "unavailable_documents_truncated": len(unavailable) > 20,
+        }
+    )
 
 
 def build_asgi_app():
