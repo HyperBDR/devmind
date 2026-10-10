@@ -609,8 +609,9 @@ def search_quotations(
 
     limit is capped at 20. Use offset and the returned total, limit, and
     has_more values to retrieve every page before summarizing a month.
-    salesperson is an optional exact, case-insensitive match against the
-    quotation's issuer_contact_name field; surrounding whitespace is ignored.
+    salesperson matches the full issuer_contact_name, ignoring case,
+    surrounding whitespace and differences between dots and spaces.
+    Partial names do not count as a full salesperson match.
     It is ANDed with the query text and date filters.
     results contains compact quotation summaries. Use get_quotation with a
     returned id when full fields or line items are requested. Permission
@@ -625,6 +626,9 @@ def search_quotations(
     from accounts.access import get_effective_feature_keys
     from quotation.access import filter_accessible_quotations
     from quotation.models import Quotation
+    from quotation.services.quotation_queries import (
+        filter_quotation_salesperson,
+    )
 
     user = _user(ctx)
     _require_robot_scope("quotation:read")
@@ -636,9 +640,7 @@ def search_quotations(
     )
     salesperson = salesperson.strip()
     if salesperson:
-        queryset = queryset.filter(
-            issuer_contact_name__iexact=salesperson
-        )
+        queryset = filter_quotation_salesperson(queryset, salesperson)
     parsed_date = _parse_quotation_date(query)
     parsed_month = _parse_quotation_month(query) if not parsed_date else None
     query_context = _query_context(

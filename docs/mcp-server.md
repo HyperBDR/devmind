@@ -52,6 +52,25 @@ missing files; storage reconciliation is a separate operation.
 
 ## Read-only robot credentials
 
+### Automatic quotation salesperson matching
+
+Quotation ownership compares the full DevMind username with the full
+quotation sales name, ignoring case, surrounding spaces and differences
+between dots and spaces. For example, `evelyn.chee` matches `Evelyn Chee`.
+No additional administrator configuration or database migration is needed.
+Both the quotation API and MCP `salesperson` filter use this normalization.
+Partial names do not establish ownership.
+
+Before granting normalized ownership, DevMind checks all other accounts,
+including inactive accounts. If another username normalizes to the same
+identity, automatic ownership is disabled; existing exact ownership and
+explicit administrator grants still apply. Profile display names and
+self-edited real names do not grant quotation access.
+
+This applies to quotation lists, dashboards, details, documents and MCP.
+Existing creation/upload permissions, explicit grants and robot tokens
+remain effective. Invoice access rules are unchanged.
+
 MCP administrators can issue a robot credential for clients that need a
 fixed, read-only identity instead of a browser OAuth login. The credential
 is bound to an active DevMind account. MCP queries still apply that account's

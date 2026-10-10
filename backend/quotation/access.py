@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from django.contrib.auth import get_user_model
 from django.db import connection
-from django.db.models import Q, QuerySet
-from django.db.models.functions import Lower, Trim
+from django.db.models import Q, QuerySet, Value
+from django.db.models.functions import Lower, Replace, Trim
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
@@ -23,6 +24,7 @@ from quotation.permissions import (
     is_quotation_platform_admin,
     user_display_email,
 )
+from quotation.services.quotation_queries import normalize_salesperson_name
 
 
 class DocumentAction:
@@ -87,6 +89,31 @@ def _normalized_owner(value) -> str:
     return str(value or "").strip().casefold()
 
 
+def _quotation_owner_identity(user) -> tuple[str, str]:
+    """Keep exact ownership and allow only an unambiguous sales identity."""
+    username = _normalized_owner(getattr(user, "username", ""))
+    identity = normalize_salesperson_name(username)
+    if len(identity.split()) < 2:
+        return username, ""
+    other_names = get_user_model().objects.exclude(pk=user.pk).values_list(
+        "username",
+        flat=True,
+    )
+    if any(
+        normalize_salesperson_name(name) == identity for name in other_names
+    ):
+        identity = ""
+    return username, identity
+
+
+def _matches_sales_identity(value, username, identity) -> bool:
+    """Retain exact matches when normalized account names collide."""
+    return bool(
+        (username and _normalized_owner(value) == username)
+        or (identity and normalize_salesperson_name(value) == identity)
+    )
+
+
 def _feishu_folder_name(asset: DocumentAsset) -> str:
     """Return the name of the folder containing a parsed Feishu file."""
     folder_path = asset.feishu_folder_path
@@ -98,9 +125,13 @@ def _feishu_folder_name(asset: DocumentAsset) -> str:
     return str(last_folder or "")
 
 
-def _folder_owned_quotation_ids(user) -> set[str]:
+def _folder_owned_quotation_ids(user, owner_identity=None) -> set[str]:
     """Return imported quote IDs whose fallback folder matches the user."""
-    username = _normalized_owner(getattr(user, "username", ""))
+    username, identity = (
+        _quotation_owner_identity(user)
+        if owner_identity is None
+        else owner_identity
+    )
     if not username:
         return set()
     assets = DocumentAsset.objects.filter(
@@ -111,7 +142,9 @@ def _folder_owned_quotation_ids(user) -> set[str]:
     return {
         asset.quotation_id
         for asset in assets
-        if _normalized_owner(_feishu_folder_name(asset)) == username
+        if _matches_sales_identity(
+            _feishu_folder_name(asset), username, identity
+        )
     }
 
 
@@ -238,7 +271,7 @@ def _granted_document_ids(user) -> set[str]:
 
 def _quotation_matches_user(user, quotation: Quotation) -> bool:
     """Return whether a non-admin user may access one quotation."""
-    username = _normalized_owner(getattr(user, "username", ""))
+    username, identity = _quotation_owner_identity(user)
     sales_owner = _normalized_owner(quotation.issuer_contact_name)
     if quotation.source_type == QuotationSourceType.DOCUMENT_IMPORT:
         if _normalized_owner(quotation.created_by_email) == _normalized_owner(
@@ -246,12 +279,16 @@ def _quotation_matches_user(user, quotation: Quotation) -> bool:
         ):
             return True
         if sales_owner:
-            return sales_owner == username
+            return _matches_sales_identity(sales_owner, username, identity)
         return any(
-            _normalized_owner(_feishu_folder_name(asset)) == username
+            _matches_sales_identity(
+                _feishu_folder_name(asset), username, identity
+            )
             for asset in quotation.documents.filter(source="feishu")
         )
-    sales_owner_matches = bool(sales_owner) and sales_owner == username
+    sales_owner_matches = bool(sales_owner) and _matches_sales_identity(
+        sales_owner, username, identity
+    )
     creator_matches = _normalized_owner(quotation.created_by_email) == (
         _normalized_owner(user_display_email(user))
     )
@@ -280,19 +317,25 @@ def filter_accessible_quotations(
     qs = qs.filter(archived_at__isnull=True)
     if is_quotation_platform_admin(user):
         return qs
-    username = _normalized_owner(getattr(user, "username", ""))
+    username, identity = _quotation_owner_identity(user)
     email = _normalized_owner(user_display_email(user))
-    folder_ids = _folder_owned_quotation_ids(user)
+    folder_ids = _folder_owned_quotation_ids(user, (username, identity))
     owner_filter = Lower(Trim("issuer_contact_name"))
     creator_filter = Lower(Trim("created_by_email"))
     granted_ids = _granted_quotation_ids(user)
+    sales_filter = Q(normalized_sales_owner=username)
+    if identity:
+        sales_filter |= Q(normalized_sales_identity=identity)
     return (
         qs.annotate(
             normalized_sales_owner=owner_filter,
+            normalized_sales_identity=Lower(
+                Trim(Replace("issuer_contact_name", Value("."), Value(" ")))
+            ),
             normalized_creator=creator_filter,
         )
         .filter(
-            Q(normalized_sales_owner=username)
+            sales_filter
             | Q(id__in=folder_ids)
             | Q(id__in=granted_ids)
             | Q(documents__created_by_email__iexact=email)
