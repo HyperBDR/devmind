@@ -232,6 +232,7 @@
             <BaseInput
               v-model="submitApprovalForm.expected_date"
               type="date"
+              :min="getRechargeDateBounds().minDate"
               :placeholder="
                 t(
                   'cloudBilling.providers.rechargeApprovalExpectedDatePlaceholder'
@@ -277,6 +278,10 @@ import { format } from 'date-fns'
 import { useI18n } from 'vue-i18n'
 import { useToast } from '@/composables/useToast'
 import { extractResponseData } from '@/utils/api'
+import {
+  getRechargeDateBounds,
+  isValidRechargeExpectedDate
+} from '@/utils/rechargeExpectedDate'
 import {
   getRechargeApprovalSubmitErrorContext,
   getRechargeInfoSaveErrorContext
@@ -971,26 +976,6 @@ const syncForm = () => {
   )
 }
 
-function addDaysToDateString(dateString, days) {
-  const parsed = new Date(`${dateString}T00:00:00`)
-  if (Number.isNaN(parsed.getTime())) {
-    return ''
-  }
-  parsed.setDate(parsed.getDate() + days)
-  const year = parsed.getFullYear()
-  const month = String(parsed.getMonth() + 1).padStart(2, '0')
-  const day = String(parsed.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-function getTodayDateString() {
-  const now = new Date()
-  const year = now.getFullYear()
-  const month = String(now.getMonth() + 1).padStart(2, '0')
-  const day = String(now.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
 const loadApprovals = async () => {
   if (!props.provider?.id) {
     approvals.value = []
@@ -1133,10 +1118,7 @@ const openSubmitApprovalDialog = () => {
     return
   }
   submitApprovalForm.amount = ''
-  submitApprovalForm.expected_date = addDaysToDateString(
-    getTodayDateString(),
-    7
-  )
+  submitApprovalForm.expected_date = getRechargeDateBounds().defaultDate
   showSubmitDialog.value = true
 }
 
@@ -1158,6 +1140,10 @@ const submitApprovalFromDialog = async () => {
   }
   if (!amount || !expectedDate) {
     showWarning(t('cloudBilling.providers.rechargeApprovalRequiredFields'))
+    return
+  }
+  if (!isValidRechargeExpectedDate(expectedDate)) {
+    showWarning(t('cloudBilling.providers.rechargeApprovalExpectedDateInvalid'))
     return
   }
 
