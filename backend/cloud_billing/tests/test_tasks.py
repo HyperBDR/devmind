@@ -2524,7 +2524,13 @@ class TestSubmitRechargeApproval:
         """
         Task should create a recharge approval record for manual submissions.
         """
-        cloud_provider.recharge_info = '{"amount": 188, "recharge_account": "acct-188"}'
+        cloud_provider.recharge_info = json.dumps(
+            {
+                "amount": 188,
+                "recharge_account": "acct-188",
+                "expected_date": "2026-05-20",
+            }
+        )
         cloud_provider.save(update_fields=["recharge_info"])
         mock_execute_agent.return_value = {
             "request_payload": {"amount": 188, "recharge_account": "acct-188"},
@@ -2551,24 +2557,56 @@ class TestSubmitRechargeApproval:
         assert record.provider == cloud_provider
         assert record.status == RechargeApprovalRecord.STATUS_SUBMITTED
         assert record.trigger_source == RechargeApprovalRecord.TRIGGER_SOURCE_MANUAL
+        raw_recharge_info = mock_execute_agent.call_args.kwargs[
+            "raw_recharge_info"
+        ]
+        assert json.loads(raw_recharge_info)["expected_date"] == "2026-05-20"
         mock_approver_notification_delay.assert_called_once_with(record.id)
 
+    @pytest.mark.parametrize(
+        ("stored_date", "utc_now", "expected_date"),
+        [
+            (None, "2026-10-12T01:00:00+00:00", "2026-10-15"),
+            ("2026-04-30", "2026-10-12T01:00:00+00:00", "2026-10-15"),
+            ("2026-05-20", "2026-10-12T01:00:00+00:00", "2026-10-15"),
+            ("2027-01-01", "2026-10-12T01:00:00+00:00", "2026-10-15"),
+            (None, "2026-10-11T16:30:00+00:00", "2026-10-15"),
+            (None, "2026-12-31T16:30:00+00:00", "2027-01-04"),
+        ],
+    )
     @patch("cloud_billing.tasks.execute_recharge_approval_agent")
-    def test_submit_recharge_approval_defaults_alert_expected_date_to_three_days(
+    def test_submit_recharge_approval_recalculates_alert_expected_date(
         self,
         mock_execute_agent,
         cloud_provider,
         monkeypatch,
+        settings,
+        stored_date,
+        utc_now,
+        expected_date,
     ):
-        """
-        Alert-triggered submissions should default expected_date to three days out.
-        """
-        cloud_provider.recharge_info = '{"amount": 188, "recharge_account": "acct-188"}'
+        """Recalculate alert dates from Beijing today, ignoring templates."""
+        settings.TIME_ZONE = "UTC"
+        settings.USE_TZ = True
+        recharge_info = {"amount": 188, "recharge_account": "acct-188"}
+        if stored_date is not None:
+            recharge_info["expected_date"] = stored_date
+        cloud_provider.recharge_info = json.dumps(recharge_info)
         cloud_provider.save(update_fields=["recharge_info"])
         monkeypatch.setattr(
             timezone,
-            "localdate",
-            lambda: datetime.date(2026, 4, 22),
+            "now",
+            lambda: datetime.datetime.fromisoformat(utc_now),
+        )
+        monkeypatch.setattr(
+            billing_tasks.send_recharge_approval_notification,
+            "delay",
+            MagicMock(),
+        )
+        monkeypatch.setattr(
+            billing_tasks.send_pending_recharge_approver_notifications,
+            "delay",
+            MagicMock(),
         )
         mock_execute_agent.return_value = {
             "request_payload": {"amount": 188, "recharge_account": "acct-188"},
@@ -2583,15 +2621,20 @@ class TestSubmitRechargeApproval:
             "summary": "submitted",
         }
 
-        result = submit_recharge_approval(
-            cloud_provider.id,
-            trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
-            alert_record_id=None,
-        )
+        with timezone.override("UTC"):
+            result = submit_recharge_approval(
+                cloud_provider.id,
+                trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
+                alert_record_id=None,
+            )
 
         assert result["success"] is True
-        raw_recharge_info = mock_execute_agent.call_args.kwargs["raw_recharge_info"]
-        assert json.loads(raw_recharge_info)["expected_date"] == "2026-04-25"
+        raw_recharge_info = mock_execute_agent.call_args.kwargs[
+            "raw_recharge_info"
+        ]
+        assert json.loads(raw_recharge_info)["expected_date"] == expected_date
+        cloud_provider.refresh_from_db()
+        assert json.loads(cloud_provider.recharge_info) == recharge_info
 
     @patch("cloud_billing.tasks.execute_recharge_approval_agent")
     def test_submit_recharge_approval_uses_explicit_alert_amount(
@@ -2609,8 +2652,10 @@ class TestSubmitRechargeApproval:
         cloud_provider.save(update_fields=["recharge_info"])
         monkeypatch.setattr(
             timezone,
-            "localdate",
-            lambda: datetime.date(2026, 4, 22),
+            "now",
+            lambda: datetime.datetime(
+                2026, 4, 22, 1, tzinfo=datetime.timezone.utc
+            ),
         )
         record = AlertRecord.objects.create(
             provider=cloud_provider,
