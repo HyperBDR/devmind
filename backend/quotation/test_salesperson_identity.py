@@ -5,6 +5,7 @@ from rest_framework.test import APIClient
 
 from accounts.models import Role
 from quotation.access import (
+    can_access_document,
     can_access_quotation,
     filter_accessible_quotations,
 )
@@ -49,6 +50,103 @@ class SalespersonIdentityTests(TestCase):
         return set(filter_accessible_quotations(
             user or self.user, Quotation.objects.all(),
         ).values_list("id", flat=True))
+
+    def imported_document(self, quote, *, uploader="importer@example.com"):
+        return DocumentAsset.objects.create(
+            quotation=quote,
+            doc_type="pdf",
+            source="feishu",
+            file_name=f"{quote.quote_no}.pdf",
+            storage_key=f"{quote.quote_no}.pdf",
+            created_by_email=uploader,
+            feishu_folder_token="import-folder",
+            feishu_folder_path=[
+                {"token": "import-folder", "name": "Imported quotations"},
+            ],
+        )
+
+    def assert_owned_quote_visible(self, quote, document):
+        self.assertIn(quote.pk, self.visible_ids())
+        self.assertTrue(can_access_quotation(self.user, quote))
+        self.assertTrue(can_access_document(self.user, document))
+        listing = self.api.get("/api/v1/quotation/quotations")
+        self.assertEqual(listing.status_code, 200)
+        self.assertEqual(
+            {item["id"] for item in listing.data["items"]}, {quote.pk},
+        )
+        detail = self.api.get(f"/api/v1/quotation/quotations/{quote.pk}")
+        self.assertEqual(detail.status_code, 200)
+        files = self.api.get(
+            "/api/v1/quotation/documents", {"source": "feishu"},
+        )
+        self.assertEqual(files.status_code, 200)
+        self.assertEqual({item["id"] for item in files.data}, {document.pk})
+        linked = self.api.get(
+            f"/api/v1/quotation/quotations/{quote.pk}/documents",
+        )
+        self.assertEqual(linked.status_code, 200)
+        self.assertEqual({item["id"] for item in linked.data}, {document.pk})
+        dashboard = self.api.get("/api/v1/quotation/dashboard/overview", {
+            "currency": "USD", "date_from": "2026-09",
+            "date_to": "2026-09",
+        })
+        self.assertEqual(dashboard.status_code, 200)
+        self.assertEqual(dashboard.data["summary"]["month_quote_count"], 1)
+        self.assertEqual(
+            {item["id"] for item in dashboard.data["recent"]["items"]},
+            {quote.pk},
+        )
+        other = User.objects.create_user(
+            "unrelated.sales", email="unrelated@example.com",
+        )
+        other.platform_roles.set(self.user.platform_roles.all())
+        QuotationMembership.objects.create(
+            user=other, role=QuotationMembershipRole.USER,
+        )
+        self.assertNotIn(quote.pk, self.visible_ids(other))
+        self.assertFalse(can_access_quotation(other, quote))
+        self.assertFalse(can_access_document(other, document))
+        self.api.force_authenticate(other)
+        self.assertEqual(
+            self.api.get("/api/v1/quotation/quotations").data["total"], 0,
+        )
+        self.assertEqual(self.api.get(
+            "/api/v1/quotation/documents", {"source": "feishu"},
+        ).data, [])
+        self.assertEqual(self.api.get(
+            f"/api/v1/quotation/quotations/{quote.pk}",
+        ).status_code, 403)
+
+    def test_import_creator_can_view_the_original_document(self):
+        quote = self.quote(
+            "External Sales", created_by_email=self.user.email,
+        )
+        document = self.imported_document(quote)
+        self.assert_owned_quote_visible(quote, document)
+
+    def test_uploader_can_open_the_listed_import_quote(self):
+        quote = self.quote("External Sales")
+        document = self.imported_document(quote, uploader=self.user.email)
+        self.assert_owned_quote_visible(quote, document)
+
+    def test_import_creator_keeps_access_despite_sales_name_collision(self):
+        User.objects.create_user("Evelyn Chee")
+        quote = self.quote(created_by_email=self.user.email)
+        document = self.imported_document(quote)
+        self.assert_owned_quote_visible(quote, document)
+
+    def test_archived_import_creator_does_not_restore_visibility(self):
+        quote = self.quote(
+            "External Sales", created_by_email=self.user.email,
+            archived_at=timezone.now(),
+        )
+        document = self.imported_document(quote)
+        self.assertNotIn(quote.pk, self.visible_ids())
+        self.assertFalse(can_access_quotation(self.user, quote))
+        self.assertFalse(can_access_document(self.user, document))
+        self.assertEqual(self.api.get(
+            "/api/v1/quotation/documents", {"source": "feishu"},
+        ).data, [])
 
     def test_full_name_formats_match_in_list_and_detail(self):
         for name in ("Evelyn Chee", " evelyn CHEE ", "EVELYN.CHEE"):

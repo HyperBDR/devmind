@@ -193,6 +193,47 @@ class McpToolIdentityTests(TransactionTestCase):
         result = self._search_quotation_page("", salesperson="Evelyn Chee")
         self.assertEqual(result["total"], 0)
 
+    def test_import_creator_and_uploader_have_consistent_mcp_access(self):
+        user = self.users[0]
+        for owner in ("creator", "uploader"):
+            with self.subTest(owner=owner):
+                quote = self._quotation(f"Q-IMPORT-{owner.upper()}", user)
+                quote.source_type = "document_import"
+                quote.issuer_contact_name = "External Sales"
+                quote.created_by_email = (
+                    user.email if owner == "creator"
+                    else "importer@example.com"
+                )
+                quote.save(update_fields=[
+                    "source_type", "issuer_contact_name", "created_by_email",
+                ])
+                quotation_models.DocumentAsset.objects.create(
+                    quotation=quote,
+                    source="feishu",
+                    doc_type="pdf",
+                    file_name=f"{quote.quote_no}.pdf",
+                    storage_key=f"{quote.quote_no}.pdf",
+                    created_by_email=(
+                        user.email if owner == "uploader"
+                        else "importer@example.com"
+                    ),
+                )
+                page = self._search_quotation_page(quote.quote_no)
+                self.assertEqual(page["total"], 1)
+                self.assertEqual(page["results"][0]["id"], quote.pk)
+                details = json.loads(mcp_server_tools.get_quotation(
+                    quotation_id=quote.pk, ctx=self._context(),
+                ))
+                self.assertEqual(details["id"], quote.pk)
+                denied = self._search_quotation_page(
+                    quote.quote_no, subject="user-b",
+                )
+                self.assertEqual(denied["total"], 0)
+                denied_detail = json.loads(mcp_server_tools.get_quotation(
+                    quotation_id=quote.pk, ctx=self._context("user-b"),
+                ))
+                self.assertIn("error", denied_detail)
+
     def _search_quotation_page(
         self,
         query,

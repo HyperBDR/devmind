@@ -13,7 +13,6 @@ from quotation.models import (
     DocumentLifecycleState,
     PublicAttachmentStatus,
     Quotation,
-    QuotationSourceType,
     QuotationUploadPermission,
     QuotationViewPermission,
     QuotationViewPermissionTarget,
@@ -269,44 +268,19 @@ def _granted_document_ids(user) -> set[str]:
     return ids
 
 
-def _quotation_matches_user(user, quotation: Quotation) -> bool:
-    """Return whether a non-admin user may access one quotation."""
-    username, identity = _quotation_owner_identity(user)
-    sales_owner = _normalized_owner(quotation.issuer_contact_name)
-    if quotation.source_type == QuotationSourceType.DOCUMENT_IMPORT:
-        if _normalized_owner(quotation.created_by_email) == _normalized_owner(
-            user_display_email(user)
-        ):
-            return True
-        if sales_owner:
-            return _matches_sales_identity(sales_owner, username, identity)
-        return any(
-            _matches_sales_identity(
-                _feishu_folder_name(asset), username, identity
-            )
-            for asset in quotation.documents.filter(source="feishu")
-        )
-    sales_owner_matches = bool(sales_owner) and _matches_sales_identity(
-        sales_owner, username, identity
-    )
-    creator_matches = _normalized_owner(quotation.created_by_email) == (
-        _normalized_owner(user_display_email(user))
-    )
-    return sales_owner_matches or creator_matches
-
-
 def can_access_quotation(
     user,
     quotation: Quotation | None,
     action: str = DocumentAction.VIEW,
 ) -> bool:
+    """Use the list ownership rules when authorizing one quotation."""
     if quotation is None or quotation.archived_at is not None:
         return False
-    if is_quotation_platform_admin(user):
-        return True
-    if quotation.pk in _granted_quotation_ids(user):
-        return True
-    return _quotation_matches_user(user, quotation)
+    return filter_accessible_quotations(
+        user,
+        Quotation.objects.filter(pk=quotation.pk),
+        action,
+    ).exists()
 
 
 def filter_accessible_quotations(
@@ -339,10 +313,7 @@ def filter_accessible_quotations(
             | Q(id__in=folder_ids)
             | Q(id__in=granted_ids)
             | Q(documents__created_by_email__iexact=email)
-            | Q(
-                source_type=QuotationSourceType.MANUAL,
-                normalized_creator=email,
-            )
+            | Q(normalized_creator=email)
         )
         .distinct()
     )

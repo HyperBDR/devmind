@@ -68,8 +68,12 @@ explicit administrator grants still apply. Profile display names and
 self-edited real names do not grant quotation access.
 
 This applies to quotation lists, dashboards, details, documents and MCP.
-Existing creation/upload permissions, explicit grants and robot tokens
-remain effective. Invoice access rules are unchanged.
+Quotation creators retain access to both manual and document-imported
+quotations, including their linked files. Uploaders may open the quotations
+already visible through their uploaded documents. Lists and detail checks
+use the same ownership rules; archived quotations remain excluded.
+Explicit grants and robot tokens remain effective. Invoice access rules
+are unchanged.
 
 MCP administrators can issue a robot credential for clients that need a
 fixed, read-only identity instead of a browser OAuth login. The credential
