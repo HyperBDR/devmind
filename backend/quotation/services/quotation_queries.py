@@ -9,8 +9,10 @@ from django.db.models import (
     OuterRef,
     Q,
     QuerySet,
+    Value,
     When,
 )
+from django.db.models.functions import Lower, Replace, Trim
 
 from quotation.models import (
     DocumentAsset,
@@ -34,6 +36,20 @@ SEARCH_FIELDS = (
 )
 PRODUCT_LINE_FACET_LIMIT = 100
 SALESPERSON_FACET_LIMIT = 100
+
+
+def normalize_salesperson_name(value) -> str:
+    """Normalize full sales names without partial or fuzzy matching."""
+    return str(value or "").replace(".", " ").strip().casefold()
+
+
+def filter_quotation_salesperson(queryset, name):
+    """Apply the same full-name comparison used by quotation ownership."""
+    return queryset.annotate(
+        salesperson_identity=Lower(
+            Trim(Replace("issuer_contact_name", Value("."), Value(" ")))
+        ),
+    ).filter(salesperson_identity=normalize_salesperson_name(name))
 
 
 def quotation_currency_facets(
@@ -77,9 +93,7 @@ def filter_quotation_list(
 
     salesperson = filters.get("salesperson")
     if salesperson:
-        queryset = queryset.filter(
-            issuer_contact_name__iexact=salesperson.strip()
-        )
+        queryset = filter_quotation_salesperson(queryset, salesperson)
 
     created_from = filters.get("created_from")
     if created_from:
