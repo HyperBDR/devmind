@@ -7,6 +7,7 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 from quotation.audit import AUDIT_CONTEXT
 from quotation.models import (
+    DocumentType,
     ExportJob,
     ExportJobStatus,
     PublicAttachment,
@@ -211,7 +212,10 @@ def create_export_job(
         )
         if not created:
             job = ExportJob.objects.select_for_update().get(pk=job.pk)
-        required_doc_types = set(normalized_formats)
+        required_doc_types = {
+            DocumentType.EXCEL if fmt == "xlsx" else fmt
+            for fmt in normalized_formats
+        }
         if "pdf" in required_doc_types and selected_attachments:
             required_doc_types.add("merged_pdf")
         missing_assets = (

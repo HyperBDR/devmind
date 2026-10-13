@@ -114,6 +114,62 @@ class QuotationExportFixture(TestCase):
 
 class QuotationExportApiTests(QuotationExportFixture):
 
+    @patch(
+        "quotation.services.export_pipeline.convert_xlsx_to_pdf",
+        return_value=b"%PDF-rendered",
+    )
+    def test_export_assets_match_requested_formats_and_download(self, _pdf):
+        for formats in (["xlsx"], ["pdf"], ["xlsx", "pdf"]):
+            with self.subTest(formats=formats):
+                job, _ = create_export_job(
+                    quotation=self.quotation,
+                    formats=formats,
+                    actor=self.user,
+                    quotation_version_no=1,
+                )
+                render_quotation_export_task.run(job.id)
+
+                response = self.client.get(
+                    f"/api/v1/quotation/exports/{job.id}"
+                )
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.data["status"], "completed")
+                assets = response.data["assets"]
+                self.assertEqual(
+                    {asset["format"] for asset in assets}, set(formats)
+                )
+                for asset in assets:
+                    download = self.client.get(asset["download_url"])
+                    self.assertEqual(download.status_code, 200)
+                    content = b"".join(download.streaming_content)
+                    signature = (
+                        b"PK\x03\x04"
+                        if asset["format"] == "xlsx"
+                        else b"%PDF-"
+                    )
+                    self.assertTrue(content.startswith(signature))
+
+    @patch("quotation.tasks.render_quotation_export_task.apply_async")
+    def test_repeated_excel_request_reuses_rendered_asset(self, apply_async):
+        apply_async.return_value.id = "celery-task-id"
+        payload = {"formats": ["xlsx"], "quotation_version": 1}
+        url = f"/api/v1/quotation/quotations/{self.quotation.id}/exports"
+        with self.captureOnCommitCallbacks(execute=True):
+            first = self.client.post(url, payload, format="json")
+        job_id = first.data["job_id"]
+        render_quotation_export_task.run(job_id)
+
+        for job_status in ("completed", "upload_failed"):
+            with self.subTest(status=job_status):
+                ExportJob.objects.filter(pk=job_id).update(status=job_status)
+                with self.captureOnCommitCallbacks(execute=True):
+                    response = self.client.post(url, payload, format="json")
+                self.assertEqual(response.status_code, 202)
+                self.assertEqual(response.data["job_id"], job_id)
+                self.assertEqual(response.data["status"], job_status)
+                self.assertEqual(apply_async.call_count, 1)
+
     def test_ip_allowlist_failure_explains_how_to_fix_feishu_upload(self):
         job, _created = create_export_job(
             quotation=self.quotation,

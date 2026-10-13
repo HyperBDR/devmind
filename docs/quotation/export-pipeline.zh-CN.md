@@ -14,6 +14,10 @@
 5. 同步任务通过 `StorageRouter` 解析固定 `StorageMount`，上传飞书并更新
    `DocumentReplica`。上传失败不会重新渲染，也不会删除本地资产。
 
+导出 API 的请求 `formats` 与响应 `assets[].format` 均使用 `xlsx` 或
+`pdf`；附件合并后的资产格式为 `merged_pdf`。数据库中的 Excel 资产类型仍为
+`excel`；API 序列化和任务复用检查负责转换，不需要迁移已有资产。
+
 渲染任务只执行当前代码支持的 renderer 版本。部署升级后仍滞留在队列中的
 旧 renderer 任务会以 `renderer_version_unsupported` 失败；重新提交导出请求
 会按当前版本创建新的固定任务，避免用新实现生成却标记成旧版本的文件。
@@ -33,6 +37,10 @@ LibreOffice。OCR 仍由可选的独立 Worker 处理。
 
 renderer 版本由代码实现固定，并自动参与导出幂等键，不能通过环境变量
 覆盖。渲染行为变化时必须随代码递增版本常量。
+
+API 与 Worker 必须使用同一发布版本；本地挂载也必须指向同一个 Orca
+工作区。切换挂载后重启 Worker，使进程重新加载代码，并确保镜像依赖
+与该版本匹配。
 
 关键配置：
 
@@ -75,6 +83,9 @@ Worker 或飞书不可用时，API 仍可启动并处理同步请求以外的业
 
 - 长时间停在 `queued`：确认 `backend-worker` 正在消费
   `quotation_render`，并检查 Redis 连接。
+- `renderer_version_unsupported`：先核对 API 与 Worker 的代码挂载、
+  发布版本及进程实际加载的版本；对齐并重启后重新点击下载。不要修改
+  旧任务固定的 renderer 版本，也不要跳过版本校验。
 - `libreoffice_timeout`：检查 Worker 内存、字体和输入模板；任务最多自动
   重试一次。
 - `libreoffice_busy`：所有转换槽位均被占用；任务会保持可重试状态并自动

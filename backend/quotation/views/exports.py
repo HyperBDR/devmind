@@ -20,6 +20,7 @@ from quotation.audit import (
 )
 from quotation.models import (
     EXPORT_ARCHIVE_SYNC_STAGE,
+    DocumentType,
     ExportJob,
     ExportJobStatus,
     Quotation,
@@ -146,7 +147,11 @@ def export_job_data(job: ExportJob) -> dict:
     assets = [
         {
             "id": asset.id,
-            "format": asset.doc_type,
+            "format": (
+                "xlsx"
+                if asset.doc_type == DocumentType.EXCEL
+                else asset.doc_type
+            ),
             "file_name": asset.file_name,
             "mime_type": asset.mime_type,
             "size_bytes": asset.size_bytes,
