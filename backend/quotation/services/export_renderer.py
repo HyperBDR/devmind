@@ -49,8 +49,9 @@ from quotation.services.storage import (
 LEGACY_DEFAULT_TEMPLATE_NAME = "DevMind standard quotation"
 DEFAULT_TEMPLATE_NAME = "DevMind managed standard quotation"
 DEFAULT_TEMPLATE_VERSION = 2
-CURRENT_RENDERER_VERSION = "quotation-preview-xlsx-v10"
-PREVIOUS_RENDERER_VERSION = "quotation-preview-xlsx-v9"
+CURRENT_RENDERER_VERSION = "quotation-preview-xlsx-v11"
+PREVIOUS_RENDERER_VERSION = "quotation-preview-xlsx-v10"
+LEGACY_RENDERER_VERSION = "quotation-preview-xlsx-v9"
 DEFAULT_WORKSHEET = "Quotation"
 
 
@@ -1364,10 +1365,13 @@ def render_quotation_xlsx(
     sheet.row_dimensions[row].height = 9
     row += 1
     notes = str(value("remarks_disclaimer"))
+    notes_line_height = (
+        9 if renderer_version == CURRENT_RENDERER_VERSION else 12
+    )
     page_width = 595 - (
         sheet.page_margins.left + sheet.page_margins.right
     ) * 72
-    if renderer_version == PREVIOUS_RENDERER_VERSION:
+    if renderer_version == LEGACY_RENDERER_VERSION:
         notes_font_size = 9
         wrapped_notes = [
             wrapped_line
@@ -1403,16 +1407,22 @@ def render_quotation_xlsx(
                 width=notes_wrap_width,
             )
         ]
-        note_min_height = 18
+        note_min_height = (
+            notes_line_height
+            if renderer_version == CURRENT_RENDERER_VERSION
+            else 18
+        )
         title_font = Font(
             name="Arial",
             size=8.25,
             bold=True,
             color="0F172A",
         )
+    # Give each line its own row so unused height cannot collect at a boundary.
+    chunk_size = 1 if renderer_version == CURRENT_RENDERER_VERSION else 6
     notes_chunks = [
-        wrapped_notes[index : index + 6]
-        for index in range(0, len(wrapped_notes), 6)
+        wrapped_notes[index : index + chunk_size]
+        for index in range(0, len(wrapped_notes), chunk_size)
     ]
     page_height = 842 - (
         sheet.page_margins.top + sheet.page_margins.bottom
@@ -1427,7 +1437,9 @@ def render_quotation_xlsx(
     )
     remaining_height = page_capacity - used_height % page_capacity
     title_height = 18
-    first_chunk_height = max(note_min_height, len(notes_chunks[0]) * 12)
+    first_chunk_height = max(
+        note_min_height, min(len(wrapped_notes), 6) * notes_line_height
+    )
     if remaining_height < title_height + first_chunk_height + 12:
         sheet.row_breaks.append(Break(id=row - 1))
     merged(
@@ -1467,7 +1479,7 @@ def render_quotation_xlsx(
         line_count = len(chunk)
         sheet.row_dimensions[row].height = max(
             note_min_height,
-            line_count * 12,
+            line_count * notes_line_height,
         )
         row += 1
     for _ in range(2):

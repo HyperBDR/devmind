@@ -1434,7 +1434,7 @@ class QuotationExportTaskTests(QuotationExportFixture):
         self.assertEqual(job.renderer_version, "openpyxl-libreoffice-v1")
         self.assertEqual(job.assets.count(), 0)
 
-    def test_queued_v9_job_still_renders_with_its_pinned_renderer(self):
+    def test_queued_previous_job_keeps_its_pinned_renderer(self):
         job = self.create_job(["xlsx"])
         ExportJob.objects.filter(pk=job.id).update(
             renderer_version=PREVIOUS_RENDERER_VERSION

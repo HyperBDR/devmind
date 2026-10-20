@@ -15,6 +15,8 @@ from quotation.services.export_pipeline import _attachment_pdf_bytes
 from quotation.services.export_renderer import (
     DEFAULT_TEMPLATE_NAME,
     LEGACY_DEFAULT_TEMPLATE_NAME,
+    LEGACY_RENDERER_VERSION,
+    PREVIOUS_RENDERER_VERSION,
     PdfConversionBusyError,
     TemplateValidationError,
     _build_managed_template_bytes,
@@ -29,6 +31,61 @@ from quotation.services.export_renderer import (
     render_quotation_xlsx,
     validate_template_bytes,
 )
+
+
+class QuotationNotesSpacingTests(SimpleTestCase):
+    def test_blank_line_at_old_chunk_boundary_has_uniform_spacing(self):
+        notes = "\n".join([*(f"Line {i}" for i in range(6)), "", "备注"])
+        content = render_quotation_xlsx(None, {"remarks_disclaimer": notes})
+        workbook = load_workbook(io.BytesIO(content))
+        self.addCleanup(workbook.close)
+        sheet = workbook["Quotation"]
+        title_row = next(
+            cell.row
+            for row in sheet.iter_rows()
+            for cell in row
+            if cell.value == "Additional Notes & Disclaimers:"
+        )
+        start = title_row + 1
+        lines = notes.split("\n")
+        for offset, line in enumerate(lines):
+            row = start + offset
+            cell = sheet.cell(row, 1)
+            self.assertEqual(cell.value or "", line)
+            self.assertEqual(sheet.row_dimensions[row].height, 9)
+            self.assertEqual(cell.border.left.style, "thin")
+            self.assertEqual(cell.border.right.style, "thin")
+            self.assertEqual(
+                cell.border.top.style, "thin" if offset == 0 else None
+            )
+            self.assertEqual(
+                cell.border.bottom.style,
+                "thin" if offset == len(lines) - 1 else None,
+            )
+        self.assertEqual(sheet.cell(start + len(lines), 1).value, None)
+
+    def test_pinned_renderers_keep_their_previous_notes_layout(self):
+        for version, font_size in (
+            (LEGACY_RENDERER_VERSION, 9),
+            (PREVIOUS_RENDERER_VERSION, 6.75),
+        ):
+            with self.subTest(version=version):
+                content = render_quotation_xlsx(
+                    None,
+                    {"remarks_disclaimer": "\n".join(["Short"] * 7)},
+                    renderer_version=version,
+                )
+                workbook = load_workbook(io.BytesIO(content))
+                self.addCleanup(workbook.close)
+                sheet = workbook["Quotation"]
+                cell = next(
+                    cell
+                    for row in sheet.iter_rows()
+                    for cell in row
+                    if cell.value == "\n".join(["Short"] * 6)
+                )
+                self.assertEqual(cell.font.sz, font_size)
+                self.assertEqual(sheet.row_dimensions[cell.row].height, 72)
 
 
 class QuotationTemplateRendererTests(TestCase):
