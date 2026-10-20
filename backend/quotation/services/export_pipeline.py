@@ -33,6 +33,7 @@ from quotation.services.export_archive import (
 )
 from quotation.services.export_renderer import (
     CURRENT_RENDERER_VERSION,
+    LEGACY_RENDERER_VERSION,
     PREVIOUS_RENDERER_VERSION,
     TemplateValidationError,
     convert_attachment_to_pdf,
@@ -315,6 +316,7 @@ def render_export_job(job_id: str) -> dict:
             return {"job_id": job.id, "status": job.status}
         if job.renderer_version not in {
             CURRENT_RENDERER_VERSION,
+            LEGACY_RENDERER_VERSION,
             PREVIOUS_RENDERER_VERSION,
         }:
             raise TemplateValidationError(
