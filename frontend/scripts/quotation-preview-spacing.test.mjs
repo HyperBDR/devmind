@@ -13,6 +13,8 @@ const notesBlock = source.split('Additional Notes & Disclaimers:')[1]
 const spacing = notesBlock.split('To indicate Customer acceptance')[0]
 
 assert.equal((spacing.match(/<tr class="h-3">/g) || []).length, 2)
+assert.doesNotMatch(source, /wrapQuotationDisclaimer/)
+assert.match(source, /\{\{ model\.remarksDisclaimer \}\}/)
 
 const quotationStart = source.indexOf('Quotation\n')
 const dateStart = source.indexOf('Date:')

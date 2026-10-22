@@ -1,18 +1,23 @@
 import base64
 import io
+import shutil
 import subprocess
 from datetime import datetime
 from tempfile import TemporaryDirectory
 from threading import Event, Thread
 from types import SimpleNamespace
+from unittest import skipUnless
 from unittest.mock import patch
 from zipfile import ZIP_DEFLATED, ZipFile
 
+from django.conf import settings
 from django.test import SimpleTestCase, TestCase, override_settings
 from openpyxl import load_workbook
+from pypdf import PdfReader
 from quotation.models import QuotationTemplate
 from quotation.services.export_pipeline import _attachment_pdf_bytes
 from quotation.services.export_renderer import (
+    COMPACT_RENDERER_VERSION,
     DEFAULT_TEMPLATE_NAME,
     LEGACY_DEFAULT_TEMPLATE_NAME,
     LEGACY_RENDERER_VERSION,
@@ -34,7 +39,7 @@ from quotation.services.export_renderer import (
 
 
 class QuotationNotesSpacingTests(SimpleTestCase):
-    def test_blank_line_at_old_chunk_boundary_has_uniform_spacing(self):
+    def test_source_lines_have_uniform_spacing(self):
         notes = "\n".join([*(f"Line {i}" for i in range(6)), "", "备注"])
         content = render_quotation_xlsx(None, {"remarks_disclaimer": notes})
         workbook = load_workbook(io.BytesIO(content))
@@ -52,7 +57,10 @@ class QuotationNotesSpacingTests(SimpleTestCase):
             row = start + offset
             cell = sheet.cell(row, 1)
             self.assertEqual(cell.value or "", line)
-            self.assertEqual(sheet.row_dimensions[row].height, 9)
+            self.assertEqual(
+                sheet.row_dimensions[row].height,
+                13 if line == "备注" else 11,
+            )
             self.assertEqual(cell.border.left.style, "thin")
             self.assertEqual(cell.border.right.style, "thin")
             self.assertEqual(
@@ -67,7 +75,7 @@ class QuotationNotesSpacingTests(SimpleTestCase):
     def test_pinned_renderers_keep_their_previous_notes_layout(self):
         for version, font_size in (
             (LEGACY_RENDERER_VERSION, 9),
-            (PREVIOUS_RENDERER_VERSION, 6.75),
+            (COMPACT_RENDERER_VERSION, 6.75),
         ):
             with self.subTest(version=version):
                 content = render_quotation_xlsx(
@@ -86,6 +94,136 @@ class QuotationNotesSpacingTests(SimpleTestCase):
                 )
                 self.assertEqual(cell.font.sz, font_size)
                 self.assertEqual(sheet.row_dimensions[cell.row].height, 72)
+
+    def test_previous_renderer_keeps_one_wrapped_line_per_row(self):
+        content = render_quotation_xlsx(
+            None,
+            {"remarks_disclaimer": "\n".join(["Short"] * 7)},
+            renderer_version=PREVIOUS_RENDERER_VERSION,
+        )
+        workbook = load_workbook(io.BytesIO(content))
+        self.addCleanup(workbook.close)
+        sheet = workbook["Quotation"]
+        cell = next(
+            cell
+            for row in sheet.iter_rows()
+            for cell in row
+            if cell.value == "Short"
+        )
+        self.assertEqual(cell.font.sz, 6.75)
+        self.assertEqual(sheet.row_dimensions[cell.row].height, 9)
+
+    def test_pinned_renderers_keep_their_previous_wrap_boundary(self):
+        notes = "a" * 170
+        expected_cells = {
+            COMPACT_RENDERER_VERSION: ["a" * 160 + "\n" + "a" * 10],
+            PREVIOUS_RENDERER_VERSION: ["a" * 160, "a" * 10],
+        }
+        for version, expected in expected_cells.items():
+            with self.subTest(version=version):
+                content = render_quotation_xlsx(
+                    None,
+                    {"remarks_disclaimer": notes},
+                    renderer_version=version,
+                )
+                workbook = load_workbook(io.BytesIO(content))
+                self.addCleanup(workbook.close)
+                sheet = workbook["Quotation"]
+                title_row = next(
+                    cell.row
+                    for row in sheet.iter_rows()
+                    for cell in row
+                    if cell.value == "Additional Notes & Disclaimers:"
+                )
+                actual = [
+                    sheet.cell(title_row + offset, 1).value
+                    for offset in range(1, len(expected) + 1)
+                ]
+                self.assertEqual(actual, expected)
+
+    def test_pinned_renderers_keep_their_previous_pagination(self):
+        notes = "\n".join(f"Remark {index}" for index in range(9))
+        for version in (
+            LEGACY_RENDERER_VERSION,
+            COMPACT_RENDERER_VERSION,
+            PREVIOUS_RENDERER_VERSION,
+        ):
+            for item_count, expected_breaks in ((0, []), (4, [37])):
+                with self.subTest(version=version, items=item_count):
+                    content = render_quotation_xlsx(
+                        None,
+                        {
+                            "items": _line_items(item_count),
+                            "remarks_disclaimer": notes,
+                        },
+                        renderer_version=version,
+                    )
+                    workbook = load_workbook(io.BytesIO(content))
+                    self.addCleanup(workbook.close)
+                    sheet = workbook["Quotation"]
+                    self.assertEqual(
+                        [page_break.id for page_break in sheet.row_breaks.brk],
+                        expected_breaks,
+                    )
+
+    def test_current_disclaimer_splits_rows_taller_than_a_page(self):
+        notes = "Long paragraph text. " * 1500
+        content = render_quotation_xlsx(None, {"remarks_disclaimer": notes})
+        workbook = load_workbook(io.BytesIO(content))
+        self.addCleanup(workbook.close)
+        sheet = workbook["Quotation"]
+        title_row = next(
+            cell.row
+            for row in sheet.iter_rows()
+            for cell in row
+            if cell.value == "Additional Notes & Disclaimers:"
+        )
+        rows = []
+        row = title_row + 1
+        while sheet.cell(row, 1).value:
+            rows.append(row)
+            row += 1
+        self.assertGreater(len(rows), 1)
+        self.assertEqual(
+            "".join(sheet.cell(row, 1).value for row in rows),
+            notes,
+        )
+        self.assertTrue(
+            all(sheet.row_dimensions[row].height <= 360 for row in rows)
+        )
+
+
+def _line_items(count):
+    return [
+        {
+            "type": "Software",
+            "line_no": index + 1,
+            "description": f"Line item {index + 1}",
+            "qty": "1.00",
+            "list_price": "100.00",
+            "discount_percent": "0.00",
+            "net_unit_price": "100.00",
+            "extended_price": "100.00",
+        }
+        for index in range(count)
+    ]
+
+
+def _signature_break_rows(content):
+    workbook = load_workbook(io.BytesIO(content), data_only=False)
+    try:
+        sheet = workbook["Quotation"]
+        acceptance_row = next(
+            cell.row
+            for row in sheet.iter_rows()
+            for cell in row
+            if isinstance(cell.value, str)
+            and cell.value.startswith("To indicate Customer acceptance")
+        )
+        breaks = {page_break.id for page_break in sheet.row_breaks.brk}
+        return acceptance_row, breaks
+    finally:
+        workbook.close()
 
 
 class QuotationTemplateRendererTests(TestCase):
@@ -342,6 +480,131 @@ class QuotationTemplateRendererTests(TestCase):
 
         self.assertEqual("".join(wrapped), notes)
         self.assertTrue(all(len(line) <= 26 for line in wrapped))
+
+    def test_current_disclaimer_keeps_soft_wraps_out_of_cell_value(self):
+        template = ensure_default_template()
+        notes = "备注内容" * 80
+
+        content = render_quotation_xlsx(
+            template,
+            {"remarks_disclaimer": notes},
+        )
+
+        workbook = load_workbook(io.BytesIO(content), data_only=False)
+        self.addCleanup(workbook.close)
+        sheet = workbook["Quotation"]
+        title_row = next(
+            cell.row
+            for row in sheet.iter_rows()
+            for cell in row
+            if cell.value == "Additional Notes & Disclaimers:"
+        )
+        notes_cell = sheet.cell(title_row + 1, 1)
+        self.assertEqual(notes_cell.value, notes)
+        self.assertNotIn("\n", notes_cell.value)
+        self.assertGreater(sheet.row_dimensions[notes_cell.row].height, 12)
+
+    def test_current_disclaimer_uses_the_full_sheet_width_for_height(self):
+        template = ensure_default_template()
+        notes = "备" * 90
+
+        content = render_quotation_xlsx(
+            template,
+            {"remarks_disclaimer": notes},
+        )
+
+        workbook = load_workbook(io.BytesIO(content), data_only=False)
+        self.addCleanup(workbook.close)
+        sheet = workbook["Quotation"]
+        notes_cell = next(
+            cell
+            for row in sheet.iter_rows()
+            for cell in row
+            if cell.value == notes
+        )
+        self.assertEqual(sheet.row_dimensions[notes_cell.row].height, 13)
+
+    def test_signature_block_starts_on_a_new_page_when_it_does_not_fit(self):
+        template = ensure_default_template()
+        notes = "\n".join(f"Remark {index}" for index in range(16))
+
+        acceptance_row, breaks = _signature_break_rows(
+            render_quotation_xlsx(template, {"remarks_disclaimer": notes})
+        )
+
+        self.assertIn(acceptance_row - 1, breaks)
+
+    def test_signature_block_stays_on_the_page_when_it_fits(self):
+        template = ensure_default_template()
+        notes = "\n".join(f"Remark {index}" for index in range(10))
+
+        acceptance_row, breaks = _signature_break_rows(
+            render_quotation_xlsx(template, {"remarks_disclaimer": notes})
+        )
+
+        self.assertNotIn(acceptance_row - 1, breaks)
+
+    @skipUnless(
+        shutil.which(settings.QUOTATION_SOFFICE_BINARY),
+        "LibreOffice is required for PDF pagination regression",
+    )
+    def test_short_quotation_with_ten_notes_fits_one_pdf_page(self):
+        template = ensure_default_template()
+        notes = "\n".join(f"Remark {index}" for index in range(10))
+
+        excel = render_quotation_xlsx(
+            template,
+            {"remarks_disclaimer": notes},
+        )
+        pdf = convert_xlsx_to_pdf(excel, job_id="ten-notes-one-page")
+
+        self.assertEqual(len(PdfReader(io.BytesIO(pdf)).pages), 1)
+
+    @skipUnless(
+        shutil.which(settings.QUOTATION_SOFFICE_BINARY),
+        "LibreOffice is required for PDF pagination regression",
+    )
+    def test_long_first_note_stays_with_title_in_pdf(self):
+        template = ensure_default_template()
+        notes = ("FIRST NOTE CONTENT " + "long note " * 230)[:2000]
+        items = [
+            {
+                "type": "Software",
+                "line_no": index + 1,
+                "description": f"Line item {index + 1}",
+                "qty": "1.00",
+                "list_price": "100.00",
+                "discount_percent": "0.00",
+                "net_unit_price": "100.00",
+                "extended_price": "100.00",
+            }
+            for index in range(9)
+        ]
+
+        excel = render_quotation_xlsx(
+            template,
+            {
+                "items": items,
+                "remarks_disclaimer": notes,
+            },
+        )
+        pdf = convert_xlsx_to_pdf(excel, job_id="title-note-pagination")
+        pages = [
+            " ".join((page.extract_text() or "").split())
+            for page in PdfReader(io.BytesIO(pdf)).pages
+        ]
+        title_page = next(
+            index
+            for index, text in enumerate(pages)
+            if "Additional Notes & Disclaimers:" in text
+        )
+        note_page = next(
+            index
+            for index, text in enumerate(pages)
+            if "FIRST NOTE CONTENT" in text
+        )
+
+        self.assertEqual(title_page, note_page)
 
     def test_long_notes_receive_height_for_wrapped_content(self):
         template = ensure_default_template()

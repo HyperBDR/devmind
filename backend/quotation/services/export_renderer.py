@@ -49,9 +49,16 @@ from quotation.services.storage import (
 LEGACY_DEFAULT_TEMPLATE_NAME = "DevMind standard quotation"
 DEFAULT_TEMPLATE_NAME = "DevMind managed standard quotation"
 DEFAULT_TEMPLATE_VERSION = 2
-CURRENT_RENDERER_VERSION = "quotation-preview-xlsx-v11"
-PREVIOUS_RENDERER_VERSION = "quotation-preview-xlsx-v10"
+CURRENT_RENDERER_VERSION = "quotation-preview-xlsx-v12"
+PREVIOUS_RENDERER_VERSION = "quotation-preview-xlsx-v11"
+COMPACT_RENDERER_VERSION = "quotation-preview-xlsx-v10"
 LEGACY_RENDERER_VERSION = "quotation-preview-xlsx-v9"
+SUPPORTED_RENDERER_VERSIONS = {
+    CURRENT_RENDERER_VERSION,
+    PREVIOUS_RENDERER_VERSION,
+    COMPACT_RENDERER_VERSION,
+    LEGACY_RENDERER_VERSION,
+}
 DEFAULT_WORKSHEET = "Quotation"
 
 
@@ -93,6 +100,104 @@ def _wrap_disclaimer_line(line: str, *, width: float) -> list[str]:
         wrapped.append(line[start:end])
         start = end
     return wrapped or [""]
+
+
+# Arial (Helvetica-compatible) advance widths for printable ASCII, in
+# thousandths of an em, starting at the space character.
+_ARIAL_ASCII_WIDTHS = (
+    278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333,
+    278, 278, 556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278,
+    584, 584, 584, 556, 1015, 667, 667, 722, 722, 667, 611, 778, 722, 278,
+    500, 667, 556, 833, 722, 778, 667, 778, 722, 667, 611, 722, 667, 944,
+    667, 667, 611, 278, 278, 278, 469, 556, 333, 556, 556, 500, 556, 556,
+    278, 556, 556, 222, 222, 500, 222, 833, 556, 556, 556, 556, 333, 500,
+    278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584,
+)
+
+
+def _is_wide_char(char: str) -> bool:
+    """Return whether a character renders at full CJK width."""
+    return unicodedata.east_asian_width(char) in {"F", "W"}
+
+
+def _char_em_width(char: str) -> float:
+    """Return the approximate advance width of a character in ems."""
+    if " " <= char <= "~":
+        return _ARIAL_ASCII_WIDTHS[ord(char) - 32] / 1000
+    return 1.0 if _is_wide_char(char) else 0.6
+
+
+def _wrap_text_to_points(
+    line: str,
+    *,
+    width: float,
+    font_size: float,
+) -> list[str]:
+    """Wrap text like a spreadsheet cell using Arial advance widths."""
+    wrapped = []
+    start = 0
+    while start < len(line):
+        end = start
+        last_break = None
+        used_width = 0.0
+        while end < len(line):
+            char = line[end]
+            char_width = _char_em_width(char) * font_size
+            if used_width + char_width > width and end > start:
+                break
+            if _is_wide_char(char) and end > start:
+                last_break = end
+            used_width += char_width
+            end += 1
+            if char.isspace() or _is_wide_char(char):
+                last_break = end
+        if end == len(line):
+            wrapped.append(line[start:end])
+            break
+        if last_break and last_break > start:
+            end = last_break
+        wrapped.append(line[start:end])
+        start = end
+    return wrapped or [""]
+
+
+# Line pitches measured from LibreOffice output for 6.75pt Arial notes.
+DISCLAIMER_LINE_HEIGHT = 8
+DISCLAIMER_WIDE_LINE_HEIGHT = 10
+DISCLAIMER_ROW_PADDING = 3
+# Rows cannot split across pages and spreadsheet rows cap at 409pt.
+DISCLAIMER_MAX_ROW_HEIGHT = 360
+
+
+def _current_disclaimer_rows(
+    source_lines: list[str],
+    *,
+    text_width: float,
+    font_size: float,
+) -> list[tuple[str, float]]:
+    """Group disclaimer paragraphs into rows sized for their soft wraps."""
+    rows = []
+    for source_line in source_lines:
+        text = ""
+        height = DISCLAIMER_ROW_PADDING
+        for wrapped_line in _wrap_text_to_points(
+            source_line,
+            width=text_width,
+            font_size=font_size,
+        ):
+            line_height = (
+                DISCLAIMER_WIDE_LINE_HEIGHT
+                if any(_is_wide_char(char) for char in wrapped_line)
+                else DISCLAIMER_LINE_HEIGHT
+            )
+            if text and height + line_height > DISCLAIMER_MAX_ROW_HEIGHT:
+                rows.append((text, height))
+                text = ""
+                height = DISCLAIMER_ROW_PADDING
+            text += wrapped_line
+            height += line_height
+        rows.append((text, height))
+    return rows
 
 
 REQUIRED_TEMPLATE_NAMES = {
@@ -1365,12 +1470,18 @@ def render_quotation_xlsx(
     sheet.row_dimensions[row].height = 9
     row += 1
     notes = str(value("remarks_disclaimer"))
-    notes_line_height = (
-        9 if renderer_version == CURRENT_RENDERER_VERSION else 12
-    )
+    is_current_renderer = renderer_version == CURRENT_RENDERER_VERSION
+    notes_line_height = 12
+    if renderer_version == PREVIOUS_RENDERER_VERSION:
+        notes_line_height = 9
     page_width = 595 - (
         sheet.page_margins.left + sheet.page_margins.right
     ) * 72
+    column_unit_pixels = 8.5 if is_current_renderer else 7
+    # LibreOffice renders one Excel column-width unit at about 8.5 pixels.
+    sheet_width = sum(
+        (width * column_unit_pixels + 5) * 0.75 for width in widths
+    )
     if renderer_version == LEGACY_RENDERER_VERSION:
         notes_font_size = 9
         wrapped_notes = [
@@ -1396,21 +1507,20 @@ def render_quotation_xlsx(
         notes_font_size = 6.75
         # ponytail: average glyph width; measured font metrics if fonts change.
         notes_wrap_width = page_width / (notes_font_size * 0.45)
+        source_lines = (
+            notes.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+            or [""]
+        )
         wrapped_notes = [
             wrapped_line
-            for line in (
-                notes.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-                or [""]
-            )
+            for line in source_lines
             for wrapped_line in _wrap_disclaimer_line(
                 line,
                 width=notes_wrap_width,
             )
         ]
         note_min_height = (
-            notes_line_height
-            if renderer_version == CURRENT_RENDERER_VERSION
-            else 18
+            9 if renderer_version == PREVIOUS_RENDERER_VERSION else 18
         )
         title_font = Font(
             name="Arial",
@@ -1418,30 +1528,62 @@ def render_quotation_xlsx(
             bold=True,
             color="0F172A",
         )
-    # Give each line its own row so unused height cannot collect at a boundary.
-    chunk_size = 1 if renderer_version == CURRENT_RENDERER_VERSION else 6
-    notes_chunks = [
-        wrapped_notes[index : index + chunk_size]
-        for index in range(0, len(wrapped_notes), chunk_size)
-    ]
+    if is_current_renderer:
+        notes_rows = _current_disclaimer_rows(
+            source_lines,
+            text_width=sheet_width - 12,
+            font_size=notes_font_size,
+        )
+    else:
+        # Give each line its own row so unused height cannot collect.
+        chunk_size = 1 if renderer_version == PREVIOUS_RENDERER_VERSION else 6
+        notes_rows = [
+            (
+                "\n".join(chunk),
+                max(note_min_height, len(chunk) * notes_line_height),
+            )
+            for chunk in (
+                wrapped_notes[index : index + chunk_size]
+                for index in range(0, len(wrapped_notes), chunk_size)
+            )
+        ]
     page_height = 842 - (
         sheet.page_margins.top + sheet.page_margins.bottom
     ) * 72
-    sheet_width = sum((width * 7 + 5) * 0.75 for width in widths)
     page_scale = min(1, page_width / sheet_width)
     page_capacity = page_height / page_scale
-    used_height = sum(
-        sheet.row_dimensions[index].height
-        or sheet.sheet_format.defaultRowHeight
-        for index in range(1, row)
-    )
-    remaining_height = page_capacity - used_height % page_capacity
+
+    def remaining_page_height(start_row: int, end_row: int) -> float:
+        remaining = page_capacity
+        for row_index in range(start_row, end_row):
+            height = (
+                sheet.row_dimensions[row_index].height
+                or sheet.sheet_format.defaultRowHeight
+            )
+            if height > remaining:
+                remaining = page_capacity
+            remaining -= height
+        return remaining
+
+    page_start_row = 1
     title_height = 18
-    first_chunk_height = max(
-        note_min_height, min(len(wrapped_notes), 6) * notes_line_height
-    )
+    if is_current_renderer:
+        remaining_height = remaining_page_height(page_start_row, row)
+        first_chunk_height = notes_rows[0][1]
+    else:
+        used_height = sum(
+            sheet.row_dimensions[index].height
+            or sheet.sheet_format.defaultRowHeight
+            for index in range(1, row)
+        )
+        remaining_height = page_capacity - used_height % page_capacity
+        first_chunk_height = max(
+            note_min_height,
+            min(len(wrapped_notes), 6) * notes_line_height,
+        )
     if remaining_height < title_height + first_chunk_height + 12:
         sheet.row_breaks.append(Break(id=row - 1))
+        page_start_row = row
     merged(
         row,
         1,
@@ -1451,14 +1593,14 @@ def render_quotation_xlsx(
     )
     sheet.row_dimensions[row].height = title_height
     row += 1
-    for index, chunk in enumerate(notes_chunks):
+    for index, (notes_text, notes_height) in enumerate(notes_rows):
         notes_border = Border(
             left=thin,
             right=thin,
             top=thin if index == 0 else Side(style=None),
             bottom=(
                 thin
-                if index == len(notes_chunks) - 1
+                if index == len(notes_rows) - 1
                 else Side(style=None)
             ),
         )
@@ -1466,7 +1608,7 @@ def render_quotation_xlsx(
             row,
             1,
             7,
-            "\n".join(chunk),
+            notes_text,
             font=Font(
                 name="Arial",
                 size=notes_font_size,
@@ -1476,16 +1618,13 @@ def render_quotation_xlsx(
             fill=muted_fill,
             alignment=Alignment(vertical="top", wrap_text=True),
         )
-        line_count = len(chunk)
-        sheet.row_dimensions[row].height = max(
-            note_min_height,
-            line_count * notes_line_height,
-        )
+        sheet.row_dimensions[row].height = notes_height
         row += 1
     for _ in range(2):
         merged(row, 1, 7, "")
         sheet.row_dimensions[row].height = 12
         row += 1
+    acceptance_row = row
     merged(
         row,
         1,
@@ -1557,6 +1696,17 @@ def render_quotation_xlsx(
         f"Email : {issuer_value('issuer_contact_email', value('email'))}",
     )
     fit_row(row, sheet.cell(row, 5).value, width=42)
+    signature_block_height = sum(
+        sheet.row_dimensions[row_index].height
+        or sheet.sheet_format.defaultRowHeight
+        for row_index in range(acceptance_row, row + 1)
+    )
+    if (
+        is_current_renderer
+        and remaining_page_height(page_start_row, acceptance_row)
+        < signature_block_height
+    ):
+        sheet.row_breaks.append(Break(id=acceptance_row - 1))
     sheet.print_area = f"A1:G{row}"
     sheet.page_setup.orientation = "portrait"
     sheet.page_setup.paperSize = sheet.PAPERSIZE_A4
