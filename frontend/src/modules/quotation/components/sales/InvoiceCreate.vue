@@ -78,6 +78,9 @@ function isWritableInvoiceStatus(
 }
 
 const ADD_PRODUCT_LINE_OPTION = '__add_product_line__'
+const DEFAULT_ADDITIONAL_NOTES =
+  'All bank charges for cross-border payments must be borne by the sender ' +
+  'to ensure OnePro Cloud receives the full invoiced amount.'
 
 let itemSequence = 0
 
@@ -162,7 +165,7 @@ const form = reactive({
   contactEmail: '',
   purchaseOrderNo: '',
   paymentTerms: 'CIA',
-  additionalNotes: '',
+  additionalNotes: DEFAULT_ADDITIONAL_NOTES,
   remarks: '',
   bankAccountName: '',
   bankName: '',
