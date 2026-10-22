@@ -8,7 +8,6 @@ import {
   getCurrencySymbol,
   type PreviewUser,
 } from '../utils/quotationPreviewModel'
-import { wrapQuotationDisclaimer } from '../utils/quotationDisclaimer'
 import { useQuotationI18n } from '../composables/useQuotationI18n'
 
 const { t } = useQuotationI18n()
@@ -46,9 +45,6 @@ function highlightCellClass(changed: boolean): string {
 }
 
 const model = computed(() => buildQuotationPreviewModel(props.quote, { currentUser: props.currentUser }))
-const previewDisclaimer = computed(() =>
-  wrapQuotationDisclaimer(model.value.remarksDisclaimer || ''),
-)
 // Match the A4 printable width used by the XLSX-to-PDF renderer.
 const previewFrameWidth = computed(() =>
   props.scale === 'compact' ? '697px' : '721px',
@@ -459,7 +455,7 @@ const moneyTotalCellClass =
             ]"
             style="font-family: Arial, Helvetica, sans-serif;"
           >
-            {{ previewDisclaimer }}
+            {{ model.remarksDisclaimer }}
           </td>
         </tr>
         <tr class="h-3">

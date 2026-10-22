@@ -32,9 +32,7 @@ from quotation.services.export_archive import (
     update_export_upload_tracking,
 )
 from quotation.services.export_renderer import (
-    CURRENT_RENDERER_VERSION,
-    LEGACY_RENDERER_VERSION,
-    PREVIOUS_RENDERER_VERSION,
+    SUPPORTED_RENDERER_VERSIONS,
     TemplateValidationError,
     convert_attachment_to_pdf,
     convert_xlsx_to_pdf,
@@ -314,11 +312,7 @@ def render_export_job(job_id: str) -> dict:
         job = ExportJob.objects.select_for_update().get(pk=job_id)
         if job.status not in claimable_statuses:
             return {"job_id": job.id, "status": job.status}
-        if job.renderer_version not in {
-            CURRENT_RENDERER_VERSION,
-            LEGACY_RENDERER_VERSION,
-            PREVIOUS_RENDERER_VERSION,
-        }:
+        if job.renderer_version not in SUPPORTED_RENDERER_VERSIONS:
             raise TemplateValidationError(
                 "Pinned quotation renderer version is unsupported",
                 code="renderer_version_unsupported",

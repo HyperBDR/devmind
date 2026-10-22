@@ -49,9 +49,16 @@ from quotation.services.storage import (
 LEGACY_DEFAULT_TEMPLATE_NAME = "DevMind standard quotation"
 DEFAULT_TEMPLATE_NAME = "DevMind managed standard quotation"
 DEFAULT_TEMPLATE_VERSION = 2
-CURRENT_RENDERER_VERSION = "quotation-preview-xlsx-v11"
-PREVIOUS_RENDERER_VERSION = "quotation-preview-xlsx-v10"
+CURRENT_RENDERER_VERSION = "quotation-preview-xlsx-v12"
+PREVIOUS_RENDERER_VERSION = "quotation-preview-xlsx-v11"
+COMPACT_RENDERER_VERSION = "quotation-preview-xlsx-v10"
 LEGACY_RENDERER_VERSION = "quotation-preview-xlsx-v9"
+SUPPORTED_RENDERER_VERSIONS = {
+    CURRENT_RENDERER_VERSION,
+    PREVIOUS_RENDERER_VERSION,
+    COMPACT_RENDERER_VERSION,
+    LEGACY_RENDERER_VERSION,
+}
 DEFAULT_WORKSHEET = "Quotation"
 
 
@@ -1365,12 +1372,19 @@ def render_quotation_xlsx(
     sheet.row_dimensions[row].height = 9
     row += 1
     notes = str(value("remarks_disclaimer"))
-    notes_line_height = (
-        9 if renderer_version == CURRENT_RENDERER_VERSION else 12
-    )
+    notes_line_height = 12
+    if renderer_version == PREVIOUS_RENDERER_VERSION:
+        notes_line_height = 9
     page_width = 595 - (
         sheet.page_margins.left + sheet.page_margins.right
     ) * 72
+    column_unit_pixels = (
+        8.5 if renderer_version == CURRENT_RENDERER_VERSION else 7
+    )
+    # LibreOffice renders one Excel column-width unit at about 8.5 pixels.
+    sheet_width = sum(
+        (width * column_unit_pixels + 5) * 0.75 for width in widths
+    )
     if renderer_version == LEGACY_RENDERER_VERSION:
         notes_font_size = 9
         wrapped_notes = [
@@ -1395,31 +1409,41 @@ def render_quotation_xlsx(
     else:
         notes_font_size = 6.75
         # ponytail: average glyph width; measured font metrics if fonts change.
-        notes_wrap_width = page_width / (notes_font_size * 0.45)
-        wrapped_notes = [
-            wrapped_line
-            for line in (
-                notes.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-                or [""]
-            )
-            for wrapped_line in _wrap_disclaimer_line(
-                line,
-                width=notes_wrap_width,
-            )
-        ]
-        note_min_height = (
-            notes_line_height
-            if renderer_version == CURRENT_RENDERER_VERSION
-            else 18
+        notes_wrap_width = sheet_width / (notes_font_size * 0.45)
+        source_lines = (
+            notes.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+            or [""]
         )
+        if renderer_version == CURRENT_RENDERER_VERSION:
+            wrapped_notes = source_lines
+        else:
+            wrapped_notes = [
+                wrapped_line
+                for line in source_lines
+                for wrapped_line in _wrap_disclaimer_line(
+                    line,
+                    width=notes_wrap_width,
+                )
+            ]
+        if renderer_version == CURRENT_RENDERER_VERSION:
+            note_min_height = 12
+        elif renderer_version == PREVIOUS_RENDERER_VERSION:
+            note_min_height = 9
+        else:
+            note_min_height = 18
         title_font = Font(
             name="Arial",
             size=8.25,
             bold=True,
             color="0F172A",
         )
-    # Give each line its own row so unused height cannot collect at a boundary.
-    chunk_size = 1 if renderer_version == CURRENT_RENDERER_VERSION else 6
+    # Keep source paragraphs intact so the PDF renderer chooses soft wraps.
+    chunk_size = (
+        1
+        if renderer_version
+        in {CURRENT_RENDERER_VERSION, PREVIOUS_RENDERER_VERSION}
+        else 6
+    )
     notes_chunks = [
         wrapped_notes[index : index + chunk_size]
         for index in range(0, len(wrapped_notes), chunk_size)
@@ -1427,21 +1451,39 @@ def render_quotation_xlsx(
     page_height = 842 - (
         sheet.page_margins.top + sheet.page_margins.bottom
     ) * 72
-    sheet_width = sum((width * 7 + 5) * 0.75 for width in widths)
     page_scale = min(1, page_width / sheet_width)
     page_capacity = page_height / page_scale
-    used_height = sum(
-        sheet.row_dimensions[index].height
-        or sheet.sheet_format.defaultRowHeight
-        for index in range(1, row)
-    )
-    remaining_height = page_capacity - used_height % page_capacity
+
+    def remaining_page_height(start_row: int, end_row: int) -> float:
+        remaining = page_capacity
+        for row_index in range(start_row, end_row):
+            height = (
+                sheet.row_dimensions[row_index].height
+                or sheet.sheet_format.defaultRowHeight
+            )
+            if height > remaining:
+                remaining = page_capacity
+            remaining -= height
+        return remaining
+
+    page_start_row = 1
+    remaining_height = remaining_page_height(page_start_row, row)
     title_height = 18
+    first_line_count = len(notes_chunks[0])
+    if renderer_version == CURRENT_RENDERER_VERSION:
+        first_line_count = len(
+            _wrap_disclaimer_line(
+                notes_chunks[0][0],
+                width=notes_wrap_width,
+            )
+        )
     first_chunk_height = max(
-        note_min_height, min(len(wrapped_notes), 6) * notes_line_height
+        note_min_height,
+        min(first_line_count, 6) * notes_line_height,
     )
     if remaining_height < title_height + first_chunk_height + 12:
         sheet.row_breaks.append(Break(id=row - 1))
+        page_start_row = row
     merged(
         row,
         1,
@@ -1477,15 +1519,24 @@ def render_quotation_xlsx(
             alignment=Alignment(vertical="top", wrap_text=True),
         )
         line_count = len(chunk)
+        if renderer_version == CURRENT_RENDERER_VERSION:
+            line_count = len(
+                _wrap_disclaimer_line(
+                    chunk[0],
+                    width=notes_wrap_width,
+                )
+            )
         sheet.row_dimensions[row].height = max(
             note_min_height,
-            line_count * notes_line_height,
+            line_count * notes_line_height
+            + (2 if renderer_version == CURRENT_RENDERER_VERSION else 0),
         )
         row += 1
     for _ in range(2):
         merged(row, 1, 7, "")
         sheet.row_dimensions[row].height = 12
         row += 1
+    acceptance_row = row
     merged(
         row,
         1,
@@ -1557,6 +1608,16 @@ def render_quotation_xlsx(
         f"Email : {issuer_value('issuer_contact_email', value('email'))}",
     )
     fit_row(row, sheet.cell(row, 5).value, width=42)
+    signature_block_height = sum(
+        sheet.row_dimensions[row_index].height
+        or sheet.sheet_format.defaultRowHeight
+        for row_index in range(acceptance_row, row + 1)
+    )
+    if (
+        remaining_page_height(page_start_row, acceptance_row)
+        < signature_block_height
+    ):
+        sheet.row_breaks.append(Break(id=acceptance_row - 1))
     sheet.print_area = f"A1:G{row}"
     sheet.page_setup.orientation = "portrait"
     sheet.page_setup.paperSize = sheet.PAPERSIZE_A4
