@@ -1409,7 +1409,11 @@ def render_quotation_xlsx(
     else:
         notes_font_size = 6.75
         # ponytail: average glyph width; measured font metrics if fonts change.
-        notes_wrap_width = sheet_width / (notes_font_size * 0.45)
+        notes_wrap_width = (
+            sheet_width
+            if renderer_version == CURRENT_RENDERER_VERSION
+            else page_width
+        ) / (notes_font_size * 0.45)
         source_lines = (
             notes.replace("\r\n", "\n").replace("\r", "\n").split("\n")
             or [""]
@@ -1479,7 +1483,8 @@ def render_quotation_xlsx(
         )
     first_chunk_height = max(
         note_min_height,
-        min(first_line_count, 6) * notes_line_height,
+        first_line_count * notes_line_height
+        + (2 if renderer_version == CURRENT_RENDERER_VERSION else 0),
     )
     if remaining_height < title_height + first_chunk_height + 12:
         sheet.row_breaks.append(Break(id=row - 1))

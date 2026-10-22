@@ -1,15 +1,19 @@
 import base64
 import io
+import shutil
 import subprocess
 from datetime import datetime
 from tempfile import TemporaryDirectory
 from threading import Event, Thread
 from types import SimpleNamespace
+from unittest import skipUnless
 from unittest.mock import patch
 from zipfile import ZIP_DEFLATED, ZipFile
 
+from django.conf import settings
 from django.test import SimpleTestCase, TestCase, override_settings
 from openpyxl import load_workbook
+from pypdf import PdfReader
 from quotation.models import QuotationTemplate
 from quotation.services.export_pipeline import _attachment_pdf_bytes
 from quotation.services.export_renderer import (
@@ -105,6 +109,34 @@ class QuotationNotesSpacingTests(SimpleTestCase):
         )
         self.assertEqual(cell.font.sz, 6.75)
         self.assertEqual(sheet.row_dimensions[cell.row].height, 9)
+
+    def test_pinned_renderers_keep_their_previous_wrap_boundary(self):
+        notes = "a" * 170
+        expected_cells = {
+            COMPACT_RENDERER_VERSION: ["a" * 160 + "\n" + "a" * 10],
+            PREVIOUS_RENDERER_VERSION: ["a" * 160, "a" * 10],
+        }
+        for version, expected in expected_cells.items():
+            with self.subTest(version=version):
+                content = render_quotation_xlsx(
+                    None,
+                    {"remarks_disclaimer": notes},
+                    renderer_version=version,
+                )
+                workbook = load_workbook(io.BytesIO(content))
+                self.addCleanup(workbook.close)
+                sheet = workbook["Quotation"]
+                title_row = next(
+                    cell.row
+                    for row in sheet.iter_rows()
+                    for cell in row
+                    if cell.value == "Additional Notes & Disclaimers:"
+                )
+                actual = [
+                    sheet.cell(title_row + offset, 1).value
+                    for offset in range(1, len(expected) + 1)
+                ]
+                self.assertEqual(actual, expected)
 
 
 class QuotationTemplateRendererTests(TestCase):
@@ -428,6 +460,52 @@ class QuotationTemplateRendererTests(TestCase):
             acceptance_row - 1,
             {page_break.id for page_break in sheet.row_breaks.brk},
         )
+
+    @skipUnless(
+        shutil.which(settings.QUOTATION_SOFFICE_BINARY),
+        "LibreOffice is required for PDF pagination regression",
+    )
+    def test_long_first_note_stays_with_title_in_pdf(self):
+        template = ensure_default_template()
+        notes = ("FIRST NOTE CONTENT " + "long note " * 230)[:2000]
+        items = [
+            {
+                "type": "Software",
+                "line_no": index + 1,
+                "description": f"Line item {index + 1}",
+                "qty": "1.00",
+                "list_price": "100.00",
+                "discount_percent": "0.00",
+                "net_unit_price": "100.00",
+                "extended_price": "100.00",
+            }
+            for index in range(9)
+        ]
+
+        excel = render_quotation_xlsx(
+            template,
+            {
+                "items": items,
+                "remarks_disclaimer": notes,
+            },
+        )
+        pdf = convert_xlsx_to_pdf(excel, job_id="title-note-pagination")
+        pages = [
+            " ".join((page.extract_text() or "").split())
+            for page in PdfReader(io.BytesIO(pdf)).pages
+        ]
+        title_page = next(
+            index
+            for index, text in enumerate(pages)
+            if "Additional Notes & Disclaimers:" in text
+        )
+        note_page = next(
+            index
+            for index, text in enumerate(pages)
+            if "FIRST NOTE CONTENT" in text
+        )
+
+        self.assertEqual(title_page, note_page)
 
     def test_long_notes_receive_height_for_wrapped_content(self):
         template = ensure_default_template()
