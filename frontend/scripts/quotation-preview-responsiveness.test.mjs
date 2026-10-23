@@ -38,7 +38,8 @@ test('quotation preview lets long English table headings wrap inside fixed colum
   assert.doesNotMatch(sectionTable, /const headerCellClass =\s*\n\s*'whitespace-nowrap/)
   assert.match(preview, /class="whitespace-normal break-normal border border-slate-300 px-1\.5 py-1 align-middle">\s*Contact Person/)
   assert.match(preview, /class="whitespace-normal break-normal border border-slate-300 px-1\.5 py-1 align-middle">\s*Payment Terms/)
-  assert.match(preview, /props\.scale === 'compact' \? 'text-\[9px\]' : 'text-\[11px\]'/)
+  assert.match(preview, /props\.scale === 'compact' \? 'text-\[9px\]' : 'text-\[9\.3px\]'/)
+  assert.match(sectionTable, /<colgroup v-if="layoutShowDiscount">/)
 })
 
 test('quotation preview expands subtotal labels with their content', () => {
