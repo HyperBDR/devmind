@@ -1,16 +1,17 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Quotation } from '../types'
+import { paginateQuotation } from '../utils/paginateQuotation'
 import oneProLogoUrl from '../assets/onepro-logo.png'
+import QuotationAcceptanceRows from './QuotationAcceptanceRows.vue'
 import QuotationSectionTable from './QuotationSectionTable.vue'
 import {
   buildQuotationPreviewModel,
-  getCurrencySymbol,
   type PreviewUser,
 } from '../utils/quotationPreviewModel'
 import { useQuotationI18n } from '../composables/useQuotationI18n'
 
-const { t } = useQuotationI18n()
+const { t, locale } = useQuotationI18n()
 
 const props = withDefaults(
   defineProps<{
@@ -49,6 +50,9 @@ const model = computed(() => buildQuotationPreviewModel(props.quote, { currentUs
 const previewFrameWidth = computed(() =>
   props.scale === 'compact' ? '697px' : '721px',
 )
+const previewFrameMinHeight = computed(() =>
+  props.scale === 'compact' ? '986px' : '1020px',
+)
 const totalsLabelSpan = computed(() => {
   const labels = [
     'Software subscription subtotal:',
@@ -69,41 +73,107 @@ const totalsLabelSpan = computed(() => {
   return 2
 })
 const totalsSpacerSpan = computed(() => 6 - totalsLabelSpan.value)
-const padding = computed(() => (props.scale === 'compact' ? 'p-4' : 'p-7'))
-const textSize = computed(() => (props.scale === 'compact' ? 'text-[10px]' : 'text-[11px]'))
+const padding = computed(() =>
+  props.scale === 'compact'
+    ? 'pl-[63px] pr-[70px] py-[84px]'
+    : 'pl-[65px] pr-[73px] py-[87px]',
+)
+const textSize = computed(() =>
+  props.scale === 'compact' ? 'text-[9px]' : 'text-[9.3px]',
+)
 const metaHeaderSize = computed(() =>
-  props.scale === 'compact' ? 'text-[9px]' : 'text-[11px]',
+  props.scale === 'compact' ? 'text-[8px]' : 'text-[8.3px]',
 )
 const sectionTitleSize = computed(() =>
-  props.scale === 'compact' ? 'text-[11px]' : 'text-[12px]',
+  props.scale === 'compact' ? 'text-[9px]' : 'text-[9.3px]',
 )
 const logoClass = computed(() =>
-  props.scale === 'compact' ? 'left-4 top-4 w-[132px]' : 'left-7 top-7 w-[166px]',
+  props.scale === 'compact'
+    ? 'left-[63px] top-[84px] w-[86px]'
+    : 'left-[65px] top-[87px] w-[89px]',
 )
-const titleSpacerClass = computed(() => (props.scale === 'compact' ? 'h-20' : 'h-28'))
+const titleSpacerClass = computed(() =>
+  props.scale === 'compact' ? 'h-[53px]' : 'h-[55px]',
+)
+const source = ref<HTMLElement>()
+const output = ref<HTMLElement>()
+let frame = 0
+let observer: ResizeObserver | undefined
+
+function refreshPages(): void {
+  if (!source.value || !output.value) return
+  const staging = document.createElement('div')
+  source.value.parentElement!.append(staging)
+  try {
+    paginateQuotation(source.value, staging, {
+      height: props.scale === 'compact' ? 986 : 1020,
+      continuationTop: props.scale === 'compact' ? 84 : 87,
+      signatureTop: props.scale === 'compact' ? 79 : 81,
+    })
+    output.value.replaceChildren(...Array.from(staging.children))
+  } catch (error) {
+    // Keep all content visible if browser layout cannot be paginated.
+    console.error('Quotation preview pagination failed', error)
+    output.value.replaceChildren(source.value.cloneNode(true))
+  } finally {
+    staging.remove()
+  }
+}
+
+function schedulePages(): void {
+  cancelAnimationFrame(frame)
+  frame = requestAnimationFrame(refreshPages)
+}
+
+watch(
+  [model, () => props.scale, changedLineIdSet, changedHeaderKeySet, locale],
+  schedulePages,
+  { flush: 'post' },
+)
+onMounted(() => {
+  observer = new ResizeObserver(schedulePages)
+  observer.observe(source.value!)
+  document.fonts.addEventListener('loadingdone', schedulePages)
+  schedulePages()
+})
+onBeforeUnmount(() => {
+  cancelAnimationFrame(frame)
+  observer?.disconnect()
+  document.fonts.removeEventListener('loadingdone', schedulePages)
+})
 
 function money(value: number): string {
   if (!value) return ''
-  return `${getCurrencySymbol(model.value.currency)}${Number(value).toLocaleString(
-    undefined,
-    { maximumFractionDigits: 2 },
-  )}`
+  return Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 })
 }
 
-function customMoney(value: number, currency: string): string {
+function customMoney(value: number): string {
   if (!value) return ''
-  return `${getCurrencySymbol(currency)}${Number(value).toLocaleString(undefined, {
+  return Number(value).toLocaleString(undefined, {
     maximumFractionDigits: 2,
-  })}`
+  })
 }
 
 const moneyTotalCellClass =
-  'whitespace-nowrap border border-slate-300 px-1.5 py-1 text-right font-mono font-semibold tabular-nums align-middle'
+  'whitespace-nowrap border border-slate-300 px-1.5 py-1 text-right font-semibold tabular-nums align-middle'
 </script>
 
 <template>
-  <section
-    :style="{ width: previewFrameWidth }"
+  <div>
+    <div ref="output" class="space-y-4" data-quotation-pages />
+    <div
+      class="quotation-measurement"
+      aria-hidden="true"
+      inert
+      @load.capture="schedulePages"
+    >
+    <section
+    ref="source"
+    :style="{
+      width: previewFrameWidth,
+      minHeight: previewFrameMinHeight,
+      fontFamily: 'Arial, Helvetica, sans-serif',
+    }"
     class="relative mx-auto w-fit max-w-none shrink-0 border border-slate-200 bg-white text-slate-900 shadow-sm"
     :class="padding"
   >
@@ -114,7 +184,7 @@ const moneyTotalCellClass =
       :class="logoClass"
     />
     <table
-      class="w-full table-fixed border-collapse leading-snug"
+      class="quotation-pdf-table w-full table-fixed border-collapse leading-snug"
       :class="textSize"
     >
       <colgroup v-if="model.showDiscount">
@@ -140,19 +210,19 @@ const moneyTotalCellClass =
           <td colspan="7" class="px-1.5 py-1 align-middle" />
         </tr>
         <tr>
-          <td colspan="7" class="break-words px-1.5 py-1 text-center text-[18px] font-semibold align-middle">
+          <td colspan="7" class="break-words text-center text-[14px] font-semibold align-middle">
             {{ model.issuerCompanyName }}
           </td>
         </tr>
         <tr>
-          <td colspan="7" class="px-1.5 py-1 text-center text-[22px] font-semibold underline align-middle">
+          <td colspan="7" class="text-center text-[17px] font-semibold underline align-middle">
             Quotation
           </td>
         </tr>
-        <tr class="h-5">
+        <tr class="h-[13px]">
           <td colspan="7" class="px-1.5 py-1 align-middle" />
         </tr>
-        <tr class="h-5">
+        <tr class="h-[13px]">
           <td colspan="7" class="px-1.5 py-1 align-middle" />
         </tr>
         <tr>
@@ -161,7 +231,7 @@ const moneyTotalCellClass =
             Date:
           </td>
           <td
-            class="whitespace-nowrap border-b border-slate-900 px-1.5 py-1 pb-0.5 text-right font-mono align-middle"
+            class="whitespace-nowrap border-b border-slate-900 px-1.5 py-1 pb-0.5 text-right align-middle"
           >
             {{ model.quoteDate }}
           </td>
@@ -178,7 +248,7 @@ const moneyTotalCellClass =
             Quote No.:
           </td>
           <td
-            class="whitespace-normal break-all border-b border-slate-900 px-1.5 py-1 pb-0.5 text-right font-mono leading-tight align-middle"
+            class="whitespace-normal break-all border-b border-slate-900 px-1.5 py-1 pb-0.5 text-right leading-tight align-middle"
           >
             {{ model.quoteNo }}
           </td>
@@ -189,14 +259,14 @@ const moneyTotalCellClass =
             class="break-words border border-slate-900 px-1.5 py-1 align-middle"
             :class="highlightCellClass(isHeaderChanged('clientCompany'))"
           >
-            <span class="font-semibold">Company :</span> {{ model.customerCompany || '' }}
+            Company : {{ model.customerCompany || '' }}
           </td>
           <td colspan="3" class="px-1.5 py-1 align-middle" />
           <td class="whitespace-nowrap px-1.5 py-1 pr-1 text-right font-semibold align-middle">
             Quote Valid Till:
           </td>
           <td
-            class="whitespace-nowrap border-b border-slate-900 px-1.5 py-1 pb-0.5 text-right font-mono align-middle"
+            class="whitespace-nowrap border-b border-slate-900 px-1.5 py-1 pb-0.5 text-right align-middle"
           >
             {{ model.validTill }}
           </td>
@@ -207,7 +277,7 @@ const moneyTotalCellClass =
             class="break-words border border-slate-900 px-1.5 py-1 align-middle"
             :class="highlightCellClass(isHeaderChanged('contactPerson'))"
           >
-            <span class="font-semibold">Name :</span> {{ model.contactPerson || '' }}
+            Name : {{ model.contactPerson || '' }}
           </td>
           <td colspan="5" class="px-1.5 py-1 align-middle" />
         </tr>
@@ -217,11 +287,11 @@ const moneyTotalCellClass =
             class="break-all border border-slate-900 px-1.5 py-1 align-middle"
             :class="highlightCellClass(isHeaderChanged('email'))"
           >
-            <span class="font-semibold">Email :</span> {{ model.email || '' }}
+            Email : {{ model.email || '' }}
           </td>
           <td colspan="5" class="px-1.5 py-1 align-middle" />
         </tr>
-        <tr class="h-3">
+        <tr class="h-[8px]">
           <td colspan="7" class="px-1.5 py-1 align-middle" />
         </tr>
         <tr>
@@ -239,7 +309,7 @@ const moneyTotalCellClass =
             class="break-words border border-slate-900 px-1.5 py-1 align-middle"
             :class="highlightCellClass(isHeaderChanged('billingCompany'))"
           >
-            <span class="font-semibold">Company :</span> {{ model.billingCompany || '' }}
+            Company : {{ model.billingCompany || '' }}
           </td>
           <td colspan="5" class="px-1.5 py-1 align-middle" />
         </tr>
@@ -249,7 +319,7 @@ const moneyTotalCellClass =
             class="break-words border border-slate-900 px-1.5 py-1 align-middle"
             :class="highlightCellClass(isHeaderChanged('billingContact'))"
           >
-            <span class="font-semibold">Name :</span> {{ model.billingContact || '' }}
+            Name : {{ model.billingContact || '' }}
           </td>
           <td colspan="5" class="px-1.5 py-1 align-middle" />
         </tr>
@@ -259,18 +329,18 @@ const moneyTotalCellClass =
             class="break-all border border-slate-900 px-1.5 py-1 align-middle"
             :class="highlightCellClass(isHeaderChanged('billingEmail'))"
           >
-            <span class="font-semibold">Email :</span> {{ model.billingEmail || '' }}
+            Email : {{ model.billingEmail || '' }}
           </td>
           <td colspan="5" class="px-1.5 py-1 align-middle" />
         </tr>
-        <tr class="h-4">
+        <tr class="h-[10px]">
           <td colspan="7" class="px-1.5 py-1 align-middle" />
         </tr>
-        <tr class="h-4">
+        <tr class="h-[10px]">
           <td colspan="7" class="px-1.5 py-1 align-middle" />
         </tr>
         <tr
-          class="relative z-10 bg-slate-200 font-semibold shadow-[0_2px_10px_rgba(15,23,42,0.18)]"
+          class="relative z-10 bg-slate-200 font-semibold"
           :class="metaHeaderSize"
         >
           <td class="whitespace-normal break-normal border border-slate-300 px-1.5 py-1 align-middle">
@@ -313,13 +383,13 @@ const moneyTotalCellClass =
             {{ model.paymentTerms || '-' }}
           </td>
           <td
-            class="whitespace-nowrap border border-slate-300 px-1.5 py-1 font-mono align-middle"
+            class="whitespace-nowrap border border-slate-300 px-1.5 py-1 align-middle"
             :class="highlightCellClass(isHeaderChanged('currency'))"
           >
             {{ model.currency }}
           </td>
         </tr>
-        <tr class="h-5">
+        <tr class="h-[13px]">
           <td colspan="7" class="px-1.5 py-1 align-middle" />
         </tr>
         <tr>
@@ -327,6 +397,7 @@ const moneyTotalCellClass =
             <QuotationSectionTable
               title="Software"
               :items="model.softwareRows"
+              :layout-show-discount="model.showDiscount"
               :show-discount="model.showSoftwareDiscount"
               :subtotal="model.softwareSubtotal"
               :currency="model.currency"
@@ -337,7 +408,7 @@ const moneyTotalCellClass =
             />
           </td>
         </tr>
-        <tr class="h-5">
+        <tr class="h-[13px]">
           <td colspan="7" class="px-1.5 py-1 align-middle" />
         </tr>
         <tr>
@@ -345,6 +416,7 @@ const moneyTotalCellClass =
             <QuotationSectionTable
               title="Others"
               :items="model.othersRows"
+              :layout-show-discount="model.showDiscount"
               :show-discount="model.showOthersDiscount"
               :subtotal="model.othersSubtotal"
               :currency="model.currency"
@@ -355,7 +427,7 @@ const moneyTotalCellClass =
             />
           </td>
         </tr>
-        <tr class="h-5">
+        <tr class="h-[13px]">
           <td colspan="7" class="px-1.5 py-1 align-middle" />
         </tr>
         <tr>
@@ -394,7 +466,7 @@ const moneyTotalCellClass =
             {{ money(model.deductionAmount) }}
           </td>
         </tr>
-        <tr>
+        <tr v-if="model.customTotalLabel?.trim() || model.customTotalAmount">
           <td :colspan="totalsSpacerSpan" class="px-1.5 py-1 align-middle" />
           <td
             :colspan="totalsLabelSpan"
@@ -406,12 +478,9 @@ const moneyTotalCellClass =
             </template>
             <template v-else>&nbsp;</template>
           </td>
-          <td class="whitespace-nowrap border border-slate-300 px-1.5 py-1 text-right font-mono font-semibold tabular-nums align-middle">
+          <td class="whitespace-nowrap border border-slate-300 px-1.5 py-1 text-right font-semibold tabular-nums align-middle">
             {{
-              customMoney(
-                model.customTotalAmount || 0,
-                model.customTotalCurrency || model.currency,
-              ) || '\u00a0'
+              customMoney(model.customTotalAmount || 0) || '\u00a0'
             }}
           </td>
         </tr>
@@ -432,23 +501,26 @@ const moneyTotalCellClass =
             {{ money(model.grandTotal) }}
           </td>
         </tr>
-        <tr class="h-3">
+        <tr class="h-[8px]">
           <td colspan="7" class="px-1.5 py-1 align-middle" />
         </tr>
-        <tr>
+        <tr class="h-[8px]">
+          <td colspan="7" class="px-1.5 py-1 align-middle" />
+        </tr>
+        <tr data-preview-notes-title>
           <td
             colspan="7"
-            class="px-1.5 py-1 text-[11px] font-semibold align-middle"
+            class="px-1.5 py-1 text-[8.25px] font-semibold align-middle"
             style="font-family: Arial, Helvetica, sans-serif;"
           >
             Additional Notes & Disclaimers:
           </td>
         </tr>
-        <tr>
+        <tr data-preview-notes>
           <td
             colspan="7"
             :class="[
-              'whitespace-pre-line border border-slate-300 px-1.5 py-1 text-[9px] leading-[16px] align-middle',
+              'whitespace-pre-wrap break-words border border-slate-300 px-1.5 py-1 text-[6.5px] leading-[9px] align-middle',
               isHeaderChanged('remarksDisclaimer')
                 ? 'bg-rose-50 text-rose-700 font-semibold'
                 : 'bg-slate-50 text-slate-700',
@@ -458,62 +530,43 @@ const moneyTotalCellClass =
             {{ model.remarksDisclaimer }}
           </td>
         </tr>
-        <tr class="h-3">
+        <tr class="h-[10px]">
           <td colspan="7" class="px-1.5 py-1 align-middle" />
         </tr>
-        <tr class="h-3">
+        <tr class="h-[10px]">
           <td colspan="7" class="px-1.5 py-1 align-middle" />
         </tr>
-        <tr>
-          <td colspan="7" class="px-1.5 py-1 pt-3 align-middle">
-            To indicate Customer acceptance of this quotation, please sign below and return one copy of this
-            quotation to OnePro Cloud.
-          </td>
-        </tr>
-        <tr class="h-8">
-          <td colspan="7" class="px-1.5 py-1 align-middle" />
-        </tr>
-        <tr class="font-semibold">
-          <td colspan="3" class="px-1.5 py-1 align-middle" />
-          <td colspan="1" class="px-1.5 py-1 align-middle" />
-          <td colspan="3" class="px-1.5 py-1 align-middle">{{ model.issuerCompanyName }}</td>
-        </tr>
-        <tr>
-          <td colspan="3" class="h-10 px-1.5 py-1 pb-1 align-bottom">
-            <div class="border-b border-slate-900" />
-          </td>
-          <td colspan="1" class="px-1.5 py-1 align-middle" />
-          <td colspan="3" class="relative h-10 px-1.5 py-1 pb-1 align-bottom">
-            <img
-              v-if="model.issuerSignature"
-              :src="model.issuerSignature"
-              alt="Issuer signature"
-              class="absolute bottom-1 left-0 max-h-8 max-w-full object-contain object-left"
-            />
-            <div class="border-b border-slate-900" />
-          </td>
-        </tr>
-        <tr>
-          <td colspan="3" class="px-1.5 py-1 align-middle">Name :</td>
-          <td colspan="1" class="px-1.5 py-1 align-middle" />
-          <td colspan="3" class="px-1.5 py-1 align-middle">Name : {{ model.signer.name }}</td>
-        </tr>
-        <tr>
-          <td colspan="3" class="px-1.5 py-1 align-middle">Title :</td>
-          <td colspan="1" class="px-1.5 py-1 align-middle" />
-          <td colspan="3" class="px-1.5 py-1 align-middle">Title : {{ model.signer.title }}</td>
-        </tr>
-        <tr>
-          <td colspan="3" class="px-1.5 py-1 align-middle">Email :</td>
-          <td colspan="1" class="px-1.5 py-1 align-middle" />
-          <td colspan="3" class="break-all px-1.5 py-1 align-middle">
-            Email :
-            <a :href="`mailto:${model.signer.email}`" class="text-blue-600 no-underline">
-              {{ model.signer.email }}
-            </a>
-          </td>
-        </tr>
+        <QuotationAcceptanceRows
+          :issuer-company-name="model.issuerCompanyName"
+          :issuer-signature="model.issuerSignature"
+          :scale="scale"
+          :signer="model.signer"
+        />
       </tbody>
     </table>
-  </section>
+    </section>
+    </div>
+  </div>
 </template>
+
+<style scoped>
+.quotation-measurement {
+  position: fixed;
+  left: -100000px;
+  top: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.quotation-pdf-table > tbody > tr > td {
+  padding: 2px 2px;
+}
+
+.quotation-pdf-table > tbody > tr > td.p-0 {
+  padding: 0;
+}
+
+.quotation-pdf-table > tbody > tr > td.acceptance-copy {
+  padding-top: 10px;
+}
+</style>

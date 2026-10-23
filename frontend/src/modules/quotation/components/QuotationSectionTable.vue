@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Quotation } from '../types'
-import { getCurrencySymbol, type PreviewLineItem } from '../utils/quotationPreviewModel'
+import type { PreviewLineItem } from '../utils/quotationPreviewModel'
 
 const props = defineProps<{
   title: string
   items: PreviewLineItem[]
+  layoutShowDiscount: boolean
   showDiscount: boolean
   subtotal: number
   currency: Quotation['currency']
@@ -19,10 +20,7 @@ const totalsSpacerSpan = computed(() => 6 - props.totalsLabelSpan)
 
 function money(value: number): string {
   if (!value) return ''
-  return `${getCurrencySymbol(props.currency)}${Number(value).toLocaleString(
-    undefined,
-    { maximumFractionDigits: 2 },
-  )}`
+  return Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 })
 }
 
 function percent(value: number): string {
@@ -46,16 +44,16 @@ function highlightCellClass(changed: boolean): string {
 }
 
 const moneyCellClass =
-  'whitespace-nowrap border border-slate-300 px-1.5 py-1 text-right font-mono tabular-nums align-middle'
+  'whitespace-nowrap border border-slate-300 px-1.5 py-1 text-right tabular-nums align-middle'
 const moneyTotalCellClass =
-  'whitespace-nowrap border border-slate-300 px-1.5 py-1 text-right font-mono font-semibold tabular-nums align-middle'
+  'whitespace-nowrap border border-slate-300 px-1.5 py-1 text-right font-semibold tabular-nums align-middle'
 const headerCellClass =
-  'whitespace-normal break-normal border border-slate-300 px-1.5 py-1 text-center font-semibold leading-tight align-middle'
+  'whitespace-normal break-normal border border-slate-300 px-1.5 py-1 text-center text-[0.9em] font-semibold leading-tight align-middle'
 </script>
 
 <template>
-  <table class="w-full table-fixed border-collapse leading-snug" :class="textSize">
-    <colgroup v-if="showDiscount">
+  <table class="quotation-pdf-section w-full table-fixed border-collapse leading-snug" :class="textSize">
+    <colgroup v-if="layoutShowDiscount">
       <col class="w-[12%]" />
       <col class="w-[24%]" />
       <col class="w-[8%]" />
@@ -91,22 +89,23 @@ const headerCellClass =
       <tr
         v-for="item in items"
         :key="item.id"
-        class="h-8"
+        data-preview-item
+        class="h-[21px]"
         :class="isLineChanged(item.id) ? 'bg-rose-50' : ''"
       >
-        <td class="border border-slate-300 px-1.5 py-1 text-center font-mono align-middle" :class="highlightCellClass(isLineChanged(item.id))">
+        <td class="border border-slate-300 px-1.5 py-1 text-center align-middle" :class="highlightCellClass(isLineChanged(item.id))">
           {{ rowHasContent(item) ? item.lineNo : '' }}
         </td>
         <td class="whitespace-pre-line break-words border border-slate-300 px-1.5 py-1 align-middle" :class="isLineChanged(item.id) ? 'bg-rose-50 font-semibold text-rose-700' : 'text-slate-900'">
           {{ rowDescription(item) }}
         </td>
-        <td class="border border-slate-300 px-1.5 py-1 text-center font-mono align-middle" :class="highlightCellClass(isLineChanged(item.id))">
+        <td class="border border-slate-300 px-1.5 py-1 text-center align-middle" :class="highlightCellClass(isLineChanged(item.id))">
           {{ rowHasContent(item) ? item.qty : '' }}
         </td>
         <td :colspan="showDiscount ? 1 : 3" :class="[moneyCellClass, highlightCellClass(isLineChanged(item.id))]">
           {{ rowHasContent(item) ? money(item.listPrice) : '' }}
         </td>
-        <td v-if="showDiscount" class="border border-slate-300 px-1.5 py-1 text-center font-mono align-middle" :class="highlightCellClass(isLineChanged(item.id))">
+        <td v-if="showDiscount" class="border border-slate-300 px-1.5 py-1 text-center align-middle" :class="highlightCellClass(isLineChanged(item.id))">
           {{ rowHasContent(item) && Number(item.discountPercent) > 0 ? percent(item.discountPercent) : '' }}
         </td>
         <td v-if="showDiscount" :class="[moneyCellClass, highlightCellClass(isLineChanged(item.id))]">
@@ -126,3 +125,9 @@ const headerCellClass =
     </tbody>
   </table>
 </template>
+
+<style scoped>
+.quotation-pdf-section td {
+  padding: 2px 2px;
+}
+</style>
