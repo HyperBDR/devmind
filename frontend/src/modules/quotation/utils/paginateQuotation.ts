@@ -123,6 +123,11 @@ export function paginateQuotation(
     remove()
     const original = originals[originals.length - 1]
     const text = original.cells[textColumn].textContent || ''
+    if (!text) {
+      newPage()
+      append(originals.map(clone), template)
+      return
+    }
     const characters = Array.from(
       new Intl.Segmenter(undefined, { granularity: 'grapheme' })
         .segment(text),

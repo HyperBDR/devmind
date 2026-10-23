@@ -9,6 +9,14 @@ export function verifyQuotationPagination(source, paginateQuotation) {
   }
   const scenarios = [
     { name: 'empty notes', notes: '' },
+    {
+      name: 'empty notes at an exhausted page boundary',
+      notes: '',
+      availableLines: -1,
+      firstPageNotes: false,
+      noteFragments: 1,
+      pageCount: 2,
+    },
     { name: 'short notes', notes: 'Short note.' },
     {
       name: 'long bilingual notes',
@@ -50,7 +58,17 @@ export function verifyQuotationPagination(source, paginateQuotation) {
     },
   ]
   for (const compact of [true, false]) {
-    for (const scenario of scenarios) {
+    for (const scenario of [
+      ...scenarios,
+      {
+        name: 'empty notes moved to the next page',
+        notes: '',
+        items: compact ? 12 : 13,
+        firstPageNotes: false,
+        noteFragments: 1,
+        pageCount: 2,
+      },
+    ]) {
       const fixture = source.cloneNode(true)
       const staging = document.createElement('div')
       const height = compact ? 986 : 1020
@@ -110,6 +128,10 @@ export function verifyQuotationPagination(source, paginateQuotation) {
         })
         const elapsed = performance.now() - start
         const pages = [...staging.children]
+        if (scenario.pageCount !== undefined) {
+          assert(pages.length === scenario.pageCount,
+            `${scenario.name}: unexpected page count`)
+        }
         for (const page of pages) {
           assert(!page.dataset.previewOversize, `${scenario.name}: oversize`)
           assert(page.scrollHeight <= page.clientHeight + 1,
