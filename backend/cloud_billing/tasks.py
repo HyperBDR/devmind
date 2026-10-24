@@ -10,6 +10,7 @@ import uuid
 from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal
 from typing import Dict, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 from celery import current_task, shared_task
 from django.contrib.auth import get_user_model
@@ -295,7 +296,9 @@ def _extract_recharge_submitter_config(
 
 
 def _default_alert_expected_date(days: int = 3) -> str:
-    return (timezone.localdate() + timedelta(days=days)).isoformat()
+    """Return the alert arrival date using the Beijing calendar date."""
+    today = timezone.localdate(timezone=ZoneInfo("Asia/Shanghai"))
+    return (today + timedelta(days=days)).isoformat()
 
 
 def _resolve_notification_language(provider: CloudProvider) -> str:
@@ -1885,8 +1888,7 @@ def submit_recharge_approval(
             alert_payload = parse_recharge_info(raw_recharge_info)
         except Exception:
             alert_payload = {}
-        if not str(alert_payload.get("expected_date") or "").strip():
-            alert_payload["expected_date"] = _default_alert_expected_date()
+        alert_payload["expected_date"] = _default_alert_expected_date()
         amount_value = str(amount or "").strip()
         currency_text = str(currency or "").strip().upper()
         if amount_value:
