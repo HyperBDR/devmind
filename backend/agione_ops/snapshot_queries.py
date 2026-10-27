@@ -31,6 +31,7 @@ def dashboard_frame(
 ):
     """Return overview and the complete DTO so focus needs one business read."""
     connection = get_connection_for(user, connection.pk, "view_business")
+    composite = False
     if connection.source_kind == "native" and version_id is None:
         from agione_ops.native_sync_models import NativePublishedSnapshot
 
@@ -47,6 +48,18 @@ def dashboard_frame(
         published = snapshots.order_by("-version__published_at").values_list(
             "version_id", flat=True
         ).first()
+        if published is None and window_start is not None and window_end is not None:
+            published = NativePublishedSnapshot.objects.filter(
+                version__connection=connection,
+                version__run__status="succeeded",
+                version__run__config_version=connection.config_version,
+                version__run__credential_version=connection.credential_version,
+                version__window_start__lt=window_end,
+                version__window_end__gt=window_start,
+            ).order_by("-version__published_at", "-version_id").values_list(
+                "version_id", flat=True,
+            ).first()
+            composite = published is not None
         if published is None:
             if window_start is not None:
                 return {
@@ -71,9 +84,18 @@ def dashboard_frame(
         version = UUID(str(version_id))
     except (ValueError, TypeError, AttributeError):
         raise NotFound("Snapshot not found.") from None
-    response = query_operation(connection, user, {
-        "operation": "dashboard", "data_version": version, "payload": {},
-    })
+    query = {"operation": "dashboard", "data_version": version, "payload": {}}
+    if composite:
+        query["window"] = {"start": window_start, "end_exclusive": window_end,
+                           "timezone": "Asia/Shanghai"}
+    try:
+        response = query_operation(connection, user, query)
+    except AgioneOpsError as error:
+        if error.code != "SNAPSHOT_WINDOW_NOT_COLLECTED":
+            raise
+        return {"state": "not_collected", "dataVersion": None,
+                "summary": None, "window": None,
+                "provenance": {"kind": "native_snapshot"}, "capabilities": {}}
     set_fields(operation="dashboard", data_version=version)
     return {
         **response["overview"],

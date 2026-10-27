@@ -185,7 +185,7 @@
           <div v-if="state.error" id="error" role="alert">
             <b>{{ t('agione.operationIncomplete') }}</b>
             <p>
-              {{ t(`agione.errors.${state.error}`) }}
+              {{ state.errorCode === 'NATIVE_SYNC_DEADLINE' ? t('agione.errors.syncDeadline') : t(`agione.errors.${state.error}`) }}
               <span v-if="state.errorCode">({{ state.errorCode }})</span>
             </p>
             <div class="button-line">
@@ -415,9 +415,19 @@
                   </template>
                   <span class="scope-dot">·</span>
                   {{ t(readOnly ? 'agione.readOnlyRangeHelp' : 'agione.completeDays') }}
+                  <template v-if="state.dashboard?.coverage?.partial && !pendingRange">
+                    <span class="scope-dot">·</span>
+                    {{ t('agione.partialRangeNotice') }}
+                    <template v-if="state.dashboard.coverage.missingDays?.length">
+                      {{ t('agione.missingDates', { dates: state.dashboard.coverage.missingDays.join('、') }) }}
+                    </template>
+                  </template>
                   <template v-if="pendingRange">
                     <span class="scope-dot">·</span>
-                    {{ ready && work.window ? t(state.error ? 'agione.pendingRangeFailed' : 'agione.pendingRange', pendingRange) : t('agione.pendingRangeEmpty', pendingRange) }}
+                    {{ state.dashboard?.coverage?.partial ? t(state.error ? 'agione.pendingRangePartialFailed' : 'agione.pendingRangePartial', pendingRange) : ready && work.window ? t(state.error ? 'agione.pendingRangeFailed' : 'agione.pendingRange', pendingRange) : t('agione.pendingRangeEmpty', pendingRange) }}
+                    <template v-if="state.dashboard?.coverage?.missingDays?.length">
+                      {{ t('agione.missingDates', { dates: state.dashboard.coverage.missingDays.join('、') }) }}
+                    </template>
                     <template v-if="ready && work.window">
                       {{ t('agione.currentDisplayedRange', { start: shanghaiDate(new Date(work.window.start)), end: shanghaiDate(new Date(Date.parse(work.window.endExclusive) - 1)) }) }}
                     </template>
@@ -504,7 +514,7 @@
             <div v-if="!readOnly && work.view !== 'focus'" class="panel empty">
               {{ t('agione.unsupportedSource') }}
             </div>
-            <div v-if="readOnly && work.stale" role="status" class="loading">
+            <div v-if="readOnly && work.stale" role="status" class="workspace-refresh-status">
               {{ t('agione.staleRefreshing') }}
             </div>
             <div :inert="work.stale || null">
@@ -1096,7 +1106,7 @@
                     }"
                     :disabled="
                       day > latestDay ||
-                      (!dateDraft.end && day > shiftDay(dateDraft.start, 6))
+                      (!dateDraft.end && day > shiftDay(dateDraft.start, 30))
                     "
                     @click="pickDay(day)"
                   >
@@ -1370,7 +1380,7 @@ watch(() => state.value.connectionId, () => { pendingRange.value = null })
 watch(() => state.value.dashboard, () => {
   const selected = pendingRange.value
   const range = state.value.dashboard?.window
-  if (selected && range &&
+  if (selected && range && !state.value.dashboard?.coverage?.partial &&
       Date.parse(selected.start + 'T00:00:00+08:00') >= Date.parse(range.start) &&
       Date.parse(shiftDay(selected.end, 1) + 'T00:00:00+08:00') <= Date.parse(range.endExclusive))
     pendingRange.value = null
@@ -1610,7 +1620,7 @@ function applyDates() {
     if (state.value.sourceKind === 'native') {
       const cached = work.value.cachedWindow
       if (
-        cached &&
+        cached && !state.value.windowMissing &&
         Date.parse(queryWindow.start) >= Date.parse(cached.start) &&
         Date.parse(queryWindow.endExclusive) <= Date.parse(cached.endExclusive)
       ) {
@@ -1638,7 +1648,7 @@ function recentSeven() {
     const cached = work.value.cachedWindow
     const window = syncWindow(start, latestDay)
     if (
-      cached && Date.parse(window.start) >= Date.parse(cached.start) &&
+      cached && !state.value.windowMissing && Date.parse(window.start) >= Date.parse(cached.start) &&
       Date.parse(window.endExclusive) <= Date.parse(cached.endExclusive)
     ) {
       controller.setWindow(start, latestDay)

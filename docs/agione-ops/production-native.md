@@ -78,3 +78,11 @@ python manage.py import_agione_native_credentials --user-id <用户ID> --allow-s
 
 回退财务同步模式时可设置 `AGIONE_OPS_FINANCE_REFRESH_ON_SYNC=true`，
 并重启 API 与 worker；此模式下调用快照需要等待财务采集完成。
+
+### 查询与采集调度
+
+- 日期筛选最多 31 个完整自然日。查询会复用同连接、同配置版本的已发布快照；部分日期缺失时标记不完整，并通过现有后台任务补采。
+- 默认同时采集 2 个日期（`AGIONE_OPS_NATIVE_SHARD_CONCURRENCY`，范围 1–3）；每个任务默认最多运行 120 秒（`AGIONE_OPS_NATIVE_MAX_SECONDS`，范围 30–1800）。已完成的暂存分片可在 24 小时内续用。
+- 定时任务 `agione_recent_data_prefetch` 每天北京时间 01:20 使用具有查看、采集权限的有效授权预采最近 7 个完整自然日。若没有符合条件的授权或连接正忙则跳过；调度配置在 Celery Beat 中管理。
+- `agione_staging_cleanup` 每天北京时间 02:20 清理已成功发布或已终止、保留超过 30 天的临时采集记录；`AGIONE_OPS_STAGING_RETENTION_DAYS` 可调整，最少 7 天。已发布快照和未完成任务的数据不在此清理范围。
+- 已发布快照目前受不可删除约束保护，不会自动按期限删除。其容量仍会增长；正式快照的保留期限和安全删除流程需要单独设计并验证。

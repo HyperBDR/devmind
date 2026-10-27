@@ -1423,6 +1423,7 @@
 /* Preserve filters and results while queries are in flight. */
 .agione-demo .group-state {margin:12px 0 0;font-size:12px;color:var(--muted)}
 .agione-demo .results-shell {position:relative}
+.agione-demo .workspace-refresh-status {position:absolute;right:12px;top:8px;z-index:2;padding:4px 8px;border-radius:4px;background:var(--surface);color:var(--muted);font-size:12px}
 .agione-demo .group-state[hidden],.agione-demo .scope-groups [hidden] {display:none}
 .agione-demo .delete-explanation {margin:12px 0 20px;color:var(--muted);font-size:13px;line-height:1.8}
 .agione-demo button.danger-button {background:var(--red);border-color:var(--red);color:#fff}

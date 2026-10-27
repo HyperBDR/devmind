@@ -1,11 +1,14 @@
 """Purely local analytics over an authorized immutable native publication."""
 
 import uuid
+from datetime import timedelta
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth import get_user_model
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.db.models import Q
 from rest_framework.exceptions import APIException
 
 from agione_ops.client import AgioneOpsError
@@ -36,6 +39,46 @@ def _authorized(connection, user):
         _fail("SOURCE_KIND_FORBIDDEN", 403)
     return current, fresh
 
+
+
+def _composite_parts(connection, row, start, end):
+    """Choose immutable complete snapshots, with one source per time slice."""
+    candidates = list(NativePublishedSnapshot.objects.filter(
+        version__connection=connection,
+        version__run__status="succeeded",
+        version__run__config_version=connection.config_version,
+        version__run__credential_version=connection.credential_version,
+        version__window_start__lt=end,
+        version__window_end__gt=start,
+    ).filter(
+        Q(version__published_at__lt=row["version__published_at"])
+        | Q(version__published_at=row["version__published_at"],
+            version_id__lte=row["version_id"])
+    ).order_by("-version__published_at", "-version_id").values(
+        "version_id", "content_digest", "version__window_start",
+        "version__window_end", "version__coverage",
+    ))
+    parts = []
+    at = start
+    zone = ZoneInfo("Asia/Shanghai")
+    while at < end:
+        local = at.astimezone(zone)
+        midnight = local.replace(hour=0, minute=0, second=0,
+                                 microsecond=0) + timedelta(days=1)
+        stop = min(midnight, end)
+        match = next((item for item in candidates if (
+            item["version__window_start"] <= at
+            and item["version__window_end"] >= stop
+            and item["version__coverage"].get("pagingComplete")
+            and not item["version__coverage"].get("partial")
+        )), None)
+        parts.append({
+            "version": str(match["version_id"]) if match else None,
+            "digest": match["content_digest"] if match else None,
+            "start": at.isoformat(), "end": stop.isoformat(),
+        })
+        at = stop
+    return parts if any(part["version"] for part in parts) else None
 
 def validate_native_snapshot(connection, user, query, expected=None):
     """Read only small version/authority fields before a DTO cache lookup."""
@@ -86,6 +129,30 @@ def validate_native_snapshot(connection, user, query, expected=None):
             })
     elif selected is not None:
         _fail("DATA_VERSION_NOT_FOUND", 404)
+    if signature["state"] == "ready" and query.get("window"):
+        raw = query["window"]
+        if not isinstance(raw, dict):
+            _fail("LIVE_WINDOW_INVALID", 400)
+        requested_start = parse_time(raw.get("start"))
+        requested_end = parse_time(raw.get("end_exclusive", raw.get("endExclusive")))
+        if not (parse_time(signature["windowStart"]) <= requested_start
+                and requested_end <= parse_time(signature["windowEndExclusive"])):
+            if (raw.get("timezone", "Asia/Shanghai") != "Asia/Shanghai"
+                    or not timedelta(0) < requested_end - requested_start
+                    <= timedelta(days=31)):
+                _fail("LIVE_WINDOW_INVALID", 400)
+            parts = _composite_parts(current, row, requested_start, requested_end)
+            if not parts:
+                _fail("SNAPSHOT_WINDOW_NOT_COLLECTED")
+            signature["parts"] = parts
+            signature["missingDays"] = [
+                parse_time(part["start"]).astimezone(
+                    ZoneInfo("Asia/Shanghai"),
+                ).date().isoformat()
+                for part in parts if not part["version"]
+            ]
+            signature["windowStart"] = requested_start.isoformat()
+            signature["windowEndExclusive"] = requested_end.isoformat()
     if signature["state"] == "ready" and query["operation"] == "dashboard":
         start, end = _window(query, signature)
         prior_start = start - (end - start)
@@ -232,6 +299,41 @@ def query_native_snapshot(connection, user, query):
         ) from error
 
     start, end = _window(query, signature)
+    if signature.get("parts"):
+        sources = {}
+        rows_by_id = {}
+        for part in signature["parts"]:
+            if not part["version"]:
+                continue
+            if part["version"] not in sources:
+                source = NativePublishedSnapshot.objects.select_related(
+                    "version",
+                ).get(version_id=part["version"])
+                try:
+                    validate_snapshot_data(source.data, part["digest"])
+                except (ValueError, APIException, ValidationError) as error:
+                    raise AgioneOpsError(
+                        "SNAPSHOT_CONTENT_INVALID", status_code=409,
+                    ) from error
+                if set(source.data["customers"]) != set(snapshot.data["customers"]):
+                    _fail("SNAPSHOT_DIRECTORY_CHANGED")
+                sources[part["version"]] = source
+            source = sources[part["version"]]
+            part_start, part_end = parse_time(part["start"]), parse_time(part["end"])
+            for item in source.data["rows"]:
+                if part_start <= parse_time(item["occurred_at"]) < part_end:
+                    existing = rows_by_id.get(item["record_id"])
+                    if existing is not None and existing != item:
+                        _fail("SOURCE_DUPLICATE_PAGE")
+                    rows_by_id[item["record_id"]] = item
+        missing = signature.get("missingDays", [])
+        snapshot = SimpleNamespace(
+            data={**snapshot.data, "rows": list(rows_by_id.values())},
+            version=SimpleNamespace(coverage={
+                **snapshot.version.coverage, "partial": bool(missing),
+                "missingDays": missing,
+            }),
+        )
     rows = [row for row in snapshot.data["rows"] if (
         start <= parse_time(row["occurred_at"]) < end
     )]

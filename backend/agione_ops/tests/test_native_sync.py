@@ -14,7 +14,9 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 from agione_ops.client import AgioneOpsError
-from agione_ops.models import ConnectionGrant, DatasetVersion, SourceConnection
+from agione_ops.models import (
+    ConnectionGrant, DatasetVersion, SourceConnection, SyncRun,
+)
 from agione_ops.native_queries import query_live_operation
 from agione_ops.native_snapshot_queries import (
     query_native_snapshot, validate_native_snapshot,
@@ -36,6 +38,7 @@ def native(settings, monkeypatch):
     settings.AGIONE_OPS_FINANCE_REFRESH_ON_SYNC = True
     settings.AGIONE_OPS_ALLOWED_ENDPOINT_HOSTS = ["fake-native.example"]
     settings.AGIONE_OPS_NATIVE_CONCURRENCY = 3
+    settings.AGIONE_OPS_NATIVE_SHARD_CONCURRENCY = 1
     settings.AGIONE_OPS_NATIVE_OVERLAP_SECONDS = 86400
     monkeypatch.setattr(run_sync, "apply_async", Mock())
     user = get_user_model().objects.create_user(username=str(uuid.uuid4()))
@@ -167,9 +170,45 @@ def test_dashboard_selects_snapshot_covering_requested_dates(native):
         native["connection"], native["user"],
         window_start=start - timedelta(days=10), window_end=end,
     )
-    assert missing["state"] == "not_collected"
-    assert missing["summary"] is None
+    assert missing["state"] == "ready"
+    assert missing["coverage"]["partial"] is True
+    assert missing["coverage"]["missingDays"]
+    assert missing["summary"]["requestCount"] == 2
 
+
+
+def test_dashboard_combines_complete_snapshots_without_upstream(native):
+    from agione_ops.queries import query_dashboard
+    from agione_ops.snapshot_queries import query_operation
+
+    start = native["start"]
+    for day in (2, 3):
+        row = deepcopy(native["rows"][0])
+        row["id"] = str(1000 + day)
+        at = start + timedelta(days=day, hours=1)
+        row["createTime"] = int(at.timestamp() * 1000)
+        native["rows"].append(row)
+    collect(native)
+    native["start"] = start + timedelta(days=2)
+    native["end"] = start + timedelta(days=4)
+    collect(native)
+    before = len(native["calls"])
+    frame = query_dashboard(native["connection"], native["user"],
+                            window_start=start, window_end=native["end"])
+    assert frame["state"] == "ready"
+    assert frame["snapshotResponse"]["data"]["summary"]["requestCount"] == 4
+    query = {"operation": "analysis", "data_version": frame["dataVersion"],
+             "window": {"start": start, "end_exclusive": native["end"],
+                        "timezone": "Asia/Shanghai"},
+             "payload": {"group_by": ["customerTenantId"],
+                         "metrics": ["requestCount"]}}
+    result = query_operation(native["connection"], native["user"], query)
+    assert result["data"]["rows"][0]["metrics"]["requestCount"] == 4
+    assert len(native["calls"]) == before
+    native["rows"].pop()
+    collect(native)
+    pinned = query_operation(native["connection"], native["user"], query)
+    assert pinned["data"]["rows"][0]["metrics"]["requestCount"] == 4
 
 def test_daily_finance_projection_passes_snapshot_validation(native):
     from agione_ops.native_finance import aggregate_finance
@@ -266,6 +305,50 @@ def test_publication_insert_failure_rolls_back_dataset_version(native, monkeypat
     assert not NativePublishedSnapshot.objects.exists()
 
 
+
+
+def test_two_daily_shards_are_fetched_concurrently(native, settings):
+    from threading import Barrier
+
+    settings.AGIONE_OPS_NATIVE_SHARD_CONCURRENCY = 2
+    barrier = Barrier(2, timeout=3)
+    native["mutation"] = barrier.wait
+    _, result = collect(native)
+    assert result["status"] == "succeeded"
+    snapshot = NativePublishedSnapshot.objects.get(
+        version_id=result["dataVersion"],
+    )
+    assert len(snapshot.data["rows"]) == 2
+
+def test_deadline_allows_new_run_to_reuse_completed_shard(native, monkeypatch):
+    from types import SimpleNamespace
+    from agione_ops import native_sync
+
+    clock = [0]
+    monkeypatch.setattr(native_sync, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    calls = [0]
+    def expire_on_second_day():
+        calls[0] += 1
+        if calls[0] == 2:
+            clock[0] = 121
+    native["mutation"] = expire_on_second_day
+    run, result = collect(native)
+    assert result["status"] == "failed"
+    run.refresh_from_db()
+    assert run.error_code == "NATIVE_SYNC_DEADLINE"
+    assert run.native_shards.filter(status="succeeded").count() == 1
+    clock[0] = 0
+    native["mutation"] = None
+    before = len(native["calls"])
+    _, result = collect(native)
+    assert result["status"] == "succeeded"
+    logs = [p for path, p in native["calls"][before:]
+            if path.endswith("call-logs")]
+    assert len(logs) == 1
+    assert len(NativePublishedSnapshot.objects.get(
+        version_id=result["dataVersion"],
+    ).data["rows"]) == 2
+
 def test_overlap_incremental_keeps_old_revision_and_deduplicates(native):
     _, first = collect(native)
     old = NativePublishedSnapshot.objects.get(version_id=first["dataVersion"])
@@ -283,6 +366,33 @@ def test_overlap_incremental_keeps_old_revision_and_deduplicates(native):
     assert len(logs) == 1
     assert len({row["record_id"] for row in newest.data["rows"]}) == 2
 
+
+
+def test_incremental_reuses_multiple_complete_snapshots(native):
+    start = native["start"]
+    for day in (2, 3):
+        row = deepcopy(native["rows"][0])
+        row["id"] = str(1000 + day)
+        at = start + timedelta(days=day, hours=1)
+        row["createTime"] = int(at.timestamp() * 1000)
+        native["rows"].append(row)
+    _, first = collect(native)
+    assert first["status"] == "succeeded"
+    native["start"] = start + timedelta(days=2)
+    native["end"] = start + timedelta(days=4)
+    _, second = collect(native)
+    assert second["status"] == "succeeded"
+    native["start"] = start
+    before = len(native["calls"])
+    _, combined = collect(native)
+    assert combined["status"] == "succeeded"
+    snapshot = NativePublishedSnapshot.objects.get(
+        version_id=combined["dataVersion"],
+    )
+    assert len(snapshot.data["rows"]) == 4
+    logs = [p for path, p in native["calls"][before:]
+            if path.endswith("call-logs")]
+    assert len(logs) == 1
 
 def test_http_compatibility_query_never_constructs_a_native_client(native):
     factory = Mock(side_effect=AssertionError("source IO forbidden"))
@@ -538,3 +648,52 @@ def test_month_end_shard_clips_query_and_checks_precision():
     with pytest.raises(AgioneOpsError) as exc:
         _read_shard(client, shard, 1, lambda _: None)
     assert exc.value.code == "SOURCE_TIME_PRECISION_CHANGED"
+
+
+def test_recent_prefetch_uses_authorized_grant(native, monkeypatch):
+    from agione_ops import tasks
+
+    SourceConnection.objects.filter(pk=native['connection'].pk).update(
+        verified_at=timezone.now(), verified_tenant_id='100',
+    )
+    dispatch = Mock()
+    monkeypatch.setattr(tasks, 'submit_recent_sync', dispatch)
+    tasks.prefetch_recent_native_data()
+    assert dispatch.call_count == 1
+    assert dispatch.call_args.args[0].pk == native['connection'].pk
+    assert dispatch.call_args.args[1].pk == native['user'].pk
+    native['grant'].can_sync = False
+    native['grant'].save()
+    tasks.prefetch_recent_native_data()
+    assert dispatch.call_count == 1
+
+
+def test_partial_window_reports_missing_shanghai_dates(native):
+    from agione_ops.queries import query_dashboard
+
+    start = native['start']
+    collect(native)
+    frame = query_dashboard(
+        native['connection'], native['user'],
+        window_start=start - timedelta(days=1), window_end=native['end'],
+    )
+    assert frame['coverage']['partial'] is True
+    assert frame['coverage']['missingDays'] == [
+        (start - timedelta(days=1)).date().isoformat(),
+    ]
+    assert frame['snapshotResponse']['data']['comparison']['state'] != 'READY'
+
+
+def test_cleanup_removes_only_old_successful_staging(native):
+    from agione_ops.tasks import cleanup_native_staging
+
+    run, result = collect(native)
+    assert result['status'] == 'succeeded'
+    snapshot = NativePublishedSnapshot.objects.get(version_id=result['dataVersion'])
+    SyncRun.objects.filter(pk=run.pk).update(
+        finished_at=timezone.now() - timedelta(days=31),
+    )
+    assert cleanup_native_staging() == 2
+    assert not NativeStagedRecord.objects.filter(run=run).exists()
+    snapshot.refresh_from_db()
+    assert len(snapshot.data['rows']) == 2

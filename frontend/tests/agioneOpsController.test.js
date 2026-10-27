@@ -117,7 +117,8 @@ test('Shanghai dates use complete local days, not browser UTC defaults', () => {
     timezone: 'Asia/Shanghai'
   })
   assert.doesNotThrow(() => syncWindow('2026-10-18', '2026-10-24', now()))
-  assert.throws(() => syncWindow('2026-10-17', '2026-10-24', now()), /invalidWindow/)
+  assert.doesNotThrow(() => syncWindow('2026-09-24', '2026-10-24', now()))
+  assert.throws(() => syncWindow('2026-09-23', '2026-10-24', now()), /invalidWindow/)
   for (const [start, end] of [
     ['2026-02-30', '2026-03-01'],
     ['2026-10-25', '2026-10-25'],

@@ -49,7 +49,7 @@ function open(select,button){
  const enabled=[...menu.querySelectorAll('[role=option]:not(:disabled)')],index=enabled.findIndex(option=>Number(option.dataset.selectIndex)===select.selectedIndex);
  focusOption(menu,Math.max(0,index));
 }
-export function enhanceSelects(root){
+export function enhanceSelects(root,{restoreFocus=true}={}){
  if(active&&(!active.select.isConnected||root.inert))close();
  for(const select of root.querySelectorAll('.workspace-tools select')){
   let button=select._menuButton;
@@ -62,7 +62,7 @@ export function enhanceSelects(root){
   }
   update(select,button);
  }
- if(focusAfterChange&&!root.inert){
+ if(restoreFocus&&focusAfterChange&&!root.closest('[inert]')){
   [...root.querySelectorAll('select')].find(node=>node.id===focusAfterChange)?._menuButton?.focus({preventScroll:true});focusAfterChange=null;
  }
 }

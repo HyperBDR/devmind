@@ -206,3 +206,22 @@ test('collecting the previous period keeps the selected dates and refreshes them
   assert.equal(versions.at(-1), undefined)
   assert.equal(c.snapshot().dashboard.dataVersion, 'current')
 })
+
+test('partial cached range is displayed and triggers background collection', async () => {
+  let syncs = 0
+  const partial = { state: 'ready', dataVersion: 'cached', summary: {}, window,
+    coverage: { partial: true, missingDays: ['2026-10-21'] },
+    provenance: { kind: 'native_snapshot' } }
+  const api = {
+    connections: async () => response({ results: [native], next: null }),
+    dashboard: async () => response(partial),
+    submitSync: async () => { syncs++; return response({ runId: 'run', status: 'failed' }) }
+  }
+  const c = createAgioneController(api, () => {}, { now, localNative: true })
+  c.reset('user:1')
+  await c.load()
+  await c.loadWindow('2026-10-20', '2026-10-22')
+  assert.equal(syncs, 1)
+  assert.equal(c.snapshot().dashboard.coverage.partial, true)
+  assert.equal(c.snapshot().windowMissing, true)
+})

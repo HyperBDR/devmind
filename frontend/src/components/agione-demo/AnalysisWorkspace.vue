@@ -1,4 +1,4 @@
-<template><div ref="host" data-testid="agione-analysis" @click="click" @change="change" @keydown="keyboard" v-html="html"></div></template>
+<template><div ref="host" data-testid="agione-analysis" @click="click" @change="change" @keydown="keyboard"></div></template>
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import DOMPurify from 'dompurify'
@@ -7,12 +7,19 @@ import { originalWorkspaceState } from '@/utils/agioneOriginalWorkspace'
 import { csvDocument } from './core.mjs'
 import { renderOriginalWorkspace } from './original-workspace-renderers.mjs'
 import { enhanceSelects, closeSelectMenus } from './select-menu.mjs'
+import { updateWorkspaceDom } from './workspace-dom.js'
 const { locale } = useI18n({ useScope: 'global' })
 const props = defineProps({ state: { type: Object, required: true }, exportRows: { type: Function, required: true } })
 const emit = defineEmits(['change', 'drill', 'clear'])
 const host = ref(null)
 const html = computed(() => DOMPurify.sanitize(renderOriginalWorkspace(originalWorkspaceState(props.state), 'aggregate', {locale:locale.value}), { USE_PROFILES: { html: true, svg: true, svgFilters: true } }))
-watch(html, async () => { await nextTick(); if(host.value)enhanceSelects(host.value) }, { immediate: true })
+watch([host, html], ([element, markup]) => {
+ if(element) updateWorkspaceDom(element, markup, target =>
+   enhanceSelects(target, { restoreFocus: target.isConnected }))
+}, { immediate: true, flush: 'post' })
+watch(() => props.state.stale, async stale => {
+ if (!stale) { await nextTick(); if (host.value) enhanceSelects(host.value) }
+})
 onBeforeUnmount(() => closeSelectMenus(host.value))
 function change(event) {
  const patch = { groupBy: event.target.id === 'groupBy' ? event.target.value : props.state.groupBy, secondary: event.target.id === 'secondary' ? event.target.value : props.state.secondary }

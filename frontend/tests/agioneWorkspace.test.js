@@ -940,3 +940,23 @@ test('reload reads updated comparison even when snapshot version is unchanged', 
   assert.equal(c.snapshot().dashboard.comparison.state, 'READY')
   assert.equal(calls.filter(x => x.body.operation === 'dashboard').length, 2)
 })
+
+test('same snapshot can attach a wider composite window', async () => {
+  const { c, calls } = setup((id, body) => wrap(body, dashboardData(1)))
+  await c.attach(frame, 'a')
+  const wider = { ...frame.window, start: '2026-10-11T00:00:00+08:00' }
+  await c.attach({ ...frame, window: wider }, 'a', wider)
+  assert.equal(c.snapshot().window.start, wider.start)
+  assert.equal(calls.at(-1).body.window.start, wider.start)
+})
+
+
+test('waits for a covering frame when a larger window is selected', async () => {
+  const { c } = setup((id, body) => wrap(body, dashboardData(1)))
+  await c.attach(frame, 'a')
+  const wider = { ...frame.window, start: '2026-10-11T00:00:00+08:00' }
+  assert.doesNotThrow(() => c.attach(frame, 'a', wider))
+  assert.deepEqual(c.snapshot().window, frame.window)
+  await c.attach({ ...frame, window: wider }, 'a', wider)
+  assert.deepEqual(c.snapshot().window, wider)
+})

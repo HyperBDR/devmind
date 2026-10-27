@@ -1,10 +1,11 @@
-<template><div ref="host" data-testid="agione-customers" @click="click" @change="change" @keydown="keyboard" v-html="html"></div></template>
+<template><div ref="host" data-testid="agione-customers" @click="click" @change="change" @keydown="keyboard"></div></template>
 <script setup>
 import { computed, ref, watch } from 'vue'
 import DOMPurify from 'dompurify'
 import { useI18n } from 'vue-i18n'
 import { originalWorkspaceState } from '@/utils/agioneOriginalWorkspace'
 import { renderOriginalWorkspace } from './original-workspace-renderers.mjs'
+import { updateWorkspaceDom } from './workspace-dom.js'
 const { locale } = useI18n({ useScope: 'global' })
 const props = defineProps({ state: { type: Object, required: true } })
 const emit = defineEmits(['change', 'select', 'requests', 'drill', 'clear', 'analyze-model'])
@@ -20,6 +21,9 @@ const html = computed(() => {
  }})
   return DOMPurify.sanitize(result,{USE_PROFILES:{html:true,svg:true,svgFilters:true}})
 })
+watch([host, html], ([element, markup]) => {
+ if(element) updateWorkspaceDom(element, markup)
+}, { immediate: true, flush: 'post' })
 function click(event) {
  const button=event.target.closest('button,[data-profile-user]')
  if(!button||button.disabled)return

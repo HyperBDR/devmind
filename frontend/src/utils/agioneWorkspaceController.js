@@ -250,8 +250,16 @@ export function createAgioneWorkspaceController(api, onChange = () => {}) {
     if (
       state.connectionId === connectionId &&
       (live ? state.requestId === frameKey : state.dataVersion === frameKey)
-    )
+    ) {
+      if (selectedWindow && frame.window &&
+          Date.parse(selectedWindow.start) >= Date.parse(frame.window.start) &&
+          Date.parse(selectedWindow.endExclusive) <= Date.parse(frame.window.endExclusive) &&
+          canonical(selectedWindow) !== canonical(state.window)) {
+        publish({ cachedWindow: frame.window })
+        return setWindow(selectedWindow)
+      }
       return
+    }
     const view = state.view
     const retain = state.connectionId === connectionId && !live &&
       (view === 'focus' ? state.dashboard :

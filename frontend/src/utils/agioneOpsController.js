@@ -50,7 +50,7 @@ export function syncWindow(startDate, endDate, now = new Date()) {
   const end = dateEpoch(endDate)
   const today = dateEpoch(shanghaiDate(now))
   const days = (end - start) / DAY + 1
-  if (!Number.isFinite(days) || days < 1 || days > 7 || end >= today) {
+  if (!Number.isFinite(days) || days < 1 || days > 31 || end >= today) {
     throw new Error('invalidWindow')
   }
   return {
@@ -195,8 +195,8 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
           data.provenance?.kind !== 'native_snapshot'
         )) throw new Error('invalidResponse')
         if (data.window) snapshotWindowDates(data)
-        const missing = data.state === 'not_collected'
-        publish({ dashboard: missing && state.dashboard?.state === 'ready'
+        const missing = data.state === 'not_collected' || data.coverage?.partial === true
+        publish({ dashboard: data.state === 'not_collected' && state.dashboard?.state === 'ready'
           ? state.dashboard : data, windowMissing: missing,
           loading: false, run: null, syncing: false })
         return
@@ -529,7 +529,7 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
     const start = dateEpoch(state.startDate)
     const end = dateEpoch(state.endDate)
     const days = (end - start) / DAY + 1
-    if (!Number.isInteger(days) || days < 1 || days > 7) return
+    if (!Number.isInteger(days) || days < 1 || days > 31) return
     const previousEnd = new Date(start - DAY).toISOString().slice(0, 10)
     const previousStart = new Date(start - days * DAY).toISOString().slice(0, 10)
     return sync(syncWindow(previousStart, previousEnd, now()))

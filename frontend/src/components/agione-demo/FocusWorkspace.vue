@@ -1,5 +1,5 @@
 <template>
- <div ref="host" style="display:contents" data-testid="agione-focus" @click="click" v-html="html"></div>
+ <div ref="host" style="display:contents" data-testid="agione-focus" @click="click"></div>
  <dialog ref="rulesDialog">
   <form @submit.prevent="saveRules">
    <h2>诊断阈值</h2>
@@ -19,6 +19,7 @@ import { useI18n } from 'vue-i18n'
 import { originalWorkspaceState, readonlyWorkspaceMarkup } from '@/utils/agioneOriginalWorkspace'
 import { renderOriginalWorkspace } from './original-workspace-renderers.mjs'
 import { applyRules } from './rules.mjs'
+import { updateWorkspaceDom } from './workspace-dom.js'
 const { locale } = useI18n({ useScope: 'global' })
 const props=defineProps({state:{type:Object,required:true},previousLoading:{type:Boolean,default:false}})
 const emit=defineEmits(['customer','requests','analyze-model','clear','diagnosis','view','previous'])
@@ -38,6 +39,9 @@ const html=computed(()=>{
  }})
  return DOMPurify.sanitize(result,{USE_PROFILES:{html:true,svg:true,svgFilters:true}})
 })
+watch([host, html], ([element, markup]) => {
+ if (element) updateWorkspaceDom(element, markup)
+}, { immediate: true, flush: 'post' })
 function click(event){const button=event.target.closest('button');if(!button||button.disabled)return
  if(button.hasAttribute('data-open-rules')){draft.value={...thresholds.value};rulesDialog.value.showModal()}
  if(button.hasAttribute('data-retry-previous'))emit('previous')
