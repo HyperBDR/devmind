@@ -26,18 +26,35 @@ def query_operation(connection, user, query):
     return cached_operation(connection, user, query, compute, validate)
 
 
-def dashboard_frame(connection, user, version_id=None):
+def dashboard_frame(
+    connection, user, version_id=None, window_start=None, window_end=None,
+):
     """Return overview and the complete DTO so focus needs one business read."""
     connection = get_connection_for(user, connection.pk, "view_business")
     if connection.source_kind == "native" and version_id is None:
         from agione_ops.native_sync_models import NativePublishedSnapshot
 
-        published = NativePublishedSnapshot.objects.filter(
-            version__connection=connection, version__run__status="succeeded"
-        ).order_by("-version__published_at").values_list(
+        snapshots = NativePublishedSnapshot.objects.filter(
+            version__connection=connection, version__run__status="succeeded",
+            version__run__config_version=connection.config_version,
+            version__run__credential_version=connection.credential_version,
+        )
+        if window_start is not None and window_end is not None:
+            snapshots = snapshots.filter(
+                version__window_start__lte=window_start,
+                version__window_end__gte=window_end,
+            )
+        published = snapshots.order_by("-version__published_at").values_list(
             "version_id", flat=True
         ).first()
         if published is None:
+            if window_start is not None:
+                return {
+                    "state": "not_collected", "dataVersion": None,
+                    "summary": None, "window": None,
+                    "provenance": {"kind": "native_snapshot"},
+                    "capabilities": {},
+                }
             from agione_ops.native_snapshot_queries import query_native_snapshot
 
             response = query_native_snapshot(

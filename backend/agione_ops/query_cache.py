@@ -22,7 +22,7 @@ from agione_ops.permissions import get_connection_for
 
 _flights = {}
 _flights_lock = threading.Lock()
-_CACHE_SCHEMA = 1
+_CACHE_SCHEMA = 2
 
 
 def _json_value(value):
@@ -88,6 +88,18 @@ def _authorize(connection, user, operation):
             "actor_id": str(actor.pk),
         }
         identity["source_id"] = "native:" + str(current.pk)
+        if operation == "dashboard" and current.source_kind == "native":
+            from agione_ops.native_sync_models import NativePublishedSnapshot
+
+            latest = NativePublishedSnapshot.objects.filter(
+                version__connection=current,
+                version__run__status="succeeded",
+                version__run__config_version=current.config_version,
+                version__run__credential_version=current.credential_version,
+            ).order_by("-version__published_at").values_list(
+                "version_id", flat=True,
+            ).first()
+            identity["snapshot_catalog"] = str(latest) if latest else None
         if operation in {"dashboard", "finance", "profile"}:
             dependencies = []
             operators = SourceConnection.objects.filter(

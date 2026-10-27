@@ -1,6 +1,7 @@
 """Purely local analytics over an authorized immutable native publication."""
 
 import uuid
+from zoneinfo import ZoneInfo
 
 from django.contrib.auth import get_user_model
 from django.conf import settings
@@ -10,7 +11,7 @@ from rest_framework.exceptions import APIException
 from agione_ops.client import AgioneOpsError
 from agione_ops.models import ConnectionGrant
 from agione_ops.native_analytics import LiveAnalytics, entity, parse_time, summary
-from agione_ops.native_finance import unavailable_finance
+from agione_ops.native_finance import finance_for_window, unavailable_finance
 from agione_ops.native_sync import validate_snapshot_data
 from agione_ops.native_sync_models import NativePublishedSnapshot
 from agione_ops.permissions import get_connection_for
@@ -85,6 +86,23 @@ def validate_native_snapshot(connection, user, query, expected=None):
             })
     elif selected is not None:
         _fail("DATA_VERSION_NOT_FOUND", 404)
+    if signature["state"] == "ready" and query["operation"] == "dashboard":
+        start, end = _window(query, signature)
+        prior_start = start - (end - start)
+        if prior_start < parse_time(signature["windowStart"]):
+            previous = NativePublishedSnapshot.objects.filter(
+                version__connection=current,
+                version__run__status="succeeded",
+                version__run__config_version=current.config_version,
+                version__run__credential_version=current.credential_version,
+                version__window_start__lte=prior_start,
+                version__window_end__gte=start,
+            ).order_by("-version__published_at").values(
+                "version_id", "content_digest",
+            ).first()
+            if previous:
+                signature["previousVersion"] = str(previous["version_id"])
+                signature["previousDigest"] = previous["content_digest"]
     if expected is not None and signature != expected:
         _fail("SNAPSHOT_CHANGED")
     return signature
@@ -130,6 +148,65 @@ def _base(connection, operation, signature):
     }
 
 
+def apply_dashboard_observations(data, engine, previous, coverage):
+    """Expose only observations backed by complete collected windows."""
+    complete = coverage.get("pagingComplete") and not coverage.get("partial")
+    filters = engine.filters
+    all_results = not filters.get(
+        "failure_types", filters.get("failureTypes", []),
+    ) and set(filters.get("statuses", [])) in (
+        set(), {"SUCCESS", "FAILURE", "UNKNOWN"},
+    )
+    if previous is not None and complete:
+        data["comparison"] = {
+            "state": "READY", "reason": None,
+            "basis": "LOCAL_PUBLISHED_SNAPSHOT",
+            "summary": summary(previous.global_rows),
+        }
+    for customer in data["customers"]:
+        cid = customer["customerTenantId"]
+        current_rows = engine.customer_global_rows.get(cid, [])
+        prior_rows = (
+            previous.customer_global_rows.get(cid, []) if previous else []
+        )
+        if previous is not None and complete:
+            before = summary(prior_rows)
+            count = before["requestCount"]
+            customer["previous"] = before
+            customer["comparisonState"] = "READY" if count else "NO_BASELINE"
+            customer["comparisonReason"] = (
+                None if count else "此客户前期无调用记录，无法计算变化比例"
+            )
+            customer["changePercent"] = (
+                100 * (len(current_rows) - count) / count if count else None
+            )
+        observed = current_rows + prior_rows
+        if complete and all_results and observed:
+            last = max(parse_time(row["occurred_at"]) for row in observed)
+            zone = ZoneInfo("Asia/Shanghai")
+            days = max(0, (
+                engine.end.astimezone(zone).date() - last.astimezone(zone).date()
+            ).days - 1)
+            customer["inactivity"] = {
+                "state": "READY", "daysWithoutCalls": days,
+                "lastObservedAt": last.isoformat(),
+                "limitedSample": len(observed) < 3, "reason": None,
+            }
+        elif not all_results:
+            customer["inactivity"] = {
+                "state": "FILTER_NOT_APPLICABLE", "daysWithoutCalls": None,
+                "reason": "仅筛选部分结果，不能判断近期无调用",
+            }
+    data["signalState"] = (
+        "APPLICABLE" if all_results and not data["summary"]["unknownCount"]
+        else "RESULT_FILTER_OR_UNKNOWN_STATUS"
+    )
+    states = [row["inactivity"]["state"] for row in data["customers"]]
+    data["inactivityState"] = (
+        "READY" if all(x == "READY" for x in states) else "PARTIAL"
+    )
+
+
 def query_native_snapshot(connection, user, query):
     """Compute legacy operation DTOs without constructing any source client."""
     signature = validate_native_snapshot(connection, user, query)
@@ -170,8 +247,40 @@ def query_native_snapshot(connection, user, query):
         from agione_ops.native_finance_refresh import finance_for
 
         finance, _ = finance_for(connection, user)
+    if finance and operation in {"dashboard", "finance"}:
+        finance = finance_for_window(finance, start, end)
     if operation == "dashboard":
         data = engine.dashboard()
+        prior_start = start - (end - start)
+        prior_snapshot = None
+        if prior_start >= parse_time(signature["windowStart"]):
+            prior_snapshot = snapshot
+        elif signature.get("previousVersion"):
+            prior_snapshot = NativePublishedSnapshot.objects.select_related(
+                "version",
+            ).get(version_id=signature["previousVersion"])
+            try:
+                validate_snapshot_data(
+                    prior_snapshot.data, signature["previousDigest"],
+                )
+            except (ValueError, APIException, ValidationError) as error:
+                raise AgioneOpsError(
+                    "SNAPSHOT_CONTENT_INVALID", status_code=409,
+                ) from error
+        previous = None
+        if prior_snapshot and prior_snapshot.version.coverage.get(
+            "pagingComplete"
+        ) and not prior_snapshot.version.coverage.get("partial"):
+            prior_rows = [row for row in prior_snapshot.data["rows"] if (
+                prior_start <= parse_time(row["occurred_at"]) < start
+            )]
+            previous = LiveAnalytics(
+                snapshot.data["customers"], snapshot.data["models"],
+                prior_rows, prior_start, start, query,
+            )
+        apply_dashboard_observations(
+            data, engine, previous, snapshot.version.coverage,
+        )
         data["finance"] = finance or unavailable_finance(
             "NATIVE_FINANCE_NOT_COLLECTED"
         )

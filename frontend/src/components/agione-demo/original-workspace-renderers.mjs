@@ -257,7 +257,7 @@ function modelUseView(rows){
 }
 function eventPanel(d){
  const rows=customerEvents(d.customers),page=eventPage(rows,S.eventKind,S.eventPage),lead=rows[0];
- const labels={all:'全部客户',inactive:'近期无调用',failure:'请求失败',blocked:'接入受阻',decline:'使用下降'};
+ const labels={all:'全部客户',inactive:'近期无调用',failure:'请求失败',blocked:'接入受阻',decline:'使用下降',technical:'技术失败'};
  const declineUnknown=d.comparison.state!=='READY';
  const inactiveUnknown=d.inactivityState&&d.inactivityState!=='READY';
  const unknown=declineUnknown||inactiveUnknown;

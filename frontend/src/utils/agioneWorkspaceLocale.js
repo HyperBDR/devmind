@@ -60,6 +60,10 @@ const phrases = `
 客户画像|Customer insights
 客户档案|Customer profile
 财务与额度|Credits & Billing
+余额为最新快照；消耗按所选日期汇总，缺失不补零。|Balances are the latest snapshot; usage follows the selected dates and missing values are not treated as zero.
+所选日期入账数据尚未完整采集|Credits added data for the selected dates is incomplete
+日维度调账数据暂不可用|Daily adjustments are unavailable
+所选日期消耗数据尚未完整采集|Usage data for the selected dates is incomplete
 全量采集完成|Full coverage
 更新全部财务|Refresh financial data
 Operator 已授权目录财务快照（独立于调用日期、模型和客户筛选）|Financial data for authorized customers; unaffected by request dates, models, or customer filters

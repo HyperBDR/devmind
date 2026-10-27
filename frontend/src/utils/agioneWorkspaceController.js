@@ -13,6 +13,7 @@ const empty = () => ({
   filters: { modelIds: [], statuses: [], failureTypes: [] },
   loading: false,
   refreshing: false,
+  stale: false,
   error: '',
   analysis: null,
   trend: null,
@@ -88,10 +89,10 @@ export function createAgioneWorkspaceController(api, onChange = () => {}) {
   const cancelled = (error) => error?.name === 'AbortError' ||
     error?.name === 'CanceledError' || error?.code === 'ERR_CANCELED'
   const domain = () => canonical([session, authEpoch, state.connectionId])
-  function clearWork() {
+  function clearWork(keepPages = false) {
     clearTimeout(financeTimer)
     financeTimer = null
-    pageCache.clear()
+    if (!keepPages) pageCache.clear()
     profileCache.clear()
     optionsCache.clear()
     activeLoad = null
@@ -163,7 +164,8 @@ export function createAgioneWorkspaceController(api, onChange = () => {}) {
     const authorizationDomain = domain()
     const generation = epoch
     const query = operation === 'finance'
-      ? { operation, ...(!live ? { dataVersion: version } : {}), payload }
+      ? { operation, ...(!live ? { dataVersion: version } : {}),
+          ...(state.window ? { window: state.window } : {}), payload }
       : body(operation, payload, extra)
     const key = canonical([authorizationDomain, generation, state.view,
       state.requestId, live, query])
@@ -231,7 +233,7 @@ export function createAgioneWorkspaceController(api, onChange = () => {}) {
     state = empty()
     if (!disposed) onChange(state)
   }
-  function attach(frame, connectionId) {
+  function attach(frame, connectionId, selectedWindow = null) {
     const live = frame?.isLive === true && frame?.provenance?.mode === 'live'
     const frameKey = live ? frame.requestId : frame?.dataVersion
     if (!frameKey || !connectionId) {
@@ -251,25 +253,38 @@ export function createAgioneWorkspaceController(api, onChange = () => {}) {
     )
       return
     const view = state.view
-    clearWork()
+    const retain = state.connectionId === connectionId && !live &&
+      (view === 'focus' ? state.dashboard :
+        view === 'aggregate' ? state.analysis : state.customers)
+    const retained = retain
+      ? Object.fromEntries(pageFields.map((key) => [key, state[key]])) : {}
+    clearWork(state.connectionId === connectionId && !live)
     if (state.connectionId !== connectionId) authEpoch++
     epoch++
     request++
     detail++
+    const selectedFits = !live && selectedWindow && frame.window &&
+      Date.parse(selectedWindow.start) >= Date.parse(frame.window.start) &&
+      Date.parse(selectedWindow.endExclusive) <= Date.parse(frame.window.endExclusive)
+    const effectiveWindow = selectedFits ? selectedWindow : frame.window
     publish({
       ...empty(),
+      ...retained,
+      stale: !!retain,
       view,
       connectionId,
       dataVersion: live ? '' : frame.dataVersion,
       isLive: live,
       requestId: live ? frameKey : '',
       provenance: frame.provenance || null,
-      window: frame.window,
+      window: effectiveWindow,
       cachedWindow: live ? null : frame.window
     })
     const response = live ? frame.liveResponse
       : frame.snapshotResponse || frame.liveResponse
     const snapshotResponse = !live &&
+      Date.parse(effectiveWindow?.start) === Date.parse(frame.window?.start) &&
+      Date.parse(effectiveWindow?.endExclusive) === Date.parse(frame.window?.endExclusive) &&
       response?.dataVersion === frame.dataVersion &&
       response.capabilities?.directUpstream !== true &&
       response.provenance?.mode !== 'live' &&
@@ -291,7 +306,7 @@ export function createAgioneWorkspaceController(api, onChange = () => {}) {
         capabilities: response.capabilities || {},
         coverage: response.coverage || null,
         finance: response.data.finance || null,
-        loading: false
+        loading: false, stale: false
       })
       const key = pageKey()
       remember(key, generation, seq)
@@ -315,12 +330,17 @@ export function createAgioneWorkspaceController(api, onChange = () => {}) {
       pageCache.delete(key)
       pageCache.set(key, cached)
     }
+    const retain = !cached && (state.view === 'focus' ? state.dashboard :
+      state.view === 'aggregate' ? state.analysis : state.customers)
     publish({
-      analysis: null, trend: null, customers: null, profile: null,
-      dashboard: null, overview: null, finance: null,
-      capabilities: {}, coverage: null,
+      ...(retain ? {} : {
+        analysis: null, trend: null, customers: null, profile: null,
+        dashboard: null, overview: null, finance: null,
+        capabilities: {}, coverage: null
+      }),
       memberOptions: [], customerOptions: [], modelOptions: [],
-      ...cached, loading: !cached, refreshing: !!cached, error: '',
+      ...cached, loading: !cached && !retain,
+      refreshing: !!cached || !!retain, stale: !!retain, error: '',
       drawerLoading: false, drawerError: '',
       directory: null, directoryLoading: false, directoryError: ''
     })
@@ -356,7 +376,7 @@ export function createAgioneWorkspaceController(api, onChange = () => {}) {
         publish({ analysis: analysis.data, trend: trend.data,
           capabilities: analysis.capabilities || {},
           coverage: analysis.coverage || null,
-          loading: false, refreshing: false })
+          loading: false, refreshing: false, stale: false })
         remember(key, generation, seq)
         void options('userId')
       } else if (state.view === 'portrait') {
@@ -372,7 +392,7 @@ export function createAgioneWorkspaceController(api, onChange = () => {}) {
           ? state.selectedCustomerId : items[0]?.customerTenantId || ''
         publish({ customers: customers.data, selectedCustomerId: id,
           capabilities: customers.capabilities || {},
-          loading: false, refreshing: false })
+          loading: false, refreshing: false, stale: false })
         if (id) await selectCustomer(id)
         remember(key, generation, seq)
         void loadFinance(generation, seq, key)
@@ -385,7 +405,7 @@ export function createAgioneWorkspaceController(api, onChange = () => {}) {
           capabilities: dashboard.capabilities || {},
           coverage: dashboard.coverage || null,
           finance: dashboard.data?.finance || null,
-          loading: false, refreshing: false })
+          loading: false, refreshing: false, stale: false })
         remember(key, generation, seq)
         if (!Object.prototype.hasOwnProperty.call(
           dashboard.data || {}, 'finance'))
@@ -395,7 +415,7 @@ export function createAgioneWorkspaceController(api, onChange = () => {}) {
     } catch (error) {
       if (valid(generation, seq)) {
         if (cancelled(error)) {
-          publish({ loading: false, refreshing: false })
+          publish({ loading: false, refreshing: false, stale: false })
           return
         }
         publish({ loading: false, refreshing: false, error: failure(error) })
@@ -689,6 +709,31 @@ export function createAgioneWorkspaceController(api, onChange = () => {}) {
           drawerError: cancelled(error) ? '' : failure(error) })
     }
   }
+  async function exportAnalysis() {
+    const generation = epoch, seq = request
+    const payload = {
+      groupBy: [state.groupBy, state.secondary].filter(Boolean),
+      metrics: [...new Set([state.metric, 'requestCount', 'successRate',
+        'inputTokens', 'outputTokens'])],
+      userIds: state.userId ? [state.userId] : [],
+      page: 1, pageSize: 200
+    }
+    const rows = []
+    let total
+    do {
+      const response = await call('analysis', { ...payload })
+      if (!valid(generation, seq)) throw new Error('筛选条件已变化，请重新导出')
+      const data = response.data
+      if (!Array.isArray(data?.rows) || !Number.isInteger(data.total) ||
+          data.rows.length !== Math.min(payload.pageSize, data.total - rows.length))
+        throw new Error('导出数据不完整，请重试')
+      total = data.total
+      rows.push(...data.rows)
+      payload.page++
+    } while (rows.length < total)
+    if (rows.length !== total) throw new Error('导出数据不完整，请重试')
+    return rows
+  }
   function openCustomer(id) {
     request++
     detail++
@@ -730,6 +775,7 @@ export function createAgioneWorkspaceController(api, onChange = () => {}) {
     reset,
     attach,
     load,
+    reload: () => { clearWork(true); request++; return load() },
     setView,
     configure,
     options,
@@ -741,6 +787,7 @@ export function createAgioneWorkspaceController(api, onChange = () => {}) {
     openGroupDrawer,
     openEvidence,
     openCustomer,
+    exportAnalysis,
     closeDrawer,
     invalidate,
     dispose

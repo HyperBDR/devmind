@@ -149,6 +149,47 @@ def test_native_publish_is_atomic_normalized_and_redelivery_safe(native):
     assert native["connection"].active_run_id is None
 
 
+def test_dashboard_selects_snapshot_covering_requested_dates(native):
+    from agione_ops.queries import query_dashboard
+
+    start, end = native["start"], native["end"]
+    _, first = collect(native)
+    native["start"] = start - timedelta(days=3)
+    native["end"] = start - timedelta(days=1)
+    _, second = collect(native)
+    assert second["status"] == "succeeded"
+    result = query_dashboard(
+        native["connection"], native["user"], window_start=start,
+        window_end=end,
+    )
+    assert str(result["dataVersion"]) == str(first["dataVersion"])
+    missing = query_dashboard(
+        native["connection"], native["user"],
+        window_start=start - timedelta(days=10), window_end=end,
+    )
+    assert missing["state"] == "not_collected"
+    assert missing["summary"] is None
+
+
+def test_daily_finance_projection_passes_snapshot_validation(native):
+    from agione_ops.native_finance import aggregate_finance
+    from agione_ops.native_sync import digest, validate_snapshot_data
+
+    _, result = collect(native)
+    snapshot = NativePublishedSnapshot.objects.get(
+        version_id=result["dataVersion"],
+    )
+    day = native["start"].date().isoformat()
+    finance = aggregate_finance([("200", [], {
+        "currentCycle": day[:7],
+        "trend": [{"date": day, "consumedCredit": "2.50",
+                   "topUpCredit": "10"}],
+    })], 1, day[:7], timezone.now().isoformat())
+    finance["mode"] = "snapshot"
+    data = {**snapshot.data, "finance": finance}
+    validate_snapshot_data(data, digest(data))
+
+
 def test_native_submit_is_uuid_only_no_source_and_single_inflight(native):
     run = submit(native, "same")
     again = submit(native, "same")
@@ -477,3 +518,23 @@ def test_finance_dispatch_waits_for_publication_commit(
         dispatch.assert_not_called()
     dispatch.assert_called_once()
     assert dispatch.call_args.args[1] == str(run.pk)
+
+
+def test_month_end_shard_clips_query_and_checks_precision():
+    from types import SimpleNamespace
+    from agione_ops.native_sync import _read_shard
+
+    shard = SimpleNamespace(
+        window_start=datetime(2026, 7, 31, tzinfo=ZONE),
+        window_end=datetime(2026, 8, 1, tzinfo=ZONE),
+    )
+    client = Mock()
+    client.get.return_value = {"records": [], "total": 0}
+    assert _read_shard(client, shard, 1, lambda _: None) == ([], 1)
+    assert client.get.call_args.args[1]["endTime"] == "2026-07-31 23:59:59"
+    client.get.return_value = {
+        "records": [{"id": "1", "createTime": 1234567890123}], "total": 1,
+    }
+    with pytest.raises(AgioneOpsError) as exc:
+        _read_shard(client, shard, 1, lambda _: None)
+    assert exc.value.code == "SOURCE_TIME_PRECISION_CHANGED"

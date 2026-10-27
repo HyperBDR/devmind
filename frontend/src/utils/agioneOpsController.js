@@ -50,7 +50,7 @@ export function syncWindow(startDate, endDate, now = new Date()) {
   const end = dateEpoch(endDate)
   const today = dateEpoch(shanghaiDate(now))
   const days = (end - start) / DAY + 1
-  if (!Number.isFinite(days) || days < 1 || days > 31 || end >= today) {
+  if (!Number.isFinite(days) || days < 1 || days > 7 || end >= today) {
     throw new Error('invalidWindow')
   }
   return {
@@ -71,10 +71,12 @@ function initial(now) {
     configurableConnections: [],
     connectionConfigured: false,
     dashboard: null,
+    windowMissing: false,
     run: null,
     loading: false,
     listLoading: false,
     syncing: false,
+    previousLoading: false,
     error: '',
     errorCode: '',
     ...previousCompleteWeek(now)
@@ -151,6 +153,7 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
   let pollRevision = 0
   let timer = null
   let disposed = false
+  let previousRun = false
 
   function publish(patch) {
     state = { ...state, ...patch }
@@ -182,7 +185,8 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
     publish({ loading: true, error: '', errorCode: '' })
     try {
       if (localNative && state.sourceKind === 'native') {
-        const data = unwrap(await api.dashboard(id, dataVersion))
+        const data = unwrap(await api.dashboard(id, dataVersion,
+          syncWindow(state.startDate, state.endDate, now())))
         if (!current(version) || query !== queryRevision) return
         if (!['ready', 'not_collected'].includes(data?.state))
           throw new Error('invalidResponse')
@@ -190,9 +194,11 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
           !data.dataVersion || !data.summary ||
           data.provenance?.kind !== 'native_snapshot'
         )) throw new Error('invalidResponse')
-        publish({ dashboard: data, loading: false,
-          ...(data.window ? snapshotWindowDates(data) : {}),
-          run: null, syncing: false })
+        if (data.window) snapshotWindowDates(data)
+        const missing = data.state === 'not_collected'
+        publish({ dashboard: missing && state.dashboard?.state === 'ready'
+          ? state.dashboard : data, windowMissing: missing,
+          loading: false, run: null, syncing: false })
         return
       }
       if (state.isLive) {
@@ -385,6 +391,8 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
     publish({
       startDate,
       endDate,
+      previousLoading: false,
+      windowMissing: false,
       run: null,
       syncing: false,
       loading: false,
@@ -392,6 +400,15 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
       errorCode: ''
     })
     return true
+  }
+
+  async function loadWindow(startDate, endDate) {
+    if (!setWindow(startDate, endDate)) return
+    const version = revision
+    await refresh()
+    if (current(version) && state.startDate === startDate &&
+        state.endDate === endDate && !state.error &&
+        state.windowMissing) await sync()
   }
 
   async function acceptRun(data, version, poll) {
@@ -403,12 +420,15 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
     if (data.status === 'succeeded') {
       publish({ syncing: false })
       if (!data.dataVersion) throw new Error('invalidResponse')
-      await refresh(data.dataVersion)
+      await refresh(previousRun ? undefined : data.dataVersion)
+      previousRun = false
+      publish({ previousLoading: false })
       return true
     }
     if (TERMINAL.has(data.status)) {
       publish({
         syncing: false,
+        previousLoading: false,
         error: 'syncFailed',
         errorCode: /^[A-Z_0-9]{1,80}$/.test(data.errorCode || '')
           ? data.errorCode
@@ -422,7 +442,7 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
   async function pollRun(id, runId, version, poll, attempts = 0) {
     if (!polling(version, poll)) return
     if (attempts >= MAX_POLL_ATTEMPTS) {
-      publish({ syncing: false, error: 'pollTimeout', errorCode: '' })
+      publish({ syncing: false, previousLoading: false, error: 'pollTimeout', errorCode: '' })
       return
     }
     try {
@@ -440,7 +460,7 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
       stopPolling()
       const failure = safeError(error)
       publish({
-        syncing: false,
+        syncing: false, previousLoading: false,
         ...failure,
         ...(failure.error === 'accessDenied'
           ? { run: null, dashboard: null }
@@ -449,7 +469,7 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
     }
   }
 
-  async function sync() {
+  async function sync(previousWindow = null) {
     if (
       state.readOnly &&
       !(localNative && state.sourceKind === 'native')
@@ -464,7 +484,7 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
       return
     let window
     try {
-      window = syncWindow(state.startDate, state.endDate, now())
+      window = previousWindow || syncWindow(state.startDate, state.endDate, now())
     } catch (_) {
       publish({ error: 'invalidWindow', errorCode: '' })
       return
@@ -473,7 +493,8 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
     stopPolling()
     const poll = pollRevision
     const id = state.connectionId
-    publish({ syncing: true, run: null, error: '', errorCode: '' })
+    previousRun = !!previousWindow
+    publish({ syncing: true, previousLoading: previousRun, run: null, error: '', errorCode: '' })
     try {
       const data = unwrap(await api.submitSync(id, window, keyFactory()))
       if (!polling(version, poll)) return
@@ -485,7 +506,7 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
       const activeRun = error?.response?.status === 409
         ? error.response.data?.data
         : null
-      if (activeRun?.runId && ACTIVE.has(activeRun.status)) {
+      if (!previousRun && activeRun?.runId && ACTIVE.has(activeRun.status)) {
         publish({ run: activeRun, syncing: true, error: '', errorCode: '' })
         timer = schedule(
           () => pollRun(id, activeRun.runId, version, poll),
@@ -495,13 +516,23 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
       }
       const failure = safeError(error)
       publish({
-        syncing: false,
+        syncing: false, previousLoading: false,
         ...failure,
         ...(failure.error === 'accessDenied'
           ? { dashboard: null, run: null }
           : {})
       })
     }
+  }
+
+  function syncPrevious() {
+    const start = dateEpoch(state.startDate)
+    const end = dateEpoch(state.endDate)
+    const days = (end - start) / DAY + 1
+    if (!Number.isInteger(days) || days < 1 || days > 7) return
+    const previousEnd = new Date(start - DAY).toISOString().slice(0, 10)
+    const previousStart = new Date(start - days * DAY).toISOString().slice(0, 10)
+    return sync(syncWindow(previousStart, previousEnd, now()))
   }
 
   function resume() {
@@ -523,8 +554,10 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
     load,
     selectConnection,
     setWindow,
+    loadWindow,
     refresh,
     sync,
+    syncPrevious,
     resume,
     dispose
   }

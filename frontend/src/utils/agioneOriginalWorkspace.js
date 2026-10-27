@@ -61,7 +61,7 @@ export function readonlyWorkspaceMarkup(html,state,locale) {
  return localizeWorkspaceHtml(readonlyMarkupBase(html,state),locale)
 }
 function readonlyMarkupBase(html,state) {
- let result=html.replace(/data-collect-finance=/g,'disabled title="只读：不触发财务采集" data-collect-finance=').replace(/data-retry-previous/g,'disabled title="只读：仅使用已缓存前期，不补采" data-retry-previous').replace(/data-open-rules/g,'disabled title="只读：使用缓存既有规则" data-open-rules').replace(/data-sync(?=[\s>])/g,'disabled title="只读：不触发采集" data-sync')
+ let result=html.replace(/data-collect-finance=/g,'disabled title="只读：不触发财务采集" data-collect-finance=').replace(/data-sync(?=[\s>])/g,'disabled title="只读：不触发采集" data-sync')
  const f=originalFinanceDTO(state.finance || state.dashboard?.finance,state)
  if(state.isLive) return result.replace(/只读：仅使用已缓存前期，不补采/g,'只读：只显示本次上游返回的前期').replace(/只读：使用缓存既有规则/g,'只读：使用已验证业务规则').replace(/只读：不触发财务采集/g,'只读：本次直接读取上游，不修改财务').replace(/只读历史快照/g,'按需直连读取').replace(/已采集财务 · 非实时/g,'本次上游读取结果').replace(/已授权缓存汇总/g,'已授权直连范围').replace(/来源快照待更新/g,'上游返回数据有时效提示').replace(/财务快照/g,'上游财务数据').replace(/平台 Credit 快照/g,'平台 Credit 数据').replace(/已缓存账期数据/g,'本次上游账期数据').replace(/已缓存前期/g,'已读取前期').replace(/采集于 /g,'读取于 ').replace(/没有可比较的已缓存前期/g,'未返回可比较的前期数据')
  const label=f.coverageBasis==='pinned_confirmed_finance'||f.latestObservations===false?'仅固定版本中已确认客户的已缓存财务，不代表最新独立账本全量':f.scopeLabel || '同平台 Operator 已授权客户的已有缓存 · 独立财务口径，不随调用筛选变化'

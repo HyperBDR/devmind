@@ -76,7 +76,7 @@ test('finance distinguishes platform credits from cash revenue and preserves unk
   assert.match(html, /Credits used<\/span><strong>—<\/strong>/)
   assert.doesNotMatch(html, /[\u3400-\u9fff]/)
   assert(!html.includes('Credits revenue'))
-  assert(html.includes('disabled'))
+  assert(!html.includes('data-collect-finance'))
 })
 
 test('HTML token localization updates visible hints but never action attributes', () => {

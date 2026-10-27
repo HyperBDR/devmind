@@ -22,10 +22,10 @@ export const agioneOpsApi = {
   liveQuery(id, body, config = {}) {
     return apiClient.post(`${connectionPath(id)}/live/query/`, body, config)
   },
-  dashboard(id, dataVersion) {
+  dashboard(id, dataVersion, window) {
     return apiClient.post(
       `${connectionPath(id)}/dashboard/query/`,
-      dataVersion ? { dataVersion } : {}
+      dataVersion ? { dataVersion } : window ? { window } : {}
     )
   },
   snapshotQuery(id, body, config = {}) {

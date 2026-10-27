@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import math
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
@@ -96,10 +97,25 @@ def validate_snapshot_data(data, content_digest):
                 "periodSummaries", "balances", "cycles", "trend",
             }.issubset(finance)
             or finance["mode"] != "snapshot"
-            or finance["trend"] != []
+            or not isinstance(finance["trend"], list)
+            or len(finance["trend"]) > 31
             or len(json.dumps(finance, ensure_ascii=True)) > 262144
         ):
             invalid()
+        for row in finance["trend"]:
+            if (
+                not isinstance(row, dict)
+                or set(row) not in (
+                    {"date", "value"}, {"date", "value", "topUp"},
+                )
+                or not isinstance(row["date"], str)
+                or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", row["date"])
+                or amount(row["value"]) is None or amount(row["value"]) < 0
+                or (row.get("topUp") is not None and (
+                    amount(row["topUp"]) is None or amount(row["topUp"]) < 0
+                ))
+            ):
+                invalid()
         shapes = (
             ("balanceDistributions", {
                 "unit", "threshold", "healthyCustomers", "lowCustomers",
@@ -201,7 +217,6 @@ def validate_snapshot_data(data, content_digest):
         for key in ("input_tokens", "output_tokens", "total_tokens"):
             if row[key] is not None and token(row[key]) is None:
                 invalid()
-        import re
 
         if not isinstance(row["failureKey"], str) or not re.fullmatch(
             r"(?:NOT_APPLICABLE|UNKNOWN|source:[A-Za-z0-9_:-]{1,60})",
@@ -391,11 +406,18 @@ def _read_shard(client, shard, workers, checkpoint):
     size = 200
     limit = _setting("AGIONE_OPS_NATIVE_SHARD_MAX_PAGES", 8, 1, 100)
     zone = ZoneInfo("Asia/Shanghai")
+    start = shard.window_start.astimezone(zone)
+    stop = shard.window_end.astimezone(zone)
+    month_end = (start.replace(day=28) + timedelta(days=4)).replace(
+        day=1, hour=0, minute=0, second=0, microsecond=0,
+    )
+    clipped = stop == month_end
+    upper = stop - timedelta(seconds=1) if clipped else stop
     params = {
-        "startTime": shard.window_start.astimezone(zone).strftime(
+        "startTime": start.strftime(
             "%Y-%m-%d %H:%M:%S"
         ),
-        "endTime": shard.window_end.astimezone(zone).strftime(
+        "endTime": upper.strftime(
             "%Y-%m-%d %H:%M:%S"
         ),
         "size": size,
@@ -438,6 +460,11 @@ def _read_shard(client, shard, workers, checkpoint):
     for row in all_rows:
         if not isinstance(row, dict):
             raise AgioneOpsError("SOURCE_SHAPE_CHANGED")
+        if (
+            clipped and type(row.get("createTime")) in (int, float)
+            and row["createTime"] % 1000
+        ):
+            raise AgioneOpsError("SOURCE_TIME_PRECISION_CHANGED", status_code=409)
         key = entity(row.get("id", row.get("record_id")))
         if key in keys:
             raise AgioneOpsError("SOURCE_DUPLICATE_PAGE")

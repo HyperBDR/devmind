@@ -9,7 +9,7 @@ import pytest
 
 from agione_ops.client import AgioneOpsError
 from agione_ops.native_analytics import normalize_log, summary
-from agione_ops.native_finance import aggregate_finance
+from agione_ops.native_finance import aggregate_finance, finance_for_window
 from agione_ops import native_queries as module
 
 CID = "90071992547409931234"
@@ -333,6 +333,32 @@ def test_finance_presents_new_fields_without_raw_accounts(live):
     assert "PRIVATE" not in json.dumps(result)
 
 
+def test_finance_date_filter_uses_complete_daily_values_only():
+    records = [
+        ("100", [], {"currentCycle": "2026-10", "trend": [
+            {"date": "2026-10-01", "consumedCredit": "1.25", "topUpCredit": "10"},
+            {"date": "2026-10-02", "consumedCredit": "2"},
+        ]}),
+        ("200", [], {"currentCycle": "2026-10", "trend": [
+            {"date": "2026-10-01", "consumedCredit": "3", "topUpCredit": "5.50"},
+            {"date": "2026-10-02", "consumedCredit": "4.50"},
+        ]}),
+    ]
+    finance = aggregate_finance(records, 2, "2026-10", START)
+    start = datetime.fromisoformat("2026-10-01T00:00:00+08:00")
+    end = datetime.fromisoformat("2026-10-02T00:00:00+08:00")
+    selected = finance_for_window(finance, start, end)["periodSummaries"][0]
+    assert selected["consumed"] == "4.25"
+    assert selected["topUp"] == "15.50"
+    assert selected["adjustment"] is None
+    missing = finance_for_window(
+        finance, start, datetime.fromisoformat("2026-10-04T00:00:00+08:00")
+    )["periodSummaries"][0]
+    assert missing["consumed"] is None
+    records[1][2]["trend"].pop()
+    assert aggregate_finance(records, 2, "2026-10", START)["trend"] == []
+
+
 def test_finance_customer_ownership_is_verified(live):
     live["financial_owner"] = OTHER
     with pytest.raises(AgioneOpsError) as error:
@@ -430,3 +456,53 @@ def test_empty_and_unknown_usage_are_distinguished():
     assert summary([row])["totalTokens"] is None
     assert summary([])["requestCount"] == 0
     assert summary([])["successRate"] is None
+
+
+def test_customer_analytics_groups_rows_once():
+    from agione_ops.native_analytics import LiveAnalytics
+
+    class CountedRow(dict):
+        reads = 0
+
+        def __getitem__(self, key):
+            if key == "customer_id":
+                type(self).reads += 1
+            return super().__getitem__(key)
+
+    rows = [CountedRow(normalize_log({
+        "id": str(1000 + i), "customerTenantId": str(10 + i % 10),
+        "createTime": STAMP, "status": 1,
+    }, module.parse_time(START), module.parse_time(END))) for i in range(100)]
+    customers = {str(10 + i): {"name": str(i)} for i in range(10)}
+    engine = LiveAnalytics(customers, {}, rows, None, None, {})
+    CountedRow.reads = 0
+    results = engine.customer_rows()
+    assert sum(row["summary"]["requestCount"] for row in results) == 100
+    assert CountedRow.reads < 500
+
+
+def test_dashboard_observations_use_complete_scoped_windows():
+    from agione_ops.native_analytics import LiveAnalytics
+    from agione_ops.native_snapshot_queries import apply_dashboard_observations
+
+    start = module.parse_time("2026-10-20T00:00:00+08:00")
+    end = module.parse_time("2026-10-27T00:00:00+08:00")
+    old = module.parse_time("2026-10-13T00:00:00+08:00")
+    customers = {CID: {"name": "Test"}}
+    def record(identifier, at):
+        return normalize_log({"id": identifier, "customerTenantId": CID,
+                              "occurred_at": at, "status": 1}, old, end)
+    current = LiveAnalytics(customers, {}, [record("1", "2026-10-20T12:00:00+08:00")], start, end, {})
+    prior = LiveAnalytics(customers, {}, [record(str(i), "2026-10-14T12:00:00+08:00") for i in range(2, 6)], old, start, {})
+    data = current.dashboard()
+    apply_dashboard_observations(data, current, prior, {"pagingComplete": True})
+    row = data["customers"][0]
+    assert row["changePercent"] == -75
+    assert row["inactivity"]["daysWithoutCalls"] == 6
+    assert data["comparison"]["summary"]["requestCount"] == 4
+    filtered = LiveAnalytics(customers, {}, current.rows, start, end,
+                             {"filters": {"statuses": ["FAILURE"]}})
+    data = filtered.dashboard()
+    apply_dashboard_observations(data, filtered, None, {"pagingComplete": True})
+    assert data["customers"][0]["inactivity"]["state"] == "FILTER_NOT_APPLICABLE"
+    assert data["comparison"]["state"] == "UNAVAILABLE"

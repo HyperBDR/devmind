@@ -417,7 +417,10 @@
                   {{ t(readOnly ? 'agione.readOnlyRangeHelp' : 'agione.completeDays') }}
                   <template v-if="pendingRange">
                     <span class="scope-dot">·</span>
-                    {{ t('agione.pendingRange', pendingRange) }}
+                    {{ ready && work.window ? t(state.error ? 'agione.pendingRangeFailed' : 'agione.pendingRange', pendingRange) : t('agione.pendingRangeEmpty', pendingRange) }}
+                    <template v-if="ready && work.window">
+                      {{ t('agione.currentDisplayedRange', { start: shanghaiDate(new Date(work.window.start)), end: shanghaiDate(new Date(Date.parse(work.window.endExclusive) - 1)) }) }}
+                    </template>
                   </template>
                 </span>
                 <details class="scope-help">
@@ -450,7 +453,7 @@
               </div>
             </section>
             </div><div class="results-shell"><div id="results"><div
-              v-if="state.listLoading || state.loading"
+              v-if="state.listLoading || (state.loading && !ready)"
               class="loading"
               role="status"
             >
@@ -467,12 +470,15 @@
             <div v-else-if="!ready && !state.error" class="empty" role="status">
               <h2>
                 {{
-                  t(readOnly ? 'agione.snapshotUnavailable' : 'agione.noData')
+                  pendingRange && state.syncing ? t('agione.collectingRange') :
+                    t(readOnly ? 'agione.snapshotUnavailable' : 'agione.noData')
                 }}
               </h2>
               <p>
                 {{
-                  readOnly
+                  pendingRange && state.syncing
+                    ? t('agione.pendingRangeEmpty', pendingRange)
+                    : readOnly
                     ? t('agione.snapshotUnavailableHelp')
                     : connection?.verifiedAt
                       ? t('agione.noDataHelp')
@@ -480,7 +486,7 @@
                 }}
               </p>
               <button
-                v-if="connection?.sourceKind === 'native' || (!readOnly && connection?.verifiedAt)"
+                v-if="!state.syncing && (connection?.sourceKind === 'native' || (!readOnly && connection?.verifiedAt))"
                 class="primary"
                 :disabled="state.syncing"
                 @click="refreshCurrent"
@@ -498,6 +504,10 @@
             <div v-if="!readOnly && work.view !== 'focus'" class="panel empty">
               {{ t('agione.unsupportedSource') }}
             </div>
+            <div v-if="readOnly && work.stale" role="status" class="loading">
+              {{ t('agione.staleRefreshing') }}
+            </div>
+            <div :inert="work.stale || null">
             <AnalysisWorkspace
               v-if="
                 readOnly &&
@@ -506,6 +516,7 @@
                 !work.error
               "
               :state="work"
+              :export-rows="workspace.exportAnalysis"
               @change="workspace.configure"
               @drill="workspace.openGroupDrawer"
               @clear="clearScope"
@@ -528,7 +539,8 @@
                   workspace.openGroupDrawer(item.row, item.customerId, item.origin)
               "
             />
-            <FocusWorkspace v-if="readOnly && work.view === 'focus' && !work.loading && !work.error && work.dashboard" :state="work" @customer="openWorkspaceCustomer" @requests="id=>workspace.openRequests({},1,id)" @analyze-model="analyzeModel" @clear="clearScope" @diagnosis="diagnosis=$event" @view="navigateWorkspace" />
+            <FocusWorkspace v-if="readOnly && work.view === 'focus' && !work.loading && !work.error && work.dashboard" :state="work" :previous-loading="state.previousLoading" @customer="openWorkspaceCustomer" @requests="id=>workspace.openRequests({},1,id)" @analyze-model="analyzeModel" @clear="clearScope" @diagnosis="diagnosis=$event" @view="navigateWorkspace" @previous="controller.syncPrevious()" />
+            </div>
             <template
               v-if="
                 !readOnly && ready && !state.loading && work.view === 'focus' && !work.error && (!readOnly || (!work.loading && !!work.overview))
@@ -1084,7 +1096,7 @@
                     }"
                     :disabled="
                       day > latestDay ||
-                      (!dateDraft.end && day > shiftDay(dateDraft.start, 30))
+                      (!dateDraft.end && day > shiftDay(dateDraft.start, 6))
                     "
                     @click="pickDay(day)"
                   >
@@ -1257,7 +1269,14 @@ watch(
     if (!id || !readOnly || id !== work.value.connectionId ||
         (!frame && (!loading || error))) workspace.attach(null, '')
     if (loading || listLoading) return
-    if (readOnly && frame) workspace.attach(frame, id)
+    if (readOnly && frame) {
+      let selectedWindow = null
+      if (state.value.sourceKind === 'native' && !state.value.isLive) {
+        try { selectedWindow = syncWindow(state.value.startDate, state.value.endDate) }
+        catch (_) { /* No selected range yet. */ }
+      }
+      workspace.attach(frame, id, selectedWindow)
+    }
     else if (!frame) workspace.attach(null, '')
   },
   { flush: 'sync' }
@@ -1339,8 +1358,16 @@ const menuPosition = ref({})
 const dateDialog = ref(null)
 const dateError = ref(false)
 const pendingRange = ref(null)
+watch(() => state.value.syncing, (syncing, before) => {
+  if (before && !syncing && !state.value.previousLoading && !state.value.error && work.value.connectionId)
+    void workspace.load()
+})
+watch(() => state.value.previousLoading, (loading, before) => {
+  if (before && !loading && !state.value.error && work.value.connectionId)
+    void workspace.reload()
+}, { flush: 'sync' })
 watch(() => state.value.connectionId, () => { pendingRange.value = null })
-watch(() => state.value.dashboard?.dataVersion, () => {
+watch(() => state.value.dashboard, () => {
   const selected = pendingRange.value
   const range = state.value.dashboard?.window
   if (selected && range &&
@@ -1435,14 +1462,14 @@ const displayFrame = computed(() =>
     : state.value.dashboard
 )
 const displayStart = computed(() =>
-  readOnly.value && work.value.window
+  pendingRange.value?.start || (readOnly.value && work.value.window
     ? shanghaiDate(new Date(work.value.window.start))
-    : state.value.startDate
+    : state.value.startDate)
 )
 const displayEnd = computed(() =>
-  readOnly.value && work.value.window
+  pendingRange.value?.end || (readOnly.value && work.value.window
     ? shanghaiDate(new Date(Date.parse(work.value.window.endExclusive) - 1))
-    : state.value.endDate
+    : state.value.endDate)
 )
 const summary = computed(() => displayFrame.value?.summary || {})
 const trend = computed(() =>
@@ -1592,8 +1619,8 @@ function applyDates() {
         workspace.setWindow(queryWindow)
       }
       else {
-        controller.setWindow(dateDraft.value.start, dateDraft.value.end)
         pendingRange.value = { start: dateDraft.value.start, end: dateDraft.value.end }
+        void controller.loadWindow(dateDraft.value.start, dateDraft.value.end)
       }
     } else if (isLive.value) {
       controller.setWindow(dateDraft.value.start, dateDraft.value.end)
@@ -1618,9 +1645,8 @@ function recentSeven() {
       pendingRange.value = null
       return workspace.setWindow(window)
     }
-    controller.setWindow(start, latestDay)
     pendingRange.value = { start, end: latestDay }
-    return
+    return controller.loadWindow(start, latestDay)
   }
   if (isLive.value) { controller.setWindow(shiftDay(latestDay, -6), latestDay); return controller.refresh() }
   if (readOnly.value) {

@@ -232,6 +232,11 @@ class LiveAnalytics:
         ):
             fail("SCOPE_FORBIDDEN", 403)
         self.global_rows = [x for x in rows if self.matches(x)]
+        self.customer_global_rows = {}
+        for row in self.global_rows:
+            self.customer_global_rows.setdefault(
+                row["customer_id"], []
+            ).append(row)
         ids = self.payload.get("user_ids", self.payload.get("userIds", []))
         self.local_rows = [
             x
@@ -401,11 +406,16 @@ class LiveAnalytics:
         }
 
     def customer_row(self, cid):
-        rows = [x for x in self.global_rows if x["customer_id"] == cid]
+        rows = self.customer_global_rows.get(cid, [])
         stats = summary(rows)
+        all_results = not self.filters.get(
+            "failure_types", self.filters.get("failureTypes", [])
+        ) and set(self.filters.get("statuses", [])) in (
+            set(), {"SUCCESS", "FAILURE", "UNKNOWN"}
+        )
         signals = (
             ["blocked"]
-            if len(rows) >= 3
+            if all_results and len(rows) >= 3
             and not stats["successCount"]
             and not stats["unknownCount"]
             else [
@@ -430,7 +440,10 @@ class LiveAnalytics:
             "previous": None,
             "changePercent": None,
             "comparisonReason": "前期尚未读取",
-            "blockedApplicability": "APPLICABLE",
+            "blockedApplicability": (
+                "APPLICABLE" if all_results and not stats["unknownCount"]
+                else "RESULT_FILTER_OR_UNKNOWN_STATUS"
+            ),
             "slowResponseState": "UNIT_UNCONFIRMED",
             "workItem": {
                 "version": None,
@@ -540,7 +553,7 @@ class LiveAnalytics:
             and cid not in self.selected
         ):
             fail("CUSTOMER_NOT_FOUND", 404)
-        rows = [x for x in self.global_rows if x["customer_id"] == cid]
+        rows = self.customer_global_rows.get(cid, [])
         stats = summary(rows)
         members = self.groups(rows, ["userId"])
         for member in members:

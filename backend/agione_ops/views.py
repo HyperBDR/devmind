@@ -408,5 +408,11 @@ class DashboardQueryAPIView(LocalAPIView):
                 connection,
                 request.user,
                 version_id=serializer.validated_data.get("data_version"),
+                window_start=serializer.validated_data.get("window", {}).get(
+                    "start"
+                ),
+                window_end=serializer.validated_data.get("window", {}).get(
+                    "end_exclusive"
+                ),
             )
         )

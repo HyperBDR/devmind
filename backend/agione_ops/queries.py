@@ -75,9 +75,9 @@ def query_dashboard(
     if connection.source_kind == "native":
         from agione_ops.snapshot_queries import dashboard_frame
 
-        if window_start is not None or window_end is not None:
-            raise AgioneOpsError("SNAPSHOT_WINDOW_FIXED", status_code=409)
-        return dashboard_frame(connection, user, version_id)
+        return dashboard_frame(
+            connection, user, version_id, window_start, window_end,
+        )
     if (window_start is None) != (window_end is None):
         raise AgioneOpsError("WINDOW_PAIR_REQUIRED")
     if window_start is not None:

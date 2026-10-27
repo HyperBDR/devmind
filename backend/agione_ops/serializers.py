@@ -207,3 +207,4 @@ class DashboardQuerySerializer(StrictSerializer):
     """Pin a whole-connection dataset without arbitrary customer filters."""
 
     data_version = serializers.UUIDField(required=False)
+    window = SyncWindowSerializer(required=False)

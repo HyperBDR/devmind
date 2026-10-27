@@ -64,12 +64,14 @@ test('local native mode reads a published snapshot and refreshes through sync', 
   assert.equal(c.snapshot().isLive, false)
   assert.equal(c.snapshot().readOnly, true)
   assert.equal(c.snapshot().dashboard.provenance.kind, 'native_snapshot')
-  assert.equal(c.snapshot().startDate, '2026-10-25')
+  assert.equal(c.snapshot().startDate, '2026-10-19')
   assert.equal(c.snapshot().endDate, '2026-10-25')
   assert(c.setWindow('2026-10-20', '2026-10-25'))
   await c.sync()
   assert.equal(calls.length, 1)
   assert.equal(calls[0][1].start, '2026-10-20T00:00:00+08:00')
+  assert.equal(c.snapshot().startDate, '2026-10-20')
+  assert.equal(c.snapshot().endDate, '2026-10-25')
 })
 test('unconfigured native connection is explicit and never performs a request', async () => {
   const h = harness([{ ...native, readyForLive: false }]); const c = createAgioneController(h.api, () => {}, { now }); c.reset('user:1'); await c.load()
@@ -97,7 +99,7 @@ test('live finance keeps original sections without cache labels or fabricated nu
   const state = { isLive: true, provenance: { mode: 'live', fetchedAt: now().toISOString() } }
   const finance = { available: true, totalCustomers: 2, balanceCustomers: 2, coveredCustomers: 2, balances: [], cycles: [], periodSummaries: [{ period: '2026-10', unit: 'Credit', topUp: null, consumed: '12.34', adjustment: null, roundOff: null, consumingCustomers: 1, coveredCustomers: 2, topUpCustomers: 0 }] }
   const html = readonlyWorkspaceMarkup(dashboardFinance(originalFinanceDTO(finance, state)), { ...state, finance })
-  assert.match(html, /df-balance-section/); assert.match(html, /df-period-section/); assert.match(html, /按需直连读取/); assert.match(html, /读取于/); assert.match(html, /12.34/); assert.match(html, /<strong>—<\/strong>/)
+  assert.match(html, /df-balance-section/); assert.match(html, /df-period-section/); assert.doesNotMatch(html, /更新全部财务|按需直连读取/); assert.match(html, /读取于/); assert.match(html, /12.34/); assert.match(html, /<strong>—<\/strong>/)
   assert.doesNotMatch(html, /历史快照|已有缓存|非实时|已授权缓存汇总/)
 })
 test('business page has no connection configuration or credential entry', () => {
@@ -123,4 +125,84 @@ test('opening an uncollected native connection never starts a sync', async () =>
   assert.equal(syncs, 0)
   assert.equal(c.snapshot().dashboard.state, 'not_collected')
   assert.equal(c.snapshot().syncing, false)
+})
+
+test('selecting a date reuses a matching native snapshot before collecting', async () => {
+  let syncs = 0
+  const api = {
+    connections: async () => response({ results: [native], next: null }),
+    dashboard: async () => response({ state: 'ready', dataVersion: 'cached',
+      summary: {}, window, provenance: { kind: 'native_snapshot' } }),
+    submitSync: async () => { syncs++; return response({}) }
+  }
+  const c = createAgioneController(api, () => {}, { now, localNative: true })
+  c.reset('user:1')
+  await c.load()
+  await c.loadWindow('2026-10-25', '2026-10-25')
+  assert.equal(c.snapshot().dashboard.dataVersion, 'cached')
+  assert.equal(syncs, 0)
+})
+
+test('selecting an uncollected date starts one background collection', async () => {
+  let syncs = 0
+  const api = {
+    connections: async () => response({ results: [native], next: null }),
+    dashboard: async () => response({ state: 'not_collected' }),
+    submitSync: async () => {
+      syncs++
+      return response({ runId: 'run', status: 'failed' })
+    }
+  }
+  const c = createAgioneController(api, () => {}, { now, localNative: true })
+  c.reset('user:1')
+  await c.load()
+  await c.loadWindow('2026-10-20', '2026-10-22')
+  assert.equal(syncs, 1)
+})
+
+
+test('an uncollected date retains the previous dashboard during collection', async () => {
+  let calls = 0
+  const api = {
+    connections: async () => response({ results: [native], next: null }),
+    dashboard: async () => response(++calls === 1
+      ? { state: 'ready', dataVersion: 'cached', summary: {}, window,
+          provenance: { kind: 'native_snapshot' } }
+      : { state: 'not_collected' }),
+    submitSync: async () => response({ runId: 'run', status: 'failed' })
+  }
+  const c = createAgioneController(api, () => {}, { now, localNative: true })
+  c.reset('user:1')
+  await c.load()
+  await c.loadWindow('2026-10-20', '2026-10-22')
+  assert.equal(c.snapshot().dashboard.dataVersion, 'cached')
+  assert.equal(c.snapshot().windowMissing, true)
+})
+
+test('collecting the previous period keeps the selected dates and refreshes them', async () => {
+  let submitted
+  const versions = []
+  const loadingStates = []
+  const api = {
+    connections: async () => response({results:[native],next:null}),
+    dashboard: async (_id, version) => {
+      versions.push(version)
+      return response({state:'ready',dataVersion:'current',summary:{},window,
+        provenance:{kind:'native_snapshot'}})
+    },
+    submitSync: async (_id, period) => {
+      submitted = period
+      return response({runId:'previous',status:'succeeded',dataVersion:'prior'})
+    }
+  }
+  const c = createAgioneController(api, state => loadingStates.push(state.previousLoading), {now,localNative:true})
+  c.reset('user:1')
+  await c.load()
+  await c.syncPrevious()
+  assert(loadingStates.includes(true))
+  assert.equal(c.snapshot().previousLoading, false)
+  assert.equal(submitted.start, '2026-10-12T00:00:00+08:00')
+  assert.equal(submitted.endExclusive, '2026-10-19T00:00:00+08:00')
+  assert.equal(versions.at(-1), undefined)
+  assert.equal(c.snapshot().dashboard.dataVersion, 'current')
 })

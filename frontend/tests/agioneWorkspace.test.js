@@ -54,6 +54,19 @@ function setup(handler) {
   return { c, calls, api }
 }
 
+test('new snapshot retains selected range and queries that range', async () => {
+  const { c, calls } = setup()
+  const selected = { ...frame.window, start: '2026-10-20T00:00:00+08:00' }
+  await c.attach(frame, 'a', selected)
+  assert.deepEqual(c.snapshot().window, selected)
+  assert.deepEqual(c.snapshot().cachedWindow, frame.window)
+  assert.equal(calls[0].body.window.start, selected.start)
+  await c.attach({ ...frame, dataVersion: 'version-2' }, 'a', selected)
+  assert.equal(c.snapshot().window.start, selected.start)
+  assert.equal(calls.filter((call) => call.body.operation === 'dashboard')
+    .at(-1).body.window.start, selected.start)
+})
+
 test('default scope omits empty customer ids instead of sending a forbidden empty array', async () => {
   const { c, calls } = setup()
   await c.attach(frame, 'a')
@@ -237,7 +250,7 @@ test('portrait caches each customer profile without rereading the directory', as
   assert.equal(calls.filter((x) => x.body.operation === 'profile').length, 3)
   assert.equal(c.snapshot().selectedCustomerId, '10')
 })
-test('finance scope is independent of global date and customer filters', async () => {
+test('finance follows dates without applying customer and model filters', async () => {
   const { c, calls } = setup()
   await c.attach(frame, 'a')
   await c.setFilters(['10'], {
@@ -250,6 +263,7 @@ test('finance scope is independent of global date and customer filters', async (
   assert.deepEqual(b, {
     operation: 'finance',
     dataVersion: 'version-1',
+    window: frame.window,
     payload: {}
   })
 })
@@ -462,24 +476,28 @@ test('same-connection denial remains authoritative after version change', async 
   assert.match(c.snapshot().error, /权限/)
 })
 
-test('scope, window and configure changes never borrow an old page', async () => {
+test('scope, window and configure changes label previous results while loading', async () => {
   const { c } = setup((id, b) => wrap(b, dashboardData(1)))
   await c.attach(frame, 'a')
   const filtered = c.setFilters(['10'], {
     modelIds: ['99'], statuses: [], failureTypes: []
   })
-  assert.equal(c.snapshot().dashboard, null)
-  assert.equal(c.snapshot().loading, true)
+  assert.notEqual(c.snapshot().dashboard, null)
+  assert.equal(c.snapshot().stale, true)
+  assert.equal(c.snapshot().loading, false)
   await filtered
+  assert.equal(c.snapshot().stale, false)
   const windowed = c.setWindow({ ...frame.window,
     start: '2026-10-20T00:00:00+08:00' })
-  assert.equal(c.snapshot().dashboard, null)
+  assert.equal(c.snapshot().stale, true)
   await windowed
+  assert.equal(c.snapshot().stale, false)
   await c.setView('aggregate')
   const configured = c.configure({ metric: 'outputTokens', analysisPage: 2 })
-  assert.equal(c.snapshot().analysis, null)
-  assert.equal(c.snapshot().loading, true)
+  assert.equal(c.snapshot().stale, true)
+  assert.equal(c.snapshot().loading, false)
   await configured
+  assert.equal(c.snapshot().stale, false)
 })
 
 test('LRU page cache is bounded and evicts the least recently used page', async () => {
@@ -489,8 +507,8 @@ test('LRU page cache is bounded and evicts the least recently used page', async 
   for (let page = 2; page <= 27; page++)
     await c.configure({ analysisPage: page })
   const old = c.configure({ analysisPage: 1 })
-  assert.equal(c.snapshot().analysis, null)
-  assert.equal(c.snapshot().loading, true)
+  assert.equal(c.snapshot().stale, true)
+  assert.equal(c.snapshot().loading, false)
   await old
   const recent = c.configure({ analysisPage: 26 })
   assert.notEqual(c.snapshot().analysis, null)
@@ -765,9 +783,10 @@ test('snapshot version and live request id prevent cache reuse', async () => {
   const { c } = setup((id, b) => wrap(b, dashboardData(1)))
   await c.attach(frame, 'a')
   const changed = c.attach({ ...frame, dataVersion: 'version-2' }, 'a')
-  assert.equal(c.snapshot().loading, true)
-  assert.equal(c.snapshot().dashboard, null)
+  assert.equal(c.snapshot().stale, true)
+  assert.notEqual(c.snapshot().dashboard, null)
   await changed
+  assert.equal(c.snapshot().stale, false)
   const api = { liveQuery: async (id, b) => ({ data: { data: {
     operation: b.operation, data: dashboardData(2),
     provenance: { mode: 'live' }, capabilities: { directUpstream: true }
@@ -835,8 +854,9 @@ test('Vue watcher observes busy completion and clears empty or failed frames', a
   const attached = []
   const work = { value: { connectionId: 'a' } }
   const workspace = { attach: (...args) => attached.push(args) }
-  const invoke = new Function('work', 'workspace', `return ${callback}`)(
-    work, workspace)
+  const state = { value: { sourceKind: 'synthetic' } }
+  const invoke = new Function('work', 'workspace', 'state', `return ${callback}`)(
+    work, workspace, state)
   invoke(['', null, false, false, true, ''])
   assert.deepEqual(attached.at(-1), [null, ''])
   invoke(['b', null, true, true, true, ''])
@@ -844,7 +864,7 @@ test('Vue watcher observes busy completion and clears empty or failed frames', a
   work.value.connectionId = 'b'
   const readyFrame = { dataVersion: 'v' }
   invoke(['b', readyFrame, false, false, true, ''])
-  assert.deepEqual(attached.at(-1), [readyFrame, 'b'])
+  assert.deepEqual(attached.at(-1), [readyFrame, 'b', null])
   invoke(['b', null, false, false, true, 'accessDenied'])
   assert.deepEqual(attached.at(-1), [null, ''])
 })
@@ -867,4 +887,56 @@ test('finance refresh keeps the dashboard and updates after background completio
   assert.equal(c.snapshot().dashboard.summary.requestCount, 42)
   assert.equal(c.snapshot().dashboard.finance.refreshState, 'ready')
   c.dispose()
+})
+
+test('aggregate export reads all pages with the selected grouping', async () => {
+  const { c, calls } = setup((id, body) => {
+    if (body.operation !== 'analysis') return Promise.resolve(wrap(body))
+    const page = body.payload.page
+    return Promise.resolve(wrap(body, {
+      rows: Array.from({ length: page === 1 ? 200 : 1 }, (_, i) => ({ label: `row-${(page - 1) * 200 + i + 1}`, metrics: { requestCount: i } })),
+      total: 201,
+      page,
+      pageSize: body.payload.pageSize
+    }))
+  })
+  await c.attach(frame, 'a')
+  await c.setView('aggregate')
+  const rows = await c.exportAnalysis()
+  assert.equal(rows.length, 201)
+  assert.equal(rows[200].label, 'row-201')
+  const pages = calls.filter(x => x.body.operation === 'analysis' && x.body.payload.pageSize === 200)
+  assert.deepEqual(pages.map(x => x.body.payload.page), [1, 2])
+  assert.deepEqual(pages[0].body.window, frame.window)
+})
+
+test('returning to a previously viewed snapshot shows cached data immediately', async () => {
+  let resolveRead
+  let block = false
+  const { c } = setup((id, body) => {
+    if (block && body.operation === 'dashboard') return new Promise(resolve => { resolveRead = resolve })
+    return Promise.resolve(wrap(body, { summary: { requestCount: 42 }, customers: [] }))
+  })
+  await c.attach(frame, 'a')
+  await c.attach({ ...frame, dataVersion: 'version-2' }, 'a')
+  block = true
+  const pending = c.attach(frame, 'a')
+  assert.equal(c.snapshot().loading, false)
+  assert.equal(c.snapshot().refreshing, true)
+  assert.equal(c.snapshot().dashboard.summary.requestCount, 42)
+  resolveRead(wrap({ operation: 'dashboard', dataVersion: 'version-1' }, { summary: {}, customers: [] }))
+  await pending
+})
+
+test('reload reads updated comparison even when snapshot version is unchanged', async () => {
+  let comparison = 'UNAVAILABLE'
+  const { c, calls } = setup((id, body) => wrap(body, {
+    comparison: { state: comparison }, finance: null
+  }))
+  await c.attach(frame, 'a')
+  assert.equal(c.snapshot().dashboard.comparison.state, 'UNAVAILABLE')
+  comparison = 'READY'
+  await c.reload()
+  assert.equal(c.snapshot().dashboard.comparison.state, 'READY')
+  assert.equal(calls.filter(x => x.body.operation === 'dashboard').length, 2)
 })
