@@ -28,6 +28,11 @@ FEATURE_DEFINITIONS = (
         'default_path': '/llm-ops',
     },
     {
+        'key': 'agione_ops',
+        'label': 'AGIOne',
+        'default_path': '/agione',
+    },
+    {
         'key': 'data_ops',
         'label': 'Data Operations Console',
         'default_path': '/data-ops',
