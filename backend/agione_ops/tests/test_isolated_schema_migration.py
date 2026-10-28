@@ -195,3 +195,47 @@ def test_reverse_bridge_is_a_noop():
 
     operation = bridge.Migration.operations[0]
     assert operation.reverse_code is migrations.RunPython.noop
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_full_migration_from_initial_history(private_schema_connection, legacy):
+    """Both fresh and legacy 0001 histories can reach the current schema."""
+    connection = private_schema_connection
+    if legacy:
+        apps = historical_state(connection)
+        with connection.schema_editor() as editor:
+            for name, _ in reversed(bridge.MODEL_TABLES):
+                editor.delete_model(apps.get_model("agione_ops", name))
+        make_legacy_marker(connection)
+    executor = MigrationExecutor(connection)
+    target = executor.loader.graph.leaf_nodes("agione_ops")
+    assert target == [("agione_ops", "0010_nativeaccountscope_names")]
+    executor.migrate(target)
+    executor = MigrationExecutor(connection)
+    assert all(node in executor.loader.applied_migrations for node in target)
+    assert TABLES <= tables(connection)
+    if legacy:
+        assert_legacy_markers(connection)
+
+
+def test_full_migration_from_empty_database(django_db_blocker):
+    alias = "agione_schema_fresh_memory"
+    assert alias not in connections.databases
+    config = deepcopy(connections.databases["default"])
+    config.update({"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"})
+    connections.databases[alias] = config
+    with django_db_blocker.unblock():
+        connection = connections[alias]
+        try:
+            executor = MigrationExecutor(connection)
+            assert not executor.loader.applied_migrations
+            target = executor.loader.graph.leaf_nodes("agione_ops")
+            executor.migrate(target)
+            assert target == [("agione_ops", "0010_nativeaccountscope_names")]
+            assert TABLES <= tables(connection)
+            assert all(node in MigrationExecutor(connection).loader.applied_migrations
+                       for node in target)
+        finally:
+            connection.close()
+            del connections[alias]
+            connections.databases.pop(alias)
