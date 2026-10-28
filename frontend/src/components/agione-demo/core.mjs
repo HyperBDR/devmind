@@ -74,9 +74,12 @@ export function selectRange(range, day) {
   return range.end||day<range.start?{start:day,end:null}:{start:range.start,end:day};
 }
 
-export function trendPlot(points, previous=[], field='requestCount') {
+export function trendPlot(points, previous=[], field='requestCount', nice=false) {
   const knownMax=trendMaximum(points,previous,field);
-  const step=Math.max(1,Math.ceil(knownMax/4));
+  const raw=knownMax/4;
+  const magnitude=10**Math.floor(Math.log10(raw));
+  const niceStep=[1,2,2.5,5,10].find(value=>value*magnitude>=raw)*magnitude;
+  const step=nice?Math.max(1,niceStep):Math.max(1,Math.ceil(raw));
   const max=Math.ceil(knownMax/step)*step;
   const segments=rows=>{
     const result=[];let segment=[];
@@ -89,4 +92,10 @@ export function trendPlot(points, previous=[], field='requestCount') {
     return result;
   };
   return {max,ticks:Array.from({length:max/step+1},(_,i)=>i*step),current:segments(points),previous:segments(previous||[])};
+}
+
+export function tokenAxis(max, english=false) {
+  const [unit, suffix] = [[1e9, 'B'], [1e6, 'M'], [1e3, 'K']]
+    .find(([value]) => max >= value) || [1, ''];
+  return { unit, label: `${english?'Tokens':'Token'}${suffix?` (${suffix})`:''}` };
 }

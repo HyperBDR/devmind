@@ -4,6 +4,29 @@ import { readFileSync } from 'node:fs'
 import { renderOriginalWorkspace, renderOriginalScopeDialog } from '../src/components/agione-demo/original-workspace-renderers.mjs'
 import { originalWorkspaceState, originalFinanceDTO, readonlyWorkspaceMarkup } from '../src/utils/agioneOriginalWorkspace.js'
 import { dashboardFinance } from '../src/components/agione-demo/dashboard-finance.mjs'
+import { tokenAxis, trendPlot } from '../src/components/agione-demo/core.mjs'
+import { profileTrendView } from '../src/components/agione-demo/profile-charts.mjs'
+
+test('profile trend uses readable ticks and retains every day and exact values', () => {
+  const plot = trendPlot([{ value: 83281000 }, { value: 10 }, { value: null }], [], 'value', true)
+  assert.deepEqual(plot.ticks, [0, 25000000, 50000000, 75000000, 100000000])
+  assert.equal(plot.current[0][0].value, 83281000)
+  assert.equal(plot.current[0][1].value, 10)
+  assert.deepEqual(tokenAxis(plot.max), { unit: 1000000, label: 'Token (M)' })
+  assert.deepEqual(tokenAxis(2000), { unit: 1000, label: 'Token (K)' })
+  assert.deepEqual(tokenAxis(2000000000), { unit: 1000000000, label: 'Token (B)' })
+  const points = Array.from({ length: 7 }, (_, i) => ({
+    bucketStart: `2026-10-${String(21 + i).padStart(2, '0')}T00:00:00+08:00`,
+    bucketEndExclusive: `2026-10-${String(22 + i).padStart(2, '0')}T00:00:00+08:00`,
+    requestCount: 1, totalTokensSampleCount: 1, totalTokens: i ? 10 : 83281000,
+  }))
+  const html = profileTrendView({ rhythm: { trend: [{ points }] } }, {
+    start: points[0].bucketStart, endExclusive: points.at(-1).bucketEndExclusive,
+  }, { grain: 'day' })
+  for (let i = 21; i <= 27; i++) assert(html.includes(`10/${i}`))
+  assert(html.includes('83,281,000 Token'))
+  assert(html.includes('Token (M)'))
+})
 
 test('finance shows actual coverage without hiding gaps or missing deposits', () => {
   const html = dashboardFinance({

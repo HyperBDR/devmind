@@ -1,4 +1,4 @@
-import {escapeHTML as e,fmt,percent,shanghaiDate,trendPlot} from './core.mjs';
+import {escapeHTML as e,fmt,percent,shanghaiDate,tokenAxis,trendPlot} from './core.mjs';
 
 const fields={totalTokens:'总 Token',inputTokens:'输入 Token',outputTokens:'输出 Token'};
 const sampleField={totalTokens:'totalTokensSampleCount',inputTokens:'inputTokensSampleCount',outputTokens:'outputTokensSampleCount'};
@@ -45,7 +45,7 @@ export function profileTrendView(profile,window,controls={}){
  const known=points.reduce((n,p)=>n+p.knownCount,0);
  const unknown=requests>0&&known===0;
  const previous=controls.compare&&!unknown&&priorSeries?chartBuckets(aligned,grain,field):[];
- const plot=trendPlot(points,previous,'value'),unit=plot.max>=10000?10000:1,unitName=unit===10000?'Token（万）':'Token';
+ const plot=trendPlot(points,previous,'value',true),{unit,label:unitName}=tokenAxis(plot.max);
  const dots=(segments,rows,old)=>segments.flat().map(p=>{
   const b=rows[p.index],start=old?new Date(Date.parse(b.bucketStart)-offset):b.bucketStart,end=old?new Date(Date.parse(b.bucketEndExclusive)-offset):b.bucketEndExclusive;
   const coverage=b.requestCount?`用量覆盖 ${fmt(b.knownCount)} / ${fmt(b.requestCount)} 条请求`:'当前已获取记录中无调用';
@@ -67,7 +67,7 @@ export function profileTrendView(profile,window,controls={}){
   });
   return [...edges,...bridges].join('');
  };
- const indexes=[...new Set(Array.from({length:Math.min(grain==='hour'?7:5,points.length)},(_,i)=>Math.round(i*(points.length-1)/Math.max(1,Math.min(grain==='hour'?6:4,points.length-1)))))];
+ const indexes=[...new Set(Array.from({length:Math.min(7,points.length)},(_,i)=>Math.round(i*(points.length-1)/Math.max(1,Math.min(6,points.length-1)))))];
  if(grain==='hour'&&!multiDay&&points.length===24)indexes.splice(0,indexes.length,0,4,8,12,16,20,23);
  const grainName={hour:'小时',day:'日',week:'自然周'}[grain];
  const missing=points.filter(p=>p.requestCount>0&&p.knownCount===0).length;
