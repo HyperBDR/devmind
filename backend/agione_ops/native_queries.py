@@ -11,6 +11,9 @@ from django.conf import settings
 from django.utils import timezone
 
 from agione_ops.client import AgioneOpsError
+from agione_ops.native_account_scope import (
+    FINANCE_SCOPE_VERSION, external_finance_directory,
+)
 from agione_ops.native_analytics import (
     LiveAnalytics,
     business_text,
@@ -22,7 +25,6 @@ from agione_ops.native_analytics import (
     tenant_display_name,
 )
 from agione_ops.native_client import NativeClient
-from agione_ops.native_account_scope import external_finance_directory
 from agione_ops.native_finance import (
     aggregate_finance,
     read_recharge,
@@ -420,6 +422,7 @@ def _finance(source, user, factory, payload, fetched_at, customer=None):
                 customer_data["recharge"] = recharge
                 customer_data["rechargeError"] = recharge_error
         finance_guard()
+        result["coverageBasis"] = FINANCE_SCOPE_VERSION
         return result
     finally:
         if operator is not source:
@@ -480,7 +483,7 @@ def collect_native_finance(
         **result,
         "mode": "snapshot",
         "scopeLabel": "Operator 已授权目录财务快照，独立于调用筛选",
-        "coverageBasis": "native_published_snapshot",
+        "coverageBasis": FINANCE_SCOPE_VERSION,
     }
 
 

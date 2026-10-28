@@ -63,3 +63,22 @@ class AccountScopeTest(unittest.TestCase):
             {"tenantId": "4", "adminEmail": "invalid"},
         ]
         self.assertEqual(external_finance_directory(rows), {"2", "3", "4"})
+
+    def test_internal_tenants_are_excluded_regardless_of_identity(self):
+        from agione_ops.native_account_scope import (
+            INTERNAL_TENANT_IDS, external_finance_directory, external_rows,
+        )
+
+        rows = [
+            {"customer_id": tenant, "subject_type": subject}
+            for tenant in INTERNAL_TENANT_IDS
+            for subject in ("USER", "PROJECT")
+        ]
+        rows.append({"customer_id": "external", "subject_type": "USER"})
+        self.assertEqual(external_rows(rows, {}), rows[-1:])
+        directory = [
+            {"tenantId": tenant, "adminEmail": "customer@example.com"}
+            for tenant in INTERNAL_TENANT_IDS
+        ]
+        directory.append({"tenantId": "external", "adminEmail": None})
+        self.assertEqual(external_finance_directory(directory), {"external"})

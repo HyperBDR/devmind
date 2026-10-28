@@ -6,6 +6,12 @@ import re
 INTERNAL_DOMAINS = frozenset({
     "oneprocloud.com", "oneprocloud.test", "oneprocloud.cn", "onepro.cloud",
 })
+INTERNAL_TENANT_IDS = frozenset({
+    "85086211957448704",
+    "187382108044468224",
+    "193397501355696128",
+})
+FINANCE_SCOPE_VERSION = "external_tenants_v2"
 EMAIL_PATTERN = re.compile(
     r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@"
     r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
@@ -54,10 +60,13 @@ def classify_rows(rows, lookup):
 
 def external_rows(rows, types):
     """Remove verified internal users; retain unverifiable and project calls."""
-    return [row for row in rows if row.get("subject_type") != "USER"
-            or include_external(types.get(
-                f"{row.get('customer_id')}:{row.get('user_id')}", "unknown"
-            ))]
+    return [row for row in rows
+            if str(row.get("customer_id")) not in INTERNAL_TENANT_IDS
+            and (row.get("subject_type") != "USER"
+                 or include_external(types.get(
+                     f"{row.get('customer_id')}:{row.get('user_id')}",
+                     "unknown",
+                 )))]
 
 
 def merge_account_types(previous, current):
@@ -76,7 +85,8 @@ def external_finance_directory(rows):
         tenant = str(row.get("tenantId") or "")
         email = row.get("adminEmail")
         email = email.strip().lower() if isinstance(email, str) else ""
-        if (not EMAIL_PATTERN.fullmatch(email)
+        if tenant not in INTERNAL_TENANT_IDS and (
+                not EMAIL_PATTERN.fullmatch(email)
                 or email.rsplit("@", 1)[1] not in INTERNAL_DOMAINS):
             eligible.add(tenant)
     return eligible

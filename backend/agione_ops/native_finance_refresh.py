@@ -9,6 +9,7 @@ from django.utils import timezone
 from rest_framework.exceptions import APIException
 
 from agione_ops.models import SourceConnection, SyncRun
+from agione_ops.native_account_scope import FINANCE_SCOPE_VERSION
 from agione_ops.native_finance import unavailable_finance
 from agione_ops.native_sync_models import (
     NativeFinanceProjection, NativePublishedSnapshot,
@@ -59,6 +60,9 @@ def finance_for(connection, user):
     result = dict(
         row.data or unavailable_finance("NATIVE_FINANCE_NOT_COLLECTED")
     )
+    if (result.get("available")
+            and result.get("coverageBasis") != FINANCE_SCOPE_VERSION):
+        result = unavailable_finance("NATIVE_FINANCE_NOT_COLLECTED")
     result["mode"] = "snapshot"
     expired = row.status in {"queued", "running"} and row.updated_at <= (
         timezone.now() - timedelta(minutes=20)

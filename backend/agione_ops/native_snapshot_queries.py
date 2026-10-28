@@ -13,8 +13,10 @@ from rest_framework.exceptions import APIException
 
 from agione_ops.client import AgioneOpsError
 from agione_ops.models import ConnectionGrant, DatasetVersion
+from agione_ops.native_account_scope import (
+    FINANCE_SCOPE_VERSION, INTERNAL_TENANT_IDS, external_rows,
+)
 from agione_ops.native_analytics import LiveAnalytics, entity, parse_time, summary
-from agione_ops.native_account_scope import external_rows
 from agione_ops.native_finance import finance_for_window, unavailable_finance
 from agione_ops.native_sync import validate_snapshot_data
 from agione_ops.native_sync_models import NativePublishedSnapshot
@@ -351,11 +353,13 @@ def query_native_snapshot(connection, user, query):
     from agione_ops.native_account_refresh import scope_for
 
     account_types, _ = scope_for(connection, user)
+    customers = {key: value for key, value in snapshot.data["customers"].items()
+                 if str(key) not in INTERNAL_TENANT_IDS}
     rows = [row for row in external_rows(snapshot.data["rows"], account_types) if (
         start <= parse_time(row["occurred_at"]) < end
     )]
     engine = LiveAnalytics(
-        snapshot.data["customers"], snapshot.data["models"], rows,
+        customers, snapshot.data["models"], rows,
         start, end, query,
     )
     from agione_ops.native_sync_models import NativeAccountScope
@@ -364,6 +368,9 @@ def query_native_snapshot(connection, user, query):
     engine.user_names = scope.names if scope and scope_for(connection, user)[1] else {}
     stats = summary(engine.global_rows)
     finance = snapshot.data.get("finance", {})
+    if (finance.get("available")
+            and finance.get("coverageBasis") != FINANCE_SCOPE_VERSION):
+        finance = unavailable_finance("NATIVE_FINANCE_NOT_COLLECTED")
     if operation in {"dashboard", "finance", "profile"} and not getattr(
         settings, "AGIONE_OPS_FINANCE_REFRESH_ON_SYNC", True,
     ):
@@ -416,7 +423,7 @@ def query_native_snapshot(connection, user, query):
                             _fail("SOURCE_DUPLICATE_PAGE")
                         prior_rows_by_id[item["record_id"]] = item
             previous = LiveAnalytics(
-                snapshot.data["customers"], snapshot.data["models"],
+                customers, snapshot.data["models"],
                 external_rows(list(prior_rows_by_id.values()), account_types),
                 prior_start, start, query,
             )
@@ -429,7 +436,7 @@ def query_native_snapshot(connection, user, query):
                 prior_start <= parse_time(row["occurred_at"]) < start
             )]
             previous = LiveAnalytics(
-                snapshot.data["customers"], snapshot.data["models"],
+                customers, snapshot.data["models"],
                 prior_rows, prior_start, start, query,
             )
         apply_dashboard_observations(

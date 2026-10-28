@@ -528,6 +528,19 @@ def test_independent_finance_publishes_without_blocking_and_fences_access(
     assert after["data"]["refreshState"] == "ready"
     assert after["data"]["reason"] == "TEST_FINANCE"
     source_read.assert_called_once()
+    from agione_ops.native_account_scope import FINANCE_SCOPE_VERSION
+    from agione_ops.native_sync import digest
+
+    row.data = {**finance, "available": True, "coverageBasis": "old"}
+    row.content_digest = digest(row.data)
+    row.save()
+    stale, _ = finance_for(connection, native["user"])
+    assert not stale["available"]
+    row.data["coverageBasis"] = FINANCE_SCOPE_VERSION
+    row.content_digest = digest(row.data)
+    row.save()
+    current, _ = finance_for(connection, native["user"])
+    assert current["available"]
     other = get_user_model().objects.create_user(username=str(uuid.uuid4()))
     other.user_permissions.add(*Permission.objects.filter(
         content_type__app_label="agione_ops", codename="view_business",
@@ -817,6 +830,29 @@ def test_account_scope_filters_all_call_analytics(native, monkeypatch):
     assert query("analysis", {"groupBy": ["customerTenantId"]})["summary"]["requestCount"] == 1
     assert query("requests")["summary"]["requestCount"] == 1
     assert query("profile", {"customerId": "200"})["summary"]["requestCount"] == 1
+
+
+def test_internal_tenant_excluded_from_analytics_and_directory(native, monkeypatch):
+    _, publication = collect(native)
+    excluded = frozenset({"200"})
+    monkeypatch.setattr(
+        "agione_ops.native_account_scope.INTERNAL_TENANT_IDS", excluded,
+    )
+    monkeypatch.setattr(
+        "agione_ops.native_snapshot_queries.INTERNAL_TENANT_IDS", excluded,
+    )
+    base = {"data_version": publication["dataVersion"], "payload": {}}
+
+    def query(operation):
+        return query_native_snapshot(native["connection"], native["user"], {
+            **base, "operation": operation,
+        })["data"]
+
+    assert query("dashboard")["summary"]["requestCount"] == 0
+    assert "200" not in {
+        row["customerTenantId"] for row in query("customers")["items"]
+    }
+    assert query("requests")["summary"]["requestCount"] == 0
 
 
 def test_account_scope_invalidates_cached_queries_and_honors_grants(native):
