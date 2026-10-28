@@ -18,10 +18,17 @@ export const FEATURE_DEFINITIONS = [
     matchers: ['/hyperbdr-dashboard']
   },
   {
+    key: 'agione_ops',
+    labelKey: 'platforms.agioneOps',
+    defaultPath: '/agione',
+    matchers: ['/agione', '/llm-ops']
+  },
+  {
     key: 'llm_ops',
+    platformVisible: false,
     labelKey: 'platforms.llmOps',
-    defaultPath: '/llm-ops',
-    matchers: ['/llm-ops']
+    defaultPath: '/agione',
+    matchers: []
   },
   {
     key: 'data_ops',
@@ -167,13 +174,15 @@ export function getAvailablePlatforms(user, t) {
     platformMap.set('workspace', { key: 'workspace' })
   }
   return FEATURE_DEFINITIONS.filter(
-    (item) => platformMap.has(item.key)
+    (item) => item.platformVisible !== false && platformMap.has(item.key)
   ).map((item) => {
     const resolved = platformMap.get(item.key)
     return {
       key: item.key,
       label: t ? t(item.labelKey) : item.key,
-      defaultPath: resolved?.default_path || item.defaultPath
+      defaultPath: item.key === 'agione_ops'
+        ? item.defaultPath
+        : resolved?.default_path || item.defaultPath
     }
   })
 }

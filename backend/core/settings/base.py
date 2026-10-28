@@ -26,15 +26,15 @@ from .mcp_server import *
 from .logging_config import configure_logging
 
 # Suppress specific warnings
-warnings.filterwarnings('ignore', category=SyntaxWarning, module='flanker')
-warnings.filterwarnings('ignore', message='.*invalid escape sequence.*')
+warnings.filterwarnings("ignore", category=SyntaxWarning, module="flanker")
+warnings.filterwarnings("ignore", message=".*invalid escape sequence.*")
 
 # Suppress MariaDB-specific Django model warnings
 SILENCED_SYSTEM_CHECKS = [
     # MariaDB does not support unique constraints with conditions
-    'models.W036',
+    "models.W036",
     # MariaDB does not support indexes on expressions
-    'models.W043',
+    "models.W043",
 ]
 
 # ============================
@@ -52,7 +52,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.getenv(
     "SECRET_KEY",
-    'django-insecure-$k0f0!qp@0k%1xa_)zy!+xvwpv)+&$q&!d69ma@l615bdc2ytd')
+    "django-insecure-$k0f0!qp@0k%1xa_)zy!+xvwpv)+&$q&!d69ma@l615bdc2ytd",
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DJANGO_DEBUG", "false").lower() == "true"
@@ -60,19 +61,18 @@ DEBUG = os.getenv("DJANGO_DEBUG", "false").lower() == "true"
 ALLOWED_HOSTS = ["*"]
 
 CSRF_TRUSTED_ORIGINS = os.getenv(
-    'CSRF_TRUSTED_ORIGINS',
-    'http://localhost:8000,http://127.0.0.1:8000'
+    "CSRF_TRUSTED_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000"
 ).split(",")
 
 # Trust proxy headers from nginx
 USE_X_FORWARDED_HOST = True
-SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 # ============================
 # Logging Configuration
 # ============================
 
-LOG_LEVEL = os.getenv('DJANGO_LOG_LEVEL', 'info').upper()
+LOG_LEVEL = os.getenv("DJANGO_LOG_LEVEL", "info").upper()
 configure_logging(LOG_LEVEL)
 
 # ============================
@@ -81,105 +81,89 @@ configure_logging(LOG_LEVEL)
 
 # Django & thrid party apps
 INSTALLED_APPS = [
-    'django.contrib.admin',
-    'django.contrib.auth',
-    'django.contrib.contenttypes',
-    'django.contrib.sessions',
-    'django.contrib.messages',
-    'django.contrib.staticfiles',
-
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
     # Required by django-allauth for managing site-specific data,
     # such as site domains and configurations.
-    'django.contrib.sites',
-
+    "django.contrib.sites",
     # Core Django Rest Framework (DRF) package that provides tools
     # to build APIs and handle request/response data in various formats
     # (JSON, XML, etc.).
-    'rest_framework',
-
+    "rest_framework",
     # Enables token-based authentication in DRF, allowing users
     # to authenticate using tokens.
-    'rest_framework.authtoken',
-
+    "rest_framework.authtoken",
     # A Django app that integrates dj-rest-auth with Django-allauth,
     # providing authentication and registration endpoints for RESTful APIs.
-    'dj_rest_auth',
-
+    "dj_rest_auth",
     # Provides JWT authentication support for Django REST Framework,
     # allowing for secure token-based authentication using JSON Web Tokens.
-    'rest_framework_simplejwt',
-
+    "rest_framework_simplejwt",
     # Django-allauth package, which provides comprehensive user authentication,
     # registration, and account management.
-    'allauth',
-
+    "allauth",
     # A submodule of django-allauth that handles user account registration,
     # login, password management, and more.
-    'allauth.account',
-
+    "allauth.account",
     # Extends allauth to support social authentication
     # (e.g., logging in with Facebook, Google, etc.).
-    'allauth.socialaccount',
-
+    "allauth.socialaccount",
     # Social account providers
-    'allauth.socialaccount.providers.google',
-
+    "allauth.socialaccount.providers.google",
     # Headless API for frontend-backend separation (allauth >= 65.0.0)
     # Provides REST API endpoints for authentication without Django forms
-    'allauth.headless',
-
+    "allauth.headless",
     # Adds user registration endpoints to dj-rest-auth, enabling
     # JWT-based user registration and management
     # (e.g., email verification, password reset).
-    'dj_rest_auth.registration',
-
+    "dj_rest_auth.registration",
     # Provides tools for generating interactive API documentation
     # with Swagger UI or ReDoc, making it easier to visualize and
     # test API endpoints.
-    'drf_spectacular',
-
+    "drf_spectacular",
     # Django CORS headers package that handles Cross-Origin
     # Resource Sharing (CORS)
     # headers, allowing frontend applications from different
     # domains to access the API.
-    'corsheaders',
-
+    "corsheaders",
     # A Django app that provides support for periodic task scheduling
     # using Celery. It allows you to manage and schedule tasks in a
     # database-backed way, making it easier to handle recurring tasks.
-    'django_celery_beat',
-
+    "django_celery_beat",
     # A Django app that stores the results of Celery tasks in the database,
     # allowing for easy retrieval and management of task outcomes.
-    'django_celery_results',
-
+    "django_celery_results",
     # A Django app that provides extensions and utilities for Django's
     # ORM (Object-Relational Mapping) framework, adding features like
     # automatically updating timestamps on model instances.
-    'django_extensions',
-
+    "django_extensions",
     # A Django app that provides a better JSON editor widget for admin
     # interface, replacing the default textarea with a code editor.
-    'django_json_widget',
+    "django_json_widget",
 ]
 
 # Project-Specific Apps
 INSTALLED_APPS += [
-    'core',
-    'accounts',
-    'ai_assistant',
-    'cloud_billing',
-    'data_collector',
-    'data_ops',
-    'hyperbdr_dashboard',
-    'llm_ops',
-    'sals',
-    'quotation',
-    'invoice',
-    'mcp_server',
-    'agentcore_metering.adapters.django',
-    'agentcore_task.adapters.django',
-    'agentcore_notifier.adapters.django',
+    "core",
+    "accounts",
+    "ai_assistant",
+    "cloud_billing",
+    "data_collector",
+    "data_ops",
+    "hyperbdr_dashboard",
+    "llm_ops",
+    "agione_ops.apps.AgioneOpsConfig",
+    "sals",
+    "quotation",
+    "invoice",
+    "mcp_server",
+    "agentcore_metering.adapters.django",
+    "agentcore_task.adapters.django",
+    "agentcore_notifier.adapters.django",
 ]
 
 # The ID of the site that this Django project is associated with.
@@ -188,63 +172,58 @@ INSTALLED_APPS += [
 SITE_ID = 1
 
 MIDDLEWARE = [
-    'django.middleware.security.SecurityMiddleware',
-
+    "django.middleware.security.SecurityMiddleware",
     # CORS middleware should be placed as high as possible in the
     # middleware stack, especially before any middleware that can
     # generate responses such as CommonMiddleware or WhiteNoiseMiddleware.
-    'corsheaders.middleware.CorsMiddleware',
-    'quotation.middleware.RequestIdMiddleware',
-
-    'django.contrib.sessions.middleware.SessionMiddleware',
-    'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'quotation.middleware.QuotationAuditMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
-
+    "corsheaders.middleware.CorsMiddleware",
+    "quotation.middleware.RequestIdMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "quotation.middleware.QuotationAuditMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
     # Middleware for django-allauth that manages account-related operations,
     # such as handling user sessions and account state.
     "allauth.account.middleware.AccountMiddleware",
-
     # Custom middleware to map browser language codes to Django
     # language codes. Must be placed before LocaleMiddleware
-    'core.middleware.LanguageCodeMappingMiddleware',
-
+    "core.middleware.LanguageCodeMappingMiddleware",
     # 'django.middleware.locale.LocaleMiddleware' is Django's
     # localization middleware. It sets the language environment
     # based on the user's language preferences. The middleware
     # checks headers (e.g., Accept-Language) or session settings.
-    'django.middleware.locale.LocaleMiddleware',
+    "django.middleware.locale.LocaleMiddleware",
 ]
 
 MIDDLEWARE += [
     # Custom middleware
 ]
 
-ROOT_URLCONF = 'core.urls'
+ROOT_URLCONF = "core.urls"
 
 TEMPLATES = [
     {
-        'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [
-            os.path.join(BASE_DIR.parent, 'accounts', 'templates'),
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [
+            os.path.join(BASE_DIR.parent, "accounts", "templates"),
         ],
-        'APP_DIRS': True,
-        'OPTIONS': {
-            'context_processors': [
-                'django.template.context_processors.debug',
-                'django.template.context_processors.request',
-                'django.contrib.auth.context_processors.auth',
-                'django.contrib.messages.context_processors.messages',
-                'accounts.context_processors.frontend_settings',
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.debug",
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
+                "accounts.context_processors.frontend_settings",
             ],
         },
     },
 ]
 
-WSGI_APPLICATION = 'core.wsgi.application'
+WSGI_APPLICATION = "core.wsgi.application"
 
 # ============================
 # Database Configuration
@@ -257,27 +236,26 @@ WSGI_APPLICATION = 'core.wsgi.application'
 
 AUTH_PASSWORD_VALIDATORS = [
     {
-        'NAME': (
-            'django.contrib.auth.password_validation.'
-            'UserAttributeSimilarityValidator'
+        "NAME": (
+            "django.contrib.auth.password_validation."
+            "UserAttributeSimilarityValidator"
         ),
     },
     {
-        'NAME': (
-            'django.contrib.auth.password_validation.'
-            'MinimumLengthValidator'
+        "NAME": (
+            "django.contrib.auth.password_validation." "MinimumLengthValidator"
         ),
     },
     {
-        'NAME': (
-            'django.contrib.auth.password_validation.'
-            'CommonPasswordValidator'
+        "NAME": (
+            "django.contrib.auth.password_validation."
+            "CommonPasswordValidator"
         ),
     },
     {
-        'NAME': (
-            'django.contrib.auth.password_validation.'
-            'NumericPasswordValidator'
+        "NAME": (
+            "django.contrib.auth.password_validation."
+            "NumericPasswordValidator"
         ),
     },
 ]
@@ -292,7 +270,7 @@ AUTH_PASSWORD_VALIDATORS = [
 # it to 'en-us' will make Django use American English translations. To
 # support other languages, change it to the appropriate language code,
 # such as 'zh-hans' for Simplified Chinese.
-LANGUAGE_CODE = 'en'
+LANGUAGE_CODE = "en"
 
 # LANGUAGES: Defines a list of supported languages for the project. It is
 # structured as tuples, where the first element is the language code (e.g.,
@@ -303,14 +281,14 @@ LANGUAGE_CODE = 'en'
 # Example: ('zh-hans', _('Simplified Chinese')) adds support
 # for Simplified Chinese.
 LANGUAGES = (
-    ('zh-hans', '简体中文'),
-    ('en', 'English'),
+    ("zh-hans", "简体中文"),
+    ("en", "English"),
 )
 
 # TIME_ZONE: Default time zone for dates/times. Set to UTC so that values
 # read from the DB (stored in UTC) are not converted when accessed in code.
 # API and admin then expose UTC; frontend handles user timezone conversion.
-TIME_ZONE = 'UTC'
+TIME_ZONE = "UTC"
 
 # USE_I18N: Enables internationalization support. When set to True, Django
 # loads translation files and handles language-specific functionalities. Set
@@ -339,7 +317,7 @@ USE_TZ = True
 # the translations for the 'cloud_platform' app can be stored in:
 # 'yourapp/locale/zh_hans/LC_MESSAGES'.
 LOCALE_PATHS = [
-    os.path.join(BASE_DIR.parent, 'locale'),
+    os.path.join(BASE_DIR.parent, "locale"),
 ]
 
 # Language code mapping from browser Accept-Language to Django language
@@ -354,34 +332,33 @@ LOCALE_PATHS = [
 # - Other languages: mapped to default 'en' if not supported
 LANGUAGE_CODE_MAPPING = {
     # Chinese variants
-    'zh-cn': 'zh-hans',
-    'zh': 'zh-hans',
+    "zh-cn": "zh-hans",
+    "zh": "zh-hans",
     # Traditional Chinese -> Simplified (fallback)
-    'zh-tw': 'zh-hans',
+    "zh-tw": "zh-hans",
     # Hong Kong Chinese -> Simplified (fallback)
-    'zh-hk': 'zh-hans',
+    "zh-hk": "zh-hans",
     # Singapore Chinese -> Simplified
-    'zh-sg': 'zh-hans',
+    "zh-sg": "zh-hans",
     # Macau Chinese -> Simplified (fallback)
-    'zh-mo': 'zh-hans',
-
+    "zh-mo": "zh-hans",
     # English variants (Django's LocaleMiddleware handles these
     # automatically via language prefix matching, but included here
     # for completeness and explicit control)
     # US English
-    'en-us': 'en',
+    "en-us": "en",
     # UK English
-    'en-gb': 'en',
+    "en-gb": "en",
     # Australia English
-    'en-au': 'en',
+    "en-au": "en",
     # Canada English
-    'en-ca': 'en',
+    "en-ca": "en",
     # New Zealand English
-    'en-nz': 'en',
+    "en-nz": "en",
     # Ireland English
-    'en-ie': 'en',
+    "en-ie": "en",
     # South Africa English
-    'en-za': 'en',
+    "en-za": "en",
 }
 
 # ============================
@@ -390,7 +367,7 @@ LANGUAGE_CODE_MAPPING = {
 # ============================
 
 STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
-STATIC_URL = 'static/'
+STATIC_URL = "static/"
 
 # ============================
 # File Upload Configuration
@@ -413,7 +390,7 @@ FILE_UPLOAD_MAX_NUMBER_FILES = 100
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
 
-DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # ============================
 # Logging Configuration
@@ -474,14 +451,13 @@ APPEND_SLASH = False
 # Allow all origins configuration from environment variable
 # Set to 'true' for development convenience, 'false' for production security
 CORS_ALLOW_ALL_ORIGINS = (
-    os.getenv('CORS_ALLOW_ALL_ORIGINS', 'false').lower() == "true"
+    os.getenv("CORS_ALLOW_ALL_ORIGINS", "false").lower() == "true"
 )
 
 # Specific allowed origins from environment variable
 # Only used when CORS_ALLOW_ALL_ORIGINS is False
 CORS_ALLOWED_ORIGINS = os.getenv(
-    'CORS_ALLOWED_ORIGINS',
-    'http://localhost:3000,http://127.0.0.1:3000'
+    "CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
 ).split(",")
 
 # Allow credentials to be included in CORS requests
@@ -489,25 +465,25 @@ CORS_ALLOW_CREDENTIALS = True
 
 # Headers that can be used during the actual request
 CORS_ALLOW_HEADERS = [
-    'accept',
-    'accept-encoding',
-    'authorization',
-    'content-type',
-    'dnt',
-    'origin',
-    'user-agent',
-    'x-csrftoken',
-    'x-requested-with',
+    "accept",
+    "accept-encoding",
+    "authorization",
+    "content-type",
+    "dnt",
+    "origin",
+    "user-agent",
+    "x-csrftoken",
+    "x-requested-with",
 ]
 
 # Methods that can be used during the actual request
 CORS_ALLOW_METHODS = [
-    'DELETE',
-    'GET',
-    'OPTIONS',
-    'PATCH',
-    'POST',
-    'PUT',
+    "DELETE",
+    "GET",
+    "OPTIONS",
+    "PATCH",
+    "POST",
+    "PUT",
 ]
 
 # ============================
@@ -517,11 +493,11 @@ CORS_ALLOW_METHODS = [
 # Session cookie configuration
 # SameSite='Lax' is secure for most cases and prevents CSRF attacks
 # while still allowing top-level navigation cookies
-SESSION_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_SAMESITE = "Lax"
 
 # Secure=True requires HTTPS; set False for local development
 # In production, this should be True
-SESSION_COOKIE_SECURE = os.getenv('DJANGO_DEBUG', 'false').lower() != "true"
+SESSION_COOKIE_SECURE = os.getenv("DJANGO_DEBUG", "false").lower() != "true"
 
 # Allow session cookies to be shared across subdomains (if needed)
 # SESSION_COOKIE_DOMAIN = os.getenv('SESSION_COOKIE_DOMAIN', None)
@@ -529,8 +505,8 @@ SESSION_COOKIE_SECURE = os.getenv('DJANGO_DEBUG', 'false').lower() != "true"
 # CSRF cookie configuration
 # SameSite='Lax' allows cookies during top-level navigation
 # (like Stripe payment redirects) while providing CSRF protection
-CSRF_COOKIE_SAMESITE = 'Lax'
-CSRF_COOKIE_SECURE = os.getenv('DJANGO_DEBUG', 'false').lower() != "true"
+CSRF_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SECURE = os.getenv("DJANGO_DEBUG", "false").lower() != "true"
 CSRF_COOKIE_HTTPONLY = False
 
 # ============================
@@ -558,37 +534,79 @@ from .invoice import *
 
 # DRF Spectacular settings for API documentation
 SPECTACULAR_SETTINGS = {
-    'TITLE': 'DevMind API',
-    'DESCRIPTION': 'API documentation for DevMind project',
-    'VERSION': '1.0.0',
-    'SERVE_INCLUDE_SCHEMA': True,
-    'COMPONENT_SPLIT_REQUEST': True,
-    'SCHEMA_PATH_PREFIX': '/api/',
-    'CONTACT': {
-        'name': 'Ray Sun',
-        'email': 'xiaoquqi@gmail.com',
+    "TITLE": "DevMind API",
+    "DESCRIPTION": "API documentation for DevMind project",
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": True,
+    "COMPONENT_SPLIT_REQUEST": True,
+    "SCHEMA_PATH_PREFIX": "/api/",
+    "CONTACT": {
+        "name": "Ray Sun",
+        "email": "xiaoquqi@gmail.com",
     },
-    'LICENSE': {
-        'name': 'MIT License',
+    "LICENSE": {
+        "name": "MIT License",
     },
-    'TAGS': [
-        {'name': 'auth', 'description': 'Authentication endpoints'},
-        {'name': 'config', 'description': 'Global configuration endpoints'},
+    "TAGS": [
+        {"name": "auth", "description": "Authentication endpoints"},
+        {"name": "config", "description": "Global configuration endpoints"},
         {
-            'name': 'task-management',
-            'description': 'Unified task management endpoints',
+            "name": "task-management",
+            "description": "Unified task management endpoints",
         },
         {
-            'name': 'llm-tracking',
-            'description': 'LLM usage tracking and config (admin API)',
+            "name": "llm-tracking",
+            "description": "LLM usage tracking and config (admin API)",
         },
         {
-            'name': 'data-collector',
-            'description': 'Data collection config, raw records, attachments, stats',
+            "name": "data-collector",
+            "description": "Data collection config, raw records, attachments, stats",
         },
         {
-            'name': 'sals',
-            'description': 'SALS operations console: incident management and statistics',
+            "name": "sals",
+            "description": "SALS operations console: incident management and statistics",
         },
     ],
 }
+
+# AGIOne transports require explicit opt-in and server-owned key material.
+AGIONE_OPS_NATIVE_SHARD_CONCURRENCY = int(os.getenv(
+    "AGIONE_OPS_NATIVE_SHARD_CONCURRENCY", "2"
+))
+AGIONE_OPS_NATIVE_MAX_SECONDS = int(os.getenv(
+    "AGIONE_OPS_NATIVE_MAX_SECONDS", "120"
+))
+AGIONE_OPS_STAGING_RETENTION_DAYS = int(os.getenv(
+    "AGIONE_OPS_STAGING_RETENTION_DAYS", "30"
+))
+AGIONE_OPS_SNAPSHOT_RETENTION_DAYS = int(os.getenv(
+    "AGIONE_OPS_SNAPSHOT_RETENTION_DAYS", "90"
+))
+AGIONE_OPS_SYNTHETIC_ENABLED = False
+AGIONE_OPS_TASK_PROJECTION_ENABLED = False
+AGIONE_OPS_NATIVE_ENABLED = os.getenv(
+    "AGIONE_OPS_NATIVE_ENABLED", "false"
+).lower() == "true"
+AGIONE_OPS_NATIVE_ONLY = os.getenv(
+    "AGIONE_OPS_NATIVE_ONLY", "true"
+).lower() == "true"
+AGIONE_OPS_FINANCE_REFRESH_ON_SYNC = os.getenv(
+    "AGIONE_OPS_FINANCE_REFRESH_ON_SYNC", "false"
+).lower() == "true"
+AGIONE_OPS_ALLOWED_ENDPOINT_HOSTS = tuple(
+    host.strip().lower()
+    for host in os.getenv(
+        "AGIONE_OPS_ALLOWED_ENDPOINT_HOSTS", ""
+    ).split(",")
+    if host.strip()
+)
+_agione_key = os.getenv("AGIONE_OPS_ENCRYPTION_KEY", "").strip()
+AGIONE_OPS_ACTIVE_KEY_ID = os.getenv(
+    "AGIONE_OPS_ACTIVE_KEY_ID", "agione-v1"
+).strip() if _agione_key else ""
+AGIONE_OPS_ENCRYPTION_KEYS = (
+    {AGIONE_OPS_ACTIVE_KEY_ID: _agione_key} if AGIONE_OPS_ACTIVE_KEY_ID else {}
+)
+AGIONE_OPS_DEMO_SNAPSHOT_ENABLED = False
+AGIONE_OPS_DEMO_SNAPSHOT_READ_ONLY = False
+AGIONE_OPS_DEMO_BASE_URL = ""

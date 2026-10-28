@@ -175,3 +175,12 @@ def check_cache_health():
     except Exception as e:
         print(f"Cache health check failed: {e}")
         return False
+
+
+# Immutable projections have their own TTL; unrelated caches keep defaults.
+AGIONE_OPS_QUERY_CACHE_ENABLED = (
+    os.getenv("AGIONE_OPS_QUERY_CACHE_ENABLED", "true").lower() == "true"
+)
+AGIONE_OPS_QUERY_CACHE_TTL = int(
+    os.getenv("AGIONE_OPS_QUERY_CACHE_TTL", "21600")
+)

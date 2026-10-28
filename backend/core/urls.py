@@ -56,6 +56,7 @@ urlpatterns = [
 
     # LLM operations management routes
     path('api/v1/llm-ops/', include('llm_ops.urls')),
+    path('api/v1/agione-ops/', include('agione_ops.urls')),
 
     # Data collector routes (raw data collection from JIRA, Feishu, etc.)
     path('api/v1/data-collector/', include('data_collector.urls')),

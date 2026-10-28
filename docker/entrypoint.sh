@@ -13,7 +13,8 @@ cd /opt/backend || { echo "Error: Cannot change to /opt/backend directory"; exit
 
 # --- Global Variables ---
 export PYTHONPATH=/opt/backend
-export DJANGO_SETTINGS_MODULE=core.settings
+: "${DJANGO_SETTINGS_MODULE:=core.settings}"
+export DJANGO_SETTINGS_MODULE
 
 LOG_BASE_DIR="/var/log/gunicorn"
 ACCESS_LOG="${LOG_BASE_DIR}/gunicorn_access.log"

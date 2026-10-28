@@ -1,0 +1,542 @@
+"""Purely local analytics over an authorized immutable native publication."""
+
+import uuid
+from datetime import timedelta
+from types import SimpleNamespace
+from zoneinfo import ZoneInfo
+
+from django.contrib.auth import get_user_model
+from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.db.models import Q
+from rest_framework.exceptions import APIException
+
+from agione_ops.client import AgioneOpsError
+from agione_ops.models import ConnectionGrant, DatasetVersion
+from agione_ops.native_account_scope import (
+    FINANCE_SCOPE_VERSION, INTERNAL_TENANT_IDS, external_rows,
+)
+from agione_ops.native_analytics import LiveAnalytics, entity, parse_time, summary
+from agione_ops.native_finance import finance_for_window, unavailable_finance
+from agione_ops.native_sync import validate_snapshot_data
+from agione_ops.native_sync_models import NativePublishedSnapshot
+from agione_ops.permissions import get_connection_for
+
+OPERATIONS = frozenset({
+    "dashboard", "schema", "analysis", "trend", "customers", "profile",
+    "requests", "evidence", "finance",
+})
+
+
+def _fail(code, status=409):
+    raise AgioneOpsError(code, status_code=status)
+
+
+def _authorized(connection, user):
+    """Never trust the request's stale active flag or Django perm cache."""
+    fresh = get_user_model().objects.filter(pk=getattr(user, "pk", None)).first()
+    if fresh is None or not fresh.is_active:
+        _fail("ACCESS_REVOKED", 403)
+    current = get_connection_for(fresh, connection.pk, "view_business")
+    if current.source_kind != "native":
+        _fail("SOURCE_KIND_FORBIDDEN", 403)
+    return current, fresh
+
+
+
+def _composite_parts(connection, row, start, end, include_newer=False):
+    """Choose immutable complete snapshots, with one source per time slice."""
+    candidates = NativePublishedSnapshot.objects.filter(
+        version__connection=connection,
+        version__run__status="succeeded",
+        version__run__config_version=connection.config_version,
+        version__run__credential_version=connection.credential_version,
+        version__window_start__lt=end,
+        version__window_end__gt=start,
+    )
+    if not include_newer:
+        candidates = candidates.filter(
+            Q(version__published_at__lt=row["version__published_at"])
+            | Q(version__published_at=row["version__published_at"],
+                version_id__lte=row["version_id"])
+        )
+    candidates = list(candidates.order_by(
+        "-version__published_at", "-version_id",
+    ).values(
+        "version_id", "content_digest", "version__window_start",
+        "version__window_end", "version__coverage",
+    ))
+    parts = []
+    at = start
+    zone = ZoneInfo("Asia/Shanghai")
+    while at < end:
+        local = at.astimezone(zone)
+        midnight = local.replace(hour=0, minute=0, second=0,
+                                 microsecond=0) + timedelta(days=1)
+        stop = min(midnight, end)
+        match = next((item for item in candidates if (
+            item["version__window_start"] <= at
+            and item["version__window_end"] >= stop
+            and item["version__coverage"].get("pagingComplete")
+            and not item["version__coverage"].get("partial")
+        )), None)
+        parts.append({
+            "version": str(match["version_id"]) if match else None,
+            "digest": match["content_digest"] if match else None,
+            "start": at.isoformat(), "end": stop.isoformat(),
+        })
+        at = stop
+    return parts if any(part["version"] for part in parts) else None
+
+def validate_native_snapshot(connection, user, query, expected=None):
+    """Read only small version/authority fields before a DTO cache lookup."""
+    if not isinstance(query, dict) or query.get("operation") not in OPERATIONS:
+        _fail("OPERATION_NOT_SUPPORTED", 400)
+    current, fresh = _authorized(connection, user)
+    selected = query.get("data_version", query.get("dataVersion"))
+    snapshots = NativePublishedSnapshot.objects.filter(
+        version__connection=current,
+        version__run__status="succeeded",
+    )
+    if selected is not None:
+        try:
+            selected = uuid.UUID(str(selected))
+        except (ValueError, TypeError, AttributeError):
+            _fail("DATA_VERSION_NOT_FOUND", 404)
+        snapshots = snapshots.filter(version_id=selected)
+    row = snapshots.order_by("-version__published_at").values(
+        "version_id", "content_digest", "version__window_start",
+        "version__window_end", "version__published_at",
+        "version__run__config_version", "version__run__credential_version",
+    ).first()
+    grant = ConnectionGrant.objects.get(
+        connection=current, user=fresh, can_view=True,
+    )
+    signature = {
+        "state": "not_collected", "dataVersion": None,
+        "contentDigest": None, "connectionId": str(current.pk),
+        "userId": str(fresh.pk), "configVersion": current.config_version,
+        "credentialVersion": current.credential_version,
+        "grantRevision": grant.revision,
+    }
+    if row is not None:
+        if (
+            row["version__run__config_version"] != current.config_version
+            or row["version__run__credential_version"]
+            != current.credential_version
+        ):
+            if selected is not None:
+                _fail("SNAPSHOT_EPOCH_CHANGED")
+        else:
+            signature.update({
+                "state": "ready", "dataVersion": str(row["version_id"]),
+                "contentDigest": row["content_digest"],
+                "windowStart": row["version__window_start"].isoformat(),
+                "windowEndExclusive": row["version__window_end"].isoformat(),
+                "publishedAt": row["version__published_at"].isoformat(),
+            })
+    elif selected is not None:
+        if DatasetVersion.objects.filter(pk=selected, connection=current).exists():
+            _fail("DATA_VERSION_EXPIRED")
+        _fail("DATA_VERSION_NOT_FOUND", 404)
+    if signature["state"] == "ready" and query.get("window"):
+        raw = query["window"]
+        if not isinstance(raw, dict):
+            _fail("LIVE_WINDOW_INVALID", 400)
+        requested_start = parse_time(raw.get("start"))
+        requested_end = parse_time(raw.get("end_exclusive", raw.get("endExclusive")))
+        if not (parse_time(signature["windowStart"]) <= requested_start
+                and requested_end <= parse_time(signature["windowEndExclusive"])):
+            if (raw.get("timezone", "Asia/Shanghai") != "Asia/Shanghai"
+                    or not timedelta(0) < requested_end - requested_start
+                    <= timedelta(days=31)):
+                _fail("LIVE_WINDOW_INVALID", 400)
+            parts = _composite_parts(current, row, requested_start, requested_end)
+            if not parts:
+                _fail("SNAPSHOT_WINDOW_NOT_COLLECTED")
+            signature["parts"] = parts
+            signature["missingDays"] = [
+                parse_time(part["start"]).astimezone(
+                    ZoneInfo("Asia/Shanghai"),
+                ).date().isoformat()
+                for part in parts if not part["version"]
+            ]
+            signature["windowStart"] = requested_start.isoformat()
+            signature["windowEndExclusive"] = requested_end.isoformat()
+    if signature["state"] == "ready" and query["operation"] == "dashboard":
+        start, end = _window(query, signature)
+        prior_start = start - (end - start)
+        if prior_start < parse_time(signature["windowStart"]):
+            previous = NativePublishedSnapshot.objects.filter(
+                version__connection=current,
+                version__run__status="succeeded",
+                version__run__config_version=current.config_version,
+                version__run__credential_version=current.credential_version,
+                version__window_start__lte=prior_start,
+                version__window_end__gte=start,
+            ).order_by("-version__published_at").values(
+                "version_id", "content_digest",
+            ).first()
+            if previous:
+                signature["previousVersion"] = str(previous["version_id"])
+                signature["previousDigest"] = previous["content_digest"]
+            else:
+                parts = _composite_parts(
+                    current, row, prior_start, start, include_newer=True,
+                )
+                if parts and all(part["version"] for part in parts):
+                    signature["previousParts"] = parts
+    if expected is not None and signature != expected:
+        _fail("SNAPSHOT_CHANGED")
+    return signature
+
+
+def _window(query, signature):
+    start = parse_time(signature["windowStart"])
+    end = parse_time(signature["windowEndExclusive"])
+    raw = query.get("window")
+    if raw is None:
+        return start, end
+    if not isinstance(raw, dict) or raw.get(
+        "timezone", "Asia/Shanghai",
+    ) != "Asia/Shanghai":
+        _fail("LIVE_WINDOW_INVALID", 400)
+    requested_start = parse_time(raw.get("start", start))
+    requested_end = parse_time(raw.get(
+        "end_exclusive", raw.get("endExclusive", end),
+    ))
+    if not start <= requested_start < requested_end <= end:
+        _fail("SNAPSHOT_WINDOW_NOT_COLLECTED")
+    return requested_start, requested_end
+
+
+def _base(connection, operation, signature):
+    return {
+        "operation": operation, "state": signature["state"],
+        "dataVersion": signature["dataVersion"], "data": None,
+        "provenance": {
+            "mode": "snapshot", "kind": "native_snapshot",
+            "transport": "local_database", "platform": connection.platform,
+            "account": connection.principal_kind,
+            "publishedAt": signature.get("publishedAt"),
+        },
+        "capabilities": {
+            "directUpstream": False, "readOnly": True,
+            "operations": sorted(OPERATIONS), "refreshAsync": True,
+        },
+        "coverage": {
+            "mode": "snapshot", "pagingComplete": False,
+            "partial": False,
+        },
+    }
+
+
+def apply_dashboard_observations(data, engine, previous, coverage):
+    """Expose only observations backed by complete collected windows."""
+    complete = coverage.get("pagingComplete") and not coverage.get("partial")
+    filters = engine.filters
+    all_results = not filters.get(
+        "failure_types", filters.get("failureTypes", []),
+    ) and set(filters.get("statuses", [])) in (
+        set(), {"SUCCESS", "FAILURE", "UNKNOWN"},
+    )
+    if previous is not None and complete:
+        data["comparison"] = {
+            "state": "READY", "reason": None,
+            "basis": "LOCAL_PUBLISHED_SNAPSHOT",
+            "summary": summary(previous.global_rows),
+        }
+    for customer in data["customers"]:
+        cid = customer["customerTenantId"]
+        current_rows = engine.customer_global_rows.get(cid, [])
+        prior_rows = (
+            previous.customer_global_rows.get(cid, []) if previous else []
+        )
+        if previous is not None and complete:
+            before = summary(prior_rows)
+            count = before["requestCount"]
+            customer["previous"] = before
+            customer["comparisonState"] = "READY" if count else "NO_BASELINE"
+            customer["comparisonReason"] = (
+                None if count else "此客户前期无调用记录，无法计算变化比例"
+            )
+            customer["changePercent"] = (
+                100 * (len(current_rows) - count) / count if count else None
+            )
+        observed = current_rows + prior_rows
+        if complete and all_results and observed:
+            last = max(parse_time(row["occurred_at"]) for row in observed)
+            zone = ZoneInfo("Asia/Shanghai")
+            days = max(0, (
+                engine.end.astimezone(zone).date() - last.astimezone(zone).date()
+            ).days - 1)
+            customer["inactivity"] = {
+                "state": "READY", "daysWithoutCalls": days,
+                "lastObservedAt": last.isoformat(),
+                "limitedSample": len(observed) < 3, "reason": None,
+            }
+        elif not all_results:
+            customer["inactivity"] = {
+                "state": "FILTER_NOT_APPLICABLE", "daysWithoutCalls": None,
+                "reason": "仅筛选部分结果，不能判断近期无调用",
+            }
+    data["signalState"] = (
+        "APPLICABLE" if all_results and not data["summary"]["unknownCount"]
+        else "RESULT_FILTER_OR_UNKNOWN_STATUS"
+    )
+    states = [row["inactivity"]["state"] for row in data["customers"]]
+    data["inactivityState"] = (
+        "READY" if all(x == "READY" for x in states) else "PARTIAL"
+    )
+
+
+def query_native_snapshot(connection, user, query):
+    """Compute legacy operation DTOs without constructing any source client."""
+    signature = validate_native_snapshot(connection, user, query)
+    operation = query["operation"]
+    payload = query.get("payload", {})
+    if not isinstance(payload, dict) or not isinstance(
+        query.get("filters", {}), dict,
+    ):
+        _fail("INVALID_PAYLOAD", 400)
+    result = _base(connection, operation, signature)
+    if signature["state"] == "not_collected":
+        result["reason"] = "NATIVE_SNAPSHOT_NOT_COLLECTED"
+        validate_native_snapshot(connection, user, query, signature)
+        return result
+    snapshot = NativePublishedSnapshot.objects.select_related(
+        "version",
+    ).get(version_id=signature["dataVersion"])
+    try:
+        validate_snapshot_data(snapshot.data, snapshot.content_digest)
+    except (ValueError, APIException, ValidationError) as error:
+        raise AgioneOpsError(
+            "SNAPSHOT_CONTENT_INVALID", status_code=409,
+        ) from error
+
+    start, end = _window(query, signature)
+    if signature.get("parts"):
+        sources = {}
+        rows_by_id = {}
+        for part in signature["parts"]:
+            if not part["version"]:
+                continue
+            if part["version"] not in sources:
+                source = NativePublishedSnapshot.objects.select_related(
+                    "version",
+                ).get(version_id=part["version"])
+                try:
+                    validate_snapshot_data(source.data, part["digest"])
+                except (ValueError, APIException, ValidationError) as error:
+                    raise AgioneOpsError(
+                        "SNAPSHOT_CONTENT_INVALID", status_code=409,
+                    ) from error
+                if set(source.data["customers"]) != set(snapshot.data["customers"]):
+                    _fail("SNAPSHOT_DIRECTORY_CHANGED")
+                sources[part["version"]] = source
+            source = sources[part["version"]]
+            part_start, part_end = parse_time(part["start"]), parse_time(part["end"])
+            for item in source.data["rows"]:
+                if part_start <= parse_time(item["occurred_at"]) < part_end:
+                    existing = rows_by_id.get(item["record_id"])
+                    if existing is not None and existing != item:
+                        _fail("SOURCE_DUPLICATE_PAGE")
+                    rows_by_id[item["record_id"]] = item
+        missing = signature.get("missingDays", [])
+        snapshot = SimpleNamespace(
+            data={**snapshot.data, "rows": list(rows_by_id.values())},
+            version=SimpleNamespace(coverage={
+                **snapshot.version.coverage, "partial": bool(missing),
+                "missingDays": missing,
+            }),
+        )
+    from agione_ops.native_account_refresh import scope_for
+
+    account_types, _ = scope_for(connection, user)
+    customers = {key: value for key, value in snapshot.data["customers"].items()
+                 if str(key) not in INTERNAL_TENANT_IDS
+                 and account_types.get(f"tenant:{key}") != "internal"}
+    rows = [row for row in external_rows(snapshot.data["rows"], account_types) if (
+        start <= parse_time(row["occurred_at"]) < end
+    )]
+    engine = LiveAnalytics(
+        customers, snapshot.data["models"], rows,
+        start, end, query,
+    )
+    from agione_ops.native_sync_models import NativeAccountScope
+
+    scope = NativeAccountScope.objects.filter(connection=connection, user=user).first()
+    engine.user_names = scope.names if scope and scope_for(connection, user)[1] else {}
+    stats = summary(engine.global_rows)
+    finance = snapshot.data.get("finance", {})
+    if (finance.get("available")
+            and finance.get("coverageBasis") != FINANCE_SCOPE_VERSION):
+        finance = unavailable_finance("NATIVE_FINANCE_NOT_COLLECTED")
+    if operation in {"dashboard", "finance", "profile"} and not getattr(
+        settings, "AGIONE_OPS_FINANCE_REFRESH_ON_SYNC", True,
+    ):
+        from agione_ops.native_finance_refresh import finance_for
+
+        finance, _ = finance_for(connection, user)
+    if finance and operation in {"dashboard", "finance"}:
+        finance = finance_for_window(finance, start, end)
+    if operation == "dashboard":
+        data = engine.dashboard()
+        prior_start = start - (end - start)
+        prior_snapshot = None
+        if prior_start >= parse_time(signature["windowStart"]):
+            prior_snapshot = snapshot
+        elif signature.get("previousVersion"):
+            prior_snapshot = NativePublishedSnapshot.objects.select_related(
+                "version",
+            ).get(version_id=signature["previousVersion"])
+            try:
+                validate_snapshot_data(
+                    prior_snapshot.data, signature["previousDigest"],
+                )
+            except (ValueError, APIException, ValidationError) as error:
+                raise AgioneOpsError(
+                    "SNAPSHOT_CONTENT_INVALID", status_code=409,
+                ) from error
+        previous = None
+        if signature.get("previousParts"):
+            prior_rows_by_id = {}
+            sources = {}
+            for part in signature["previousParts"]:
+                if part["version"] not in sources:
+                    source = NativePublishedSnapshot.objects.select_related(
+                        "version",
+                    ).get(version_id=part["version"])
+                    try:
+                        validate_snapshot_data(source.data, part["digest"])
+                    except (ValueError, APIException, ValidationError) as error:
+                        raise AgioneOpsError(
+                            "SNAPSHOT_CONTENT_INVALID", status_code=409,
+                        ) from error
+                    if set(source.data["customers"]) != set(snapshot.data["customers"]):
+                        _fail("SNAPSHOT_DIRECTORY_CHANGED")
+                    sources[part["version"]] = source
+                for item in sources[part["version"]].data["rows"]:
+                    at = parse_time(item["occurred_at"])
+                    if parse_time(part["start"]) <= at < parse_time(part["end"]):
+                        old = prior_rows_by_id.get(item["record_id"])
+                        if old is not None and old != item:
+                            _fail("SOURCE_DUPLICATE_PAGE")
+                        prior_rows_by_id[item["record_id"]] = item
+            previous = LiveAnalytics(
+                customers, snapshot.data["models"],
+                external_rows(list(prior_rows_by_id.values()), account_types),
+                prior_start, start, query,
+            )
+        elif prior_snapshot and prior_snapshot.version.coverage.get(
+            "pagingComplete"
+        ) and not prior_snapshot.version.coverage.get("partial"):
+            prior_rows = [row for row in external_rows(
+                prior_snapshot.data["rows"], account_types
+            ) if (
+                prior_start <= parse_time(row["occurred_at"]) < start
+            )]
+            previous = LiveAnalytics(
+                customers, snapshot.data["models"],
+                prior_rows, prior_start, start, query,
+            )
+        apply_dashboard_observations(
+            data, engine, previous, snapshot.version.coverage,
+        )
+        data["finance"] = finance or unavailable_finance(
+            "NATIVE_FINANCE_NOT_COLLECTED"
+        )
+    elif operation == "schema":
+        data = engine.schema()
+    elif operation == "analysis":
+        data = engine.analysis()
+    elif operation == "customers":
+        data = engine.page(engine.customer_rows())
+        data["selectedCustomerTenantId"] = (
+            data["items"][0]["customerTenantId"] if data["items"] else None
+        )
+        data["clearProfile"] = not data["items"]
+    elif operation == "trend":
+        data = {
+            "summary": summary(engine.local_rows), "globalSummary": stats,
+            "series": engine.trend(
+                series_by=payload.get("series_by", payload.get("seriesBy")),
+                granularity=payload.get("granularity", "day"),
+            ),
+            "previousSeries": None,
+            "comparisonReason": "前期尚未采集",
+            "comparisonBasis": "LOCAL_PUBLISHED_SNAPSHOT",
+        }
+    elif operation == "profile":
+        cid = entity(payload.get("customer_id", payload.get("customerId")))
+        data = engine.profile(cid)
+        customer_finance = finance.get("customerFinance", {}).get(cid)
+        if customer_finance is None:
+            data["value"]["finance"] = unavailable_finance(
+                "NATIVE_FINANCE_NOT_COLLECTED" if not finance.get("available")
+                else "CUSTOMER_FINANCE_NOT_AVAILABLE",
+            )
+        else:
+            fetched_at = finance.get("fetchedAt")
+            data["value"]["finance"] = {
+                "available": True,
+                "reason": None,
+                "finance": {
+                    **customer_finance,
+                    "fetchedAt": fetched_at,
+                    "summarySections": {
+                        "accounts": {
+                            "state": "FRESH", "read_at": fetched_at,
+                        },
+                        "overview": {
+                            "state": "FRESH", "read_at": fetched_at,
+                        },
+                        "recharge": {
+                            "state": "ERROR" if customer_finance.get("rechargeError") else "FRESH",
+                            "read_at": fetched_at,
+                            "error": {"code": customer_finance.get("rechargeError")},
+                        },
+                    },
+                },
+            }
+    elif operation == "finance":
+        data = finance or unavailable_finance("NATIVE_FINANCE_NOT_COLLECTED")
+    elif operation == "requests":
+        data = engine.requests()
+    else:
+        rid = entity(payload.get("evidence_id", payload.get("evidenceId")))
+        record = next(
+            (row for row in engine.local_rows if row["record_id"] == rid), None,
+        )
+        if record is None:
+            _fail("EVIDENCE_NOT_FOUND", 404)
+        data = {"record": engine.evidence(record)}
+    result.update({
+        "data": data,
+        "window": {
+            "start": start.isoformat(), "endExclusive": end.isoformat(),
+            "timezone": "Asia/Shanghai",
+        },
+        "coverage": {
+            **snapshot.version.coverage, "mode": "snapshot",
+            "fetchedAt": snapshot.data["metadata"]["collectedAt"],
+        },
+    })
+    result["provenance"].update({
+        "roleState": snapshot.data["metadata"]["roleState"],
+        "fetchedAt": snapshot.data["metadata"]["collectedAt"],
+    })
+    if operation == "dashboard":
+        count = snapshot.version.coverage["directoryTotal"]
+        result["overview"] = {
+            "summary": stats, "metrics": stats,
+            "directory": {
+                "total": count, "confirmed": count,
+                "excludedUnconfirmed": 0,
+            },
+            "readOnly": True, "mode": "snapshot",
+            "dataVersion": signature["dataVersion"],
+            "provenance": result["provenance"],
+        }
+    validate_native_snapshot(connection, user, query, signature)
+    return result

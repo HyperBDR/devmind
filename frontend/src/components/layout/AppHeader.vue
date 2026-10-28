@@ -1,11 +1,16 @@
 <template>
-  <header
-    class="bg-white shadow-sm border-b border-gray-200 flex-shrink-0 z-30"
+  <component
+    :is="inline ? 'div' : 'header'"
+    :class="inline
+      ? 'devmind-inline-header'
+      : 'bg-white shadow-sm border-b border-gray-200 flex-shrink-0 z-30'"
   >
-    <div class="px-4 sm:px-6 lg:px-8">
-      <div class="flex justify-between items-center h-16">
-        <!-- Mobile menu button -->
-        <div class="flex items-center gap-3">
+    <div :class="inline ? 'devmind-inline-header-inner' : 'px-4 sm:px-6 lg:px-8'">
+      <div :class="inline
+        ? 'flex items-center justify-end'
+        : 'flex justify-between items-center h-16'">
+        <!-- Preserve the full header only outside embedded mode. -->
+        <div v-if="!inline" class="flex items-center gap-3">
           <button
             v-if="showMenuButton"
             @click="$emit('toggle-menu')"
@@ -32,7 +37,9 @@
         </div>
 
         <!-- User menu -->
-        <div class="flex items-center space-x-4">
+        <div :class="inline
+          ? 'devmind-inline-header-controls flex items-center space-x-4'
+          : 'flex items-center space-x-4'">
           <LanguageSwitcher />
           <PlatformSwitcher />
           <div class="relative" ref="userMenuRef">
@@ -226,7 +233,7 @@
         </div>
       </div>
     </div>
-  </header>
+  </component>
 </template>
 
 <script setup>
@@ -239,6 +246,10 @@ import PlatformSwitcher from '@/components/layout/PlatformSwitcher.vue'
 import { appVersion } from '@/config/version'
 
 defineProps({
+  inline: {
+    type: Boolean,
+    default: false
+  },
   showMenuButton: {
     type: Boolean,
     default: true
@@ -392,6 +403,114 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* Isolate embedded controls from the business workspace button defaults. */
+.devmind-inline-header {
+  flex: 0 0 auto;
+  min-width: 0;
+  margin-left: auto;
+  color: #374151;
+  font-family: theme('fontFamily.sans');
+  font-size: 14px;
+  line-height: 20px;
+}
+
+/* Restore native utility values masked by the workspace button selector. */
+.devmind-inline-header :deep(button) {
+  border: 0 solid #e5e7eb;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  color: #374151;
+  font: inherit;
+}
+
+.devmind-inline-header :deep(button:hover) {
+  background: transparent;
+}
+
+.devmind-inline-header :deep(button.rounded-md) {
+  border-radius: theme('borderRadius.md');
+}
+
+.devmind-inline-header :deep(button.rounded-lg) {
+  border-radius: theme('borderRadius.lg');
+}
+
+.devmind-inline-header :deep(button.px-2) {
+  padding-right: theme('spacing.2');
+  padding-left: theme('spacing.2');
+}
+
+.devmind-inline-header :deep(button.px-3) {
+  padding-right: theme('spacing.3');
+  padding-left: theme('spacing.3');
+}
+
+.devmind-inline-header :deep(button.px-4) {
+  padding-right: theme('spacing.4');
+  padding-left: theme('spacing.4');
+}
+
+.devmind-inline-header :deep(button.py-1) {
+  padding-top: theme('spacing.1');
+  padding-bottom: theme('spacing.1');
+}
+
+.devmind-inline-header :deep(button.py-2) {
+  padding-top: theme('spacing.2');
+  padding-bottom: theme('spacing.2');
+}
+
+.devmind-inline-header :deep(button.border) {
+  border-width: 1px;
+}
+
+.devmind-inline-header :deep(button.bg-white) {
+  background-color: theme('colors.white');
+}
+
+.devmind-inline-header :deep(button.text-gray-600) {
+  color: theme('colors.gray.600');
+}
+
+.devmind-inline-header :deep(button.font-medium) {
+  font-weight: theme('fontWeight.medium');
+}
+
+.devmind-inline-header :deep(button.hover\:bg-gray-100:hover) {
+  background-color: theme('colors.gray.100');
+}
+
+.devmind-inline-header :deep(button.hover\:text-gray-900:hover) {
+  color: theme('colors.gray.900');
+}
+
+.devmind-inline-header :deep(button.hover\:border-primary-300:hover) {
+  border-color: theme('colors.primary.300');
+}
+
+.devmind-inline-header :deep(button.hover\:text-primary-700:hover) {
+  color: theme('colors.primary.700');
+}
+
+.devmind-inline-header :deep(a) {
+  @apply text-gray-700;
+}
+
+.devmind-inline-header :deep(svg) {
+  flex-shrink: 0;
+}
+
+.devmind-inline-header :deep(.absolute.right-0) {
+  max-width: calc(100vw - 20px);
+}
+
+@media (max-width: 650px) {
+  .devmind-inline-header :deep(button > span.max-w-\[20rem\]) {
+    max-width: 56px;
+  }
+}
+
 .nav-link {
   @apply text-gray-500 hover:text-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors;
 }
