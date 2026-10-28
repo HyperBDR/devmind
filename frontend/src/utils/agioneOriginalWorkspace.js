@@ -8,7 +8,7 @@ export function originalWorkspaceState(state) {
     const p = state.profile
     const financeResult = p.value?.finance
     const finance = financeResult?.finance || {}
-    const financeReadAt = finance.fetchedAt || state.provenance?.fetchedAt
+    const financeReadAt = finance.fetchedAt
     const fallbackSections = financeReadAt ? {
       accounts: { state: 'FRESH', read_at: financeReadAt },
       overview: { state: 'FRESH', read_at: financeReadAt }

@@ -22,7 +22,7 @@ from agione_ops.permissions import get_connection_for
 
 _flights = {}
 _flights_lock = threading.Lock()
-_CACHE_SCHEMA = 2
+_CACHE_SCHEMA = 5
 
 
 def _json_value(value):
@@ -239,8 +239,19 @@ def cached_operation(connection, user, query, compute, validate=None):
     key = make_cache_key(identity, query)
     result = _cache_get(key)
     if result is not None:
-        set_fields(cache_hit=True)
-        return copy.deepcopy(finish(result)["result"])
+        try:
+            validated = finish(result)
+        except AgioneOpsError as error:
+            if getattr(error, "code", "") != "SNAPSHOT_CHANGED":
+                raise
+            try:
+                cache.delete(key)
+            except Exception:
+                set_fields(cache_unavailable=True)
+                return copy.deepcopy(calculate()["result"])
+        else:
+            set_fields(cache_hit=True)
+            return copy.deepcopy(validated["result"])
     with _flights_lock:
         future = _flights.get(key)
         leader = future is None

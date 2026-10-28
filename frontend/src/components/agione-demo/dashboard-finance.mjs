@@ -34,12 +34,26 @@ function metric(label, value, unit = '') {
   return `<div class="df-summary-metric"><span>${e(label)}</span><strong>${e(value)}</strong>${unit ? `<small>${e(unit)}</small>` : ''}</div>`
 }
 
+function coverage(trend, field) {
+  const days = [...new Set((trend || []).filter(row =>
+    /^\d{4}-\d{2}-\d{2}$/.test(row.date || '') && finite(row[field]) !== null
+  ).map(row => row.date))].sort()
+  const ranges = []
+  for (const day of days) {
+    const last = ranges.at(-1)
+    if (last && Date.parse(`${day}T00:00:00Z`) - Date.parse(`${last[1]}T00:00:00Z`) === 86400000) last[1] = day
+    else ranges.push([day, day])
+  }
+  return ranges.map(([first, last]) => first === last ? first : `${first} — ${last}`).join('、') || '暂无完整日数据'
+}
+
 function distributionView(distribution, finance) {
   if (!distribution) return `<div class="df-finance-empty"><strong>余额分层待采集</strong><span>当前没有可用于分层的账户余额。</span></div>`
-  const total = ['healthyCustomers', 'lowCustomers', 'zeroCustomers', 'negativeCustomers']
+  const total = ['healthyCustomers', 'normalCustomers', 'lowCustomers', 'zeroCustomers', 'negativeCustomers']
     .reduce((sum, key) => sum + (Number(distribution[key]) || 0), 0)
   const segments = [
     ['healthy', '余额充足', distribution.healthyCustomers],
+    ['normal', '余额正常', distribution.normalCustomers],
     ['low', '低于阈值', distribution.lowCustomers],
     ['zero', '余额为 0', distribution.zeroCustomers],
     ['negative', '余额为负', distribution.negativeCustomers]
@@ -50,7 +64,7 @@ function distributionView(distribution, finance) {
 function summaryView(summary, finance) {
   const unit = summary?.unit || 'Credit'
   if (!summary) return `<div class="df-finance-empty"><strong>账期摘要待采集</strong><span>当前没有可用的账期财务快照。</span></div>`
-  return `<div class="df-summary-grid">${metric('Credit 入账', money(summary.topUp), unit)}${metric('Credit 消耗', money(summary.consumed), unit)}${metric('调账 / 舍入', adjustment(summary), unit)}${metric('产生消耗客户', `${summary.consumingCustomers ?? '—'} / ${finance.totalCustomers ?? '—'}`)}</div><p class="df-summary-note">账期覆盖 ${e(summary.coveredCustomers ?? '—')} 位客户 · 有入账记录 ${e(summary.topUpCustomers ?? '—')} 位客户${summary.topUp == null ? ' · 所选日期入账数据尚未完整采集' : ''}${summary.adjustment == null && summary.roundOff == null ? ' · 日维度调账数据暂不可用' : ''}${summary.consumed == null ? ' · 所选日期消耗数据尚未完整采集' : ''}</p>`
+  return `<div class="df-summary-grid">${metric('Credit 入账', money(summary.topUp), unit)}${metric('Credit 消耗', money(summary.consumed), unit)}${metric('调账 / 舍入', adjustment(summary), unit)}${metric('产生消耗客户', `${summary.consumingCustomers ?? '—'} / ${finance.totalCustomers ?? '—'}`)}</div><p class="df-summary-note">入账日数据覆盖：${e(coverage(finance.trend, 'topUp'))}<br>消耗日数据覆盖：${e(coverage(finance.trend, 'value'))}</p><p class="df-summary-note">账期覆盖 ${e(summary.coveredCustomers ?? '—')} 位客户 · 有入账记录 ${e(summary.topUpCustomers ?? '—')} 位客户${summary.topUp == null ? ' · 所选日期入账数据尚未完整采集' : ''}${summary.adjustment == null && summary.roundOff == null ? ' · 日维度调账数据暂不可用' : ''}${summary.consumed == null ? ' · 所选日期消耗数据尚未完整采集' : ''}</p>`
 }
 
 function financeMessage(finance) {

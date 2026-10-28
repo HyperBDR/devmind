@@ -267,6 +267,28 @@ class LiveOperationAPIView(LocalAPIView):
         ))
 
 
+class FinanceRefreshAPIView(LocalAPIView):
+    """Refresh the authorized user's existing finance projection."""
+
+    def post(self, request, connection_id):
+        from agione_ops.native_finance_refresh import finance_for, schedule_finance
+        from agione_ops.native_sync_models import NativeFinanceProjection
+
+        connection = get_connection_for(request.user, connection_id, "run_sync")
+        get_connection_for(request.user, connection_id, "view_business")
+        EmptySerializer(data=request.data).is_valid(raise_exception=True)
+        row = NativeFinanceProjection.objects.filter(
+            connection=connection, user=request.user,
+        ).first()
+        if row is None or finance_for(connection, request.user)[1] is None:
+            raise AgioneOpsError("NATIVE_FINANCE_NOT_COLLECTED", status_code=409)
+        schedule_finance(row.run_id)
+        finance, _ = finance_for(connection, request.user)
+        if finance.get("refreshState") not in {"queued", "running"}:
+            raise AgioneOpsError("FINANCE_REFRESH_FAILED", status_code=409)
+        return Response({"state": finance["refreshState"]}, status=202)
+
+
 class ConnectionVerifyAPIView(LocalAPIView):
     """Identity verification is an explicit action, never a GET side effect."""
 
@@ -297,6 +319,9 @@ class ConnectionVerifyAPIView(LocalAPIView):
             connection.verified_tenant_id = identity["tenant_id"]
             connection.verified_at = timezone.now()
             connection.save(update_fields=["verified_tenant_id", "verified_at"])
+            from agione_ops.tasks import start_initial_native_sync
+
+            start_initial_native_sync(connection, request.user)
             return Response({"state": "connected", "mode": "live", **identity})
         return Response(verify_connection(connection, request.user))
 

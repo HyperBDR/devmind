@@ -60,6 +60,9 @@ const phrases = `
 客户画像|Customer insights
 客户档案|Customer profile
 财务与额度|Credits & Billing
+入账日数据覆盖：|Daily credits added coverage:\x20
+消耗日数据覆盖：|Daily credits used coverage:\x20
+暂无完整日数据|No complete daily data
 余额为最新快照；消耗按所选日期汇总，缺失不补零。|Balances are the latest snapshot; usage follows the selected dates and missing values are not treated as zero.
 所选日期入账数据尚未完整采集|Credits added data for the selected dates is incomplete
 日维度调账数据暂不可用|Daily adjustments are unavailable
@@ -82,6 +85,7 @@ Credit 消耗|Credits used
 余额为 0|Zero balance
 余额为负|Negative balance
 余额充足|Sufficient balance
+余额正常|Normal balance
 负余额客户合计欠额|Total owed
 账期摘要|Billing period summary
 账期消耗|Credits used this billing period
@@ -310,6 +314,13 @@ Token 指标|Token metric
 账户|Account
 暂无账户|No accounts available
 充值概况|Top-up summary
+成功订单次数|Successful orders
+最近成功订单|Latest successful order
+包含系统赠送，实付金额按币种统计 · 不随调用日期变化。|Includes system gifts; payments are grouped by currency and do not follow the selected dates.
+最近 5 条成功订单，包含系统赠送，不随调用日期变化。不同支付币种分别统计。|Latest 5 successful orders, including system gifts. Payments are grouped by currency and do not follow the selected dates.
+系统赠送|System gift
+次成功订单| successful orders
+该客户暂无可用财务数据，可能未在 Operator 授权目录中，或上游未返回。|No financial data is available for this customer; the Operator directory or source may not include it.
 累计实付充值|Total top-up amount
 成功充值次数|Successful top-ups
 最近成功充值|Latest successful top-up

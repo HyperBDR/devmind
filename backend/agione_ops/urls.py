@@ -31,6 +31,11 @@ urlpatterns = [
         name="agione-ops-connection-grant",
     ),
     path(
+        "connections/<uuid:connection_id>/finance/refresh/",
+        views.FinanceRefreshAPIView.as_view(),
+        name="agione-ops-finance-refresh",
+    ),
+    path(
         "connections/<uuid:connection_id>/verify/",
         views.ConnectionVerifyAPIView.as_view(),
         name="agione-ops-verify",

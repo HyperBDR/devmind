@@ -274,6 +274,13 @@ def test_unauthorized_object_and_unknown_version_do_not_leak(
     )
 
 
+def test_finance_refresh_requires_grant_and_existing_projection(actors, connection):
+    _, owner, other = actors
+    path = f"{BASE}{connection.pk}/finance/refresh/"
+    assert client_for(other).post(path, {}, format="json").status_code == 404
+    assert client_for(owner).post(path, {}, format="json").status_code == 409
+
+
 def test_naive_future_unsupported_and_unknown_inputs_are_rejected(
     actors,
     connection,

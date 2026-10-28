@@ -225,3 +225,53 @@ test('partial cached range is displayed and triggers background collection', asy
   assert.equal(c.snapshot().dashboard.coverage.partial, true)
   assert.equal(c.snapshot().windowMissing, true)
 })
+
+test('custom dates survive reload for the same user but not another user', async () => {
+  const values = new Map()
+  const dateStorage = {
+    getItem: key => values.get(key) || null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: key => values.delete(key)
+  }
+  const requested = []
+  const api = {
+    connections: async () => response({ results: [native], next: null }),
+    dashboard: async (_id, _version, requestedWindow) => {
+      requested.push(requestedWindow)
+      return response({ state: 'ready', dataVersion: 'cached', summary: {},
+        window: requestedWindow, provenance: { kind: 'native_snapshot' } })
+    }
+  }
+  const create = () => createAgioneController(api, () => {}, { now, localNative: true, dateStorage })
+  const first = create()
+  first.reset('user:1')
+  await first.load()
+  first.setWindow('2026-10-01', '2026-10-07')
+  const reloaded = create()
+  reloaded.reset('user:1')
+  await reloaded.load()
+  assert.equal(reloaded.snapshot().startDate, '2026-10-01')
+  assert.equal(requested.at(-1).start, '2026-10-01T00:00:00+08:00')
+  await reloaded.load()
+  assert.equal(reloaded.snapshot().startDate, '2026-10-01')
+  const other = create()
+  other.reset('user:2')
+  assert.notEqual(other.snapshot().startDate, '2026-10-01')
+  reloaded.setWindow('2026-10-19', '2026-10-25')
+  assert.equal(values.size, 0)
+})
+
+test('a restored uncollected date resumes background collection', async () => {
+  const dateStorage = { getItem: () => JSON.stringify({ startDate: '2026-10-01', endDate: '2026-10-07' }), setItem() {}, removeItem() {} }
+  let submitted
+  const api = {
+    connections: async () => response({ results: [native], next: null }),
+    dashboard: async () => response({ state: 'not_collected' }),
+    submitSync: async (_id, range) => { submitted = range; return response({ runId: 'run', status: 'failed' }) }
+  }
+  const c = createAgioneController(api, () => {}, { now, localNative: true, dateStorage })
+  c.reset('user:1')
+  await c.load()
+  assert.equal(submitted.start, '2026-10-01T00:00:00+08:00')
+  assert.equal(c.snapshot().startDate, '2026-10-01')
+})

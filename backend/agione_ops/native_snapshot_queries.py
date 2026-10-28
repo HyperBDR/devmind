@@ -12,7 +12,7 @@ from django.db.models import Q
 from rest_framework.exceptions import APIException
 
 from agione_ops.client import AgioneOpsError
-from agione_ops.models import ConnectionGrant
+from agione_ops.models import ConnectionGrant, DatasetVersion
 from agione_ops.native_analytics import LiveAnalytics, entity, parse_time, summary
 from agione_ops.native_finance import finance_for_window, unavailable_finance
 from agione_ops.native_sync import validate_snapshot_data
@@ -41,20 +41,25 @@ def _authorized(connection, user):
 
 
 
-def _composite_parts(connection, row, start, end):
+def _composite_parts(connection, row, start, end, include_newer=False):
     """Choose immutable complete snapshots, with one source per time slice."""
-    candidates = list(NativePublishedSnapshot.objects.filter(
+    candidates = NativePublishedSnapshot.objects.filter(
         version__connection=connection,
         version__run__status="succeeded",
         version__run__config_version=connection.config_version,
         version__run__credential_version=connection.credential_version,
         version__window_start__lt=end,
         version__window_end__gt=start,
-    ).filter(
-        Q(version__published_at__lt=row["version__published_at"])
-        | Q(version__published_at=row["version__published_at"],
-            version_id__lte=row["version_id"])
-    ).order_by("-version__published_at", "-version_id").values(
+    )
+    if not include_newer:
+        candidates = candidates.filter(
+            Q(version__published_at__lt=row["version__published_at"])
+            | Q(version__published_at=row["version__published_at"],
+                version_id__lte=row["version_id"])
+        )
+    candidates = list(candidates.order_by(
+        "-version__published_at", "-version_id",
+    ).values(
         "version_id", "content_digest", "version__window_start",
         "version__window_end", "version__coverage",
     ))
@@ -128,6 +133,8 @@ def validate_native_snapshot(connection, user, query, expected=None):
                 "publishedAt": row["version__published_at"].isoformat(),
             })
     elif selected is not None:
+        if DatasetVersion.objects.filter(pk=selected, connection=current).exists():
+            _fail("DATA_VERSION_EXPIRED")
         _fail("DATA_VERSION_NOT_FOUND", 404)
     if signature["state"] == "ready" and query.get("window"):
         raw = query["window"]
@@ -170,6 +177,12 @@ def validate_native_snapshot(connection, user, query, expected=None):
             if previous:
                 signature["previousVersion"] = str(previous["version_id"])
                 signature["previousDigest"] = previous["content_digest"]
+            else:
+                parts = _composite_parts(
+                    current, row, prior_start, start, include_newer=True,
+                )
+                if parts and all(part["version"] for part in parts):
+                    signature["previousParts"] = parts
     if expected is not None and signature != expected:
         _fail("SNAPSHOT_CHANGED")
     return signature
@@ -370,7 +383,35 @@ def query_native_snapshot(connection, user, query):
                     "SNAPSHOT_CONTENT_INVALID", status_code=409,
                 ) from error
         previous = None
-        if prior_snapshot and prior_snapshot.version.coverage.get(
+        if signature.get("previousParts"):
+            prior_rows_by_id = {}
+            sources = {}
+            for part in signature["previousParts"]:
+                if part["version"] not in sources:
+                    source = NativePublishedSnapshot.objects.select_related(
+                        "version",
+                    ).get(version_id=part["version"])
+                    try:
+                        validate_snapshot_data(source.data, part["digest"])
+                    except (ValueError, APIException, ValidationError) as error:
+                        raise AgioneOpsError(
+                            "SNAPSHOT_CONTENT_INVALID", status_code=409,
+                        ) from error
+                    if set(source.data["customers"]) != set(snapshot.data["customers"]):
+                        _fail("SNAPSHOT_DIRECTORY_CHANGED")
+                    sources[part["version"]] = source
+                for item in sources[part["version"]].data["rows"]:
+                    at = parse_time(item["occurred_at"])
+                    if parse_time(part["start"]) <= at < parse_time(part["end"]):
+                        old = prior_rows_by_id.get(item["record_id"])
+                        if old is not None and old != item:
+                            _fail("SOURCE_DUPLICATE_PAGE")
+                        prior_rows_by_id[item["record_id"]] = item
+            previous = LiveAnalytics(
+                snapshot.data["customers"], snapshot.data["models"],
+                list(prior_rows_by_id.values()), prior_start, start, query,
+            )
+        elif prior_snapshot and prior_snapshot.version.coverage.get(
             "pagingComplete"
         ) and not prior_snapshot.version.coverage.get("partial"):
             prior_rows = [row for row in prior_snapshot.data["rows"] if (
@@ -413,7 +454,8 @@ def query_native_snapshot(connection, user, query):
         customer_finance = finance.get("customerFinance", {}).get(cid)
         if customer_finance is None:
             data["value"]["finance"] = unavailable_finance(
-                "NATIVE_FINANCE_NOT_COLLECTED",
+                "NATIVE_FINANCE_NOT_COLLECTED" if not finance.get("available")
+                else "CUSTOMER_FINANCE_NOT_AVAILABLE",
             )
         else:
             fetched_at = finance.get("fetchedAt")
@@ -429,6 +471,11 @@ def query_native_snapshot(connection, user, query):
                         },
                         "overview": {
                             "state": "FRESH", "read_at": fetched_at,
+                        },
+                        "recharge": {
+                            "state": "ERROR" if customer_finance.get("rechargeError") else "FRESH",
+                            "read_at": fetched_at,
+                            "error": {"code": customer_finance.get("rechargeError")},
                         },
                     },
                 },

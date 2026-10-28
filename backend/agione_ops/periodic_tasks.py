@@ -19,3 +19,9 @@ def register_periodic_tasks():
         schedule=crontab(hour=2, minute=20),
         enabled=True,
     )
+    TASK_REGISTRY.add(
+        name='agione_snapshot_cleanup',
+        task='agione_ops.tasks.cleanup_native_snapshots',
+        schedule=crontab(hour=2, minute=40),
+        enabled=True,
+    )

@@ -50,6 +50,39 @@ def submit_recent_sync(connection, user, end):
     )
 
 
+def start_initial_native_sync(connection, user):
+    """Start the first authorized collection without blocking provisioning."""
+    import logging
+    from zoneinfo import ZoneInfo
+
+    from django.conf import settings
+    from django.utils import timezone
+    from rest_framework.exceptions import APIException
+
+    from agione_ops.models import ConnectionGrant
+    from agione_ops.native_sync_models import NativePublishedSnapshot
+    from agione_ops.permissions import has_action
+
+    if not (getattr(settings, 'AGIONE_OPS_NATIVE_ENABLED', False)
+            and connection.enabled and connection.source_kind == 'native'
+            and has_action(user, 'view_business') and has_action(user, 'run_sync')
+            and ConnectionGrant.objects.filter(connection=connection, user=user,
+                                                can_view=True, can_sync=True).exists()
+            and not NativePublishedSnapshot.objects.filter(
+                version__connection=connection).exists()):
+        return
+    end = timezone.now().astimezone(ZoneInfo('Asia/Shanghai')).replace(
+        hour=0, minute=0, second=0, microsecond=0,
+    )
+    try:
+        submit_recent_sync(connection, user, end)
+    except APIException as error:
+        logging.getLogger(__name__).info(
+            'AGIOne initial collection skipped: %s',
+            getattr(error, 'code', 'unavailable'),
+        )
+
+
 @shared_task(name='agione_ops.tasks.prefetch_recent_native_data')
 def prefetch_recent_native_data():
     """Use an active authorized grant; busy or unconfigured sources are skipped."""
@@ -119,3 +152,46 @@ def cleanup_native_staging():
             return total
         count, _ = NativeStagedRecord.objects.filter(pk__in=ids).delete()
         total += count
+
+
+@shared_task(name='agione_ops.tasks.cleanup_native_snapshots')
+def cleanup_native_snapshots():
+    """Delete expired snapshot payloads while preserving live read leases."""
+    from datetime import timedelta
+
+    from django.conf import settings
+    from django.db import connection, models, transaction
+    from django.db.models import OuterRef, Q, Subquery
+    from django.utils import timezone
+
+    from agione_ops.native_sync_models import NativePublishedSnapshot
+
+    days = getattr(settings, 'AGIONE_OPS_SNAPSHOT_RETENTION_DAYS', 90)
+    if type(days) is not int or days < 30:
+        days = 90
+    now = timezone.now()
+    latest = NativePublishedSnapshot.objects.filter(
+        version__connection_id=OuterRef('version__connection_id'),
+    ).order_by('-version__published_at', '-version_id').values('version_id')[:1]
+    candidates = NativePublishedSnapshot.objects.filter(
+        Q(version__native_lease__expires_at__isnull=True)
+        | Q(version__native_lease__expires_at__lte=now),
+        version__published_at__lt=now - timedelta(days=days),
+    ).exclude(version_id=Subquery(latest)).order_by('version__published_at')
+    ids = list(candidates.values_list('version_id', flat=True)[:200])
+    removed = 0
+    for version_id in ids:
+        with transaction.atomic():
+            lock_options = {}
+            if connection.features.has_select_for_update_skip_locked:
+                lock_options['skip_locked'] = True
+            snapshot = NativePublishedSnapshot.objects.select_for_update(
+                **lock_options,
+            ).filter(pk=version_id).first()
+            if snapshot is None or not candidates.filter(pk=version_id).exists():
+                continue
+            count, _ = models.QuerySet(
+                model=NativePublishedSnapshot, using=connection.alias,
+            ).filter(pk=version_id).delete()
+            removed += count
+    return removed

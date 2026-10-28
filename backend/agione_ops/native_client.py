@@ -27,6 +27,7 @@ READ_PATHS = re.compile(
     r"op-customer-overviews)"
     r"|/xapi/observability/(?:call-logs|models/options|inventory/users)"
     r"|/financial/api/finance/v1/provider/revenue/overview"
+    r"|/financial/account/recharge/pageQuery"
     r"|/financial/api/finance/v1/admin/customers/[0-9]{1,40}/"
     r"(?:accounts|overview))$"
 )

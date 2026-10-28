@@ -1,13 +1,16 @@
 """DevMind-owned live operations; no Demo transport or dataset persistence."""
 
 import math
+import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.utils import timezone
 
+from agione_ops.client import AgioneOpsError
 from agione_ops.native_analytics import (
     LiveAnalytics,
     business_text,
@@ -20,6 +23,7 @@ from agione_ops.native_analytics import (
 from agione_ops.native_client import NativeClient
 from agione_ops.native_finance import (
     aggregate_finance,
+    read_recharge,
     unavailable_finance,
 )
 from agione_ops.permissions import connections_for, get_connection_for
@@ -335,6 +339,10 @@ def _finance(source, user, factory, payload, fetched_at, customer=None):
             selected_customers = sorted(directory)[offset : offset + limit]
         finance_client = operator.client
         finance_client.io_guard = finance_guard
+        month = timezone.now().astimezone(ZoneInfo("Asia/Shanghai")).date()
+        previous_month = (month.replace(day=1) - timedelta(days=1)).strftime(
+            "%Y-%m"
+        )
 
         def read_customer(cid):
             """Read one customer through the shared task-owned client."""
@@ -344,24 +352,72 @@ def _finance(source, user, factory, payload, fetched_at, customer=None):
             overview = finance_client.get(
                 path + "/overview", {"range": "thisMonth"}
             )
+            try:
+                previous = finance_client.get(
+                    path + "/overview", {"range": "lastMonth"}
+                )
+            except AgioneOpsError as exc:
+                if exc.code not in {
+                    "SOURCE_TIMEOUT", "SOURCE_RATE_LIMITED",
+                    "SOURCE_UNAVAILABLE", "SOURCE_UNREACHABLE",
+                    "SOURCE_REJECTED",
+                }:
+                    raise
+                previous = None
+            try:
+                recharge = read_recharge(finance_client, cid)
+                recharge_error = None
+            except AgioneOpsError as exc:
+                recharge = None
+                recharge_error = exc.code if re.fullmatch(
+                    r"[A-Z_0-9]{1,80}", str(exc.code)
+                ) else "SOURCE_UNAVAILABLE"
             finance_guard()
-            return cid, accounts, overview
+            return cid, accounts, overview, previous, recharge, recharge_error
 
         workers = min(5, len(selected_customers))
         if workers:
             with ThreadPoolExecutor(max_workers=workers) as executor:
-                records = list(executor.map(read_customer, selected_customers))
+                readings = list(executor.map(read_customer, selected_customers))
         else:
-            records = []
+            readings = []
+        if timezone.now().astimezone(ZoneInfo("Asia/Shanghai")).strftime(
+            "%Y-%m"
+        ) != month.strftime("%Y-%m"):
+            fail("SOURCE_REJECTED", 409)
+        records = [(cid, accounts, overview)
+                   for cid, accounts, overview, _, _, _ in readings]
         result = aggregate_finance(
             records,
             total,
-            timezone.now()
-            .astimezone(ZoneInfo("Asia/Shanghai"))
-            .strftime("%Y-%m"),
+            month.strftime("%Y-%m"),
             fetched_at,
             offset,
         )
+        if all(isinstance(previous, dict) for _, _, _, previous, _, _ in readings):
+            historical = aggregate_finance(
+                [(cid, [], {
+                    **{key: previous[key] for key in (
+                        "tenantId", "cusTenantId", "customerTenantId"
+                    ) if key in previous},
+                    "currentCycle": previous_month,
+                    "trend": previous.get("trend"),
+                }) for cid, _, _, previous, _, _ in readings],
+                total, previous_month, fetched_at, offset,
+            )
+            result["trend"] = historical["trend"] + result["trend"]
+            if result["trend"]:
+                result["trendCustomers"] = total
+                result["trendTotal"] = str(sum(
+                    (Decimal(row["value"]) for row in result["trend"]),
+                    Decimal(),
+                ))
+                result["trendReason"] = ""
+        for cid, _, _, _, recharge, recharge_error in readings:
+            customer_data = result["customerFinance"].get(cid)
+            if customer_data is not None:
+                customer_data["recharge"] = recharge
+                customer_data["rechargeError"] = recharge_error
         finance_guard()
         return result
     finally:
@@ -429,7 +485,15 @@ def collect_native_finance(
 
 def query_live_operation(connection, user, query, *, client_factory=None):
     """Compatibility endpoint: local publication only, never source IO."""
-    return query_native_snapshot(connection, user, query)
+    from agione_ops.native_snapshot_queries import validate_native_snapshot
+    from agione_ops.snapshot_queries import query_operation
+
+    signature = validate_native_snapshot(connection, user, query)
+    if signature["state"] != "ready":
+        return query_native_snapshot(connection, user, query)
+    pinned = {**query, "data_version": signature["dataVersion"]}
+    pinned.pop("dataVersion", None)
+    return query_operation(connection, user, pinned)
 
 
 def _legacy_live_operation(

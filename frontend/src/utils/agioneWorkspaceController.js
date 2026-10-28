@@ -66,6 +66,34 @@ export function viewFromHash(hash = '') {
   return VIEWS.has(view) ? view : 'focus'
 }
 
+export async function requestPreviousComparison(workspace, controller) {
+  const before = workspace.snapshot()
+  const selection = controller.snapshot()
+  const context = JSON.stringify([
+    before.view, before.connectionId, before.filters, before.customerIds,
+    selection.startDate, selection.endDate
+  ])
+  const unchanged = () => {
+    const view = workspace.snapshot()
+    const current = controller.snapshot()
+    return JSON.stringify([
+      view.view, view.connectionId, view.filters, view.customerIds,
+      current.startDate, current.endDate
+    ]) === context
+  }
+  if (before.view !== 'focus' || selection.syncing) return
+  await controller.refresh()
+  if (!unchanged() || controller.snapshot().error ||
+      controller.snapshot().syncing) return
+  if (controller.snapshot().windowMissing) return 'current_required'
+  await workspace.reload()
+  const after = workspace.snapshot()
+  if (!unchanged() || after.error || controller.snapshot().syncing) return
+  if (after.coverage?.partial) return 'current_required'
+  if (after.dashboard?.comparison?.state !== 'READY')
+    await controller.syncPrevious()
+}
+
 export function createAgioneWorkspaceController(api, onChange = () => {}) {
   let state = empty(),
     session = '',
@@ -451,6 +479,19 @@ export function createAgioneWorkspaceController(api, onChange = () => {}) {
       }
     }
   }
+  async function refreshFinance() {
+    const generation = epoch, seq = request
+    publish({ financeRefreshError: '', finance: { ...state.finance, refreshState: 'queued' } })
+    try {
+      await api.refreshFinance(state.connectionId)
+      if (valid(generation, seq)) await loadFinance(generation, seq)
+    } catch (error) {
+      if (valid(generation, seq)) publish({
+        financeRefreshError: failure(error),
+        finance: { ...state.finance, refreshState: 'failed' }
+      })
+    }
+  }
   function scheduleFinance(finance, generation, seq, key) {
     clearTimeout(financeTimer)
     financeTimer = null
@@ -790,6 +831,7 @@ export function createAgioneWorkspaceController(api, onChange = () => {}) {
     setFilters,
     setWindow,
     selectCustomer,
+    refreshFinance,
     queryDirectory,
     openRequests,
     openGroupDrawer,

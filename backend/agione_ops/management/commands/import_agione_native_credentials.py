@@ -35,6 +35,7 @@ class Command(BaseCommand):
                 pk=options["user_id"], is_active=True,
             )
             identities = set()
+            connections = []
             with transaction.atomic():
                 for row in rows:
                     if not isinstance(row, dict) or set(row) != {
@@ -68,6 +69,7 @@ class Command(BaseCommand):
                     client = NativeClient(connection)
                     client.close()
                     connection.save()
+                    connections.append(connection)
                     grant, _ = ConnectionGrant.objects.get_or_create(
                         connection=connection, user=user,
                     )
@@ -91,6 +93,11 @@ class Command(BaseCommand):
             raise CommandError(
                 "Native credential import failed; no secret details emitted."
             ) from None
+        if options["allow_sync"]:
+            from agione_ops.tasks import start_initial_native_sync
+
+            for connection in connections:
+                start_initial_native_sync(connection, user)
         self.stdout.write(
             f"Imported {len(rows)} encrypted native connections; "
             "grants apply only to the requested user."

@@ -70,11 +70,16 @@ python manage.py import_agione_native_credentials --user-id <用户ID> --allow-s
 
 确认 API、Celery worker、Redis 和数据库均正常，且 worker 注册了
 `agione_ops.tasks.run_sync` 与 `agione_ops.tasks.refresh_native_finance`。
-使用已授权账号打开 `/agione`，手动点击“刷新数据”。生产数据库不会
-自动包含本机快照；调用数据发布后，财务在后台独立采集。核验三个页面的
+首次导入并授予采集权限或验证连接时，如果当前账号有查看和采集权限且
+尚无快照，会自动提交最近 7 天采集；也可手动点击“刷新数据”。生产数据库
+不会自动包含本机快照；调用数据发布后，财务在后台独立采集。核验三个页面的
 日期范围、客户范围、财务覆盖与采集时间；没有 Operator 授权时财务显示
 不可用，不补零。首次采集或选中未采集的日期可能耗时，后续已采集范围
 内查询使用本地数据。
+
+财务采集默认读取本月和上月的日数据；账期摘要分别显示入账与消耗的
+实际覆盖日期，不完整的日期不会按零计算。更早日期能否获取取决于上游
+接口，目前不在默认采集范围内。
 
 回退财务同步模式时可设置 `AGIONE_OPS_FINANCE_REFRESH_ON_SYNC=true`，
 并重启 API 与 worker；此模式下调用快照需要等待财务采集完成。
@@ -85,4 +90,4 @@ python manage.py import_agione_native_credentials --user-id <用户ID> --allow-s
 - 默认同时采集 2 个日期（`AGIONE_OPS_NATIVE_SHARD_CONCURRENCY`，范围 1–3）；每个任务默认最多运行 120 秒（`AGIONE_OPS_NATIVE_MAX_SECONDS`，范围 30–1800）。已完成的暂存分片可在 24 小时内续用。
 - 定时任务 `agione_recent_data_prefetch` 每天北京时间 01:20 使用具有查看、采集权限的有效授权预采最近 7 个完整自然日。若没有符合条件的授权或连接正忙则跳过；调度配置在 Celery Beat 中管理。
 - `agione_staging_cleanup` 每天北京时间 02:20 清理已成功发布或已终止、保留超过 30 天的临时采集记录；`AGIONE_OPS_STAGING_RETENTION_DAYS` 可调整，最少 7 天。已发布快照和未完成任务的数据不在此清理范围。
-- 已发布快照目前受不可删除约束保护，不会自动按期限删除。其容量仍会增长；正式快照的保留期限和安全删除流程需要单独设计并验证。
+- `agione_snapshot_cleanup` 每天北京时间 02:40 清理超过 90 天（按发布时间）的正式快照内容，保留版本及任务记录；`AGIONE_OPS_SNAPSHOT_RETENTION_DAYS` 可调整，最少 30 天。每个连接保留最新快照，查询使用的各快照在最近一次访问后保护 24 小时；过期历史数据需要重新采集。

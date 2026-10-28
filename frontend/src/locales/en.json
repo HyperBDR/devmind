@@ -6623,6 +6623,7 @@
       "conflict": "A collection task is already running or the configuration changed. The previous usable data remains visible; retry after the task completes.",
       "networkError": "Unable to fetch data. Try again. If the problem persists, contact your administrator.",
       "invalidWindow": "Choose a date range of up to 31 complete days, excluding today.",
+      "snapshotExpired": "This historical snapshot has expired. Reload the selected dates to collect any missing data.",
       "syncDeadline": "Collection reached its time limit. Completed data was retained; refresh to continue.",
       "syncFailed": "This synchronization did not publish a version. The previous successful version is unchanged.",
       "pollTimeout": "Automatic status checks stopped; the backend task may still be running. You can resume checking."

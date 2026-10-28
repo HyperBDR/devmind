@@ -19,6 +19,9 @@ export const agioneOpsApi = {
   verifyConnection(id) {
     return apiClient.post(`${connectionPath(id)}/verify/`, {})
   },
+  refreshFinance(id) {
+    return apiClient.post(`${connectionPath(id)}/finance/refresh/`, {})
+  },
   liveQuery(id, body, config = {}) {
     return apiClient.post(`${connectionPath(id)}/live/query/`, body, config)
   },

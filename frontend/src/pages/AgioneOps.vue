@@ -505,8 +505,8 @@
               </button>
             </div>
             <div v-if="readOnly && work.error" class="callout" role="alert">
-              <p>{{ t('agione.errors.networkError') }}</p>
-              <button @click="workspace.load()">{{ t('agione.retryPage') }}</button>
+              <p>{{ t(work.error.includes('(DATA_VERSION_EXPIRED)') ? 'agione.errors.snapshotExpired' : 'agione.errors.networkError') }}</p>
+              <button @click="work.error.includes('(DATA_VERSION_EXPIRED)') ? controller.loadWindow(state.startDate, state.endDate) : workspace.load()">{{ t('agione.retryPage') }}</button>
             </div>
             <div v-if="readOnly && work.loading" class="loading" role="status">
               {{ t('agione.workspaceLoading') }}
@@ -539,6 +539,8 @@
                 !work.error
               "
               :state="work"
+              :finance-refresh-disabled="refreshDisabled || state.sourceKind !== 'native'"
+              @refresh-finance="workspace.refreshFinance"
               @change="workspace.configure"
               @select="workspace.selectCustomer"
               @clear="clearScope"
@@ -549,7 +551,7 @@
                   workspace.openGroupDrawer(item.row, item.customerId, item.origin)
               "
             />
-            <FocusWorkspace v-if="readOnly && work.view === 'focus' && !work.loading && !work.error && work.dashboard" :state="work" :previous-loading="state.previousLoading" @customer="openWorkspaceCustomer" @requests="id=>workspace.openRequests({},1,id)" @analyze-model="analyzeModel" @clear="clearScope" @diagnosis="diagnosis=$event" @view="navigateWorkspace" @previous="controller.syncPrevious()" />
+            <FocusWorkspace v-if="readOnly && work.view === 'focus' && !work.loading && !work.error && work.dashboard" :state="work" :previous-loading="state.previousLoading || previousChecking || previousAfterCurrent" @customer="openWorkspaceCustomer" @requests="id=>workspace.openRequests({},1,id)" @analyze-model="analyzeModel" @clear="clearScope" @diagnosis="diagnosis=$event" @view="navigateWorkspace" @previous="retryPreviousComparison" />
             </div>
             <template
               v-if="
@@ -1159,6 +1161,7 @@ import {
 } from '@/components/agione-demo/core.mjs'
 import {
   createAgioneWorkspaceController,
+  requestPreviousComparison,
   viewFromHash
 } from '@/utils/agioneWorkspaceController'
 import AnalysisWorkspace from '@/components/agione-demo/AnalysisWorkspace.vue'
@@ -1174,9 +1177,11 @@ import '@/components/agione-demo/english-typography.css'
 
 const { t: translate, locale } = useI18n({ useScope: 'global' })
 const userStore = useUserStore()
+let dateStorage
+try { dateStorage = window.sessionStorage } catch (_) {}
 const controller = createAgioneController(agioneOpsApi, (next) => {
   state.value = next
-}, { nativeOnly: true, localNative: true })
+}, { nativeOnly: true, localNative: true, dateStorage })
 const state = ref(controller.snapshot())
 const liveKeys = new Set([
   'cachedRange', 'originalAsOf', 'realSnapshotNotice', 'realSnapshotShort',
@@ -1368,9 +1373,31 @@ const menuPosition = ref({})
 const dateDialog = ref(null)
 const dateError = ref(false)
 const pendingRange = ref(null)
+const previousChecking = ref(false)
+const previousAfterCurrent = ref(false)
+async function retryPreviousComparison() {
+  if (previousChecking.value || state.value.previousLoading) return
+  previousChecking.value = true
+  try {
+    const result = await requestPreviousComparison(workspace, controller)
+    if (result === 'current_required') {
+      previousAfterCurrent.value = true
+      await controller.sync()
+      if (state.value.error) previousAfterCurrent.value = false
+    }
+  } finally {
+    previousChecking.value = false
+  }
+}
 watch(() => state.value.syncing, (syncing, before) => {
   if (before && !syncing && !state.value.previousLoading && !state.value.error && work.value.connectionId)
     void workspace.load()
+})
+watch(() => [state.value.syncing, state.value.loading], ([syncing, loading]) => {
+  if (!previousAfterCurrent.value || syncing || loading) return
+  previousAfterCurrent.value = false
+  if (!state.value.error && !state.value.windowMissing)
+    void retryPreviousComparison()
 })
 watch(() => state.value.previousLoading, (loading, before) => {
   if (before && !loading && !state.value.error && work.value.connectionId)

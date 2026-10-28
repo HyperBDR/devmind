@@ -960,3 +960,30 @@ test('waits for a covering frame when a larger window is selected', async () => 
   await c.attach({ ...frame, window: wider }, 'a', wider)
   assert.deepEqual(c.snapshot().window, wider)
 })
+
+test('previous comparison checks local data before requesting collection', async () => {
+  const { requestPreviousComparison } = await import('../src/utils/agioneWorkspaceController.js')
+  let comparison = 'UNAVAILABLE'
+  let syncs = 0
+  const state = { view: 'focus', connectionId: 'a', dataVersion: 'v',
+    window: frame.window, filters: {}, customerIds: [] }
+  const workspace = {
+    snapshot: () => ({ ...state, dashboard: { comparison: { state: comparison } } }),
+    reload: async () => { comparison = 'READY' }
+  }
+  const controller = { snapshot: () => ({ syncing: false }), refresh: async () => {},
+    syncPrevious: async () => { syncs++ } }
+  await requestPreviousComparison(workspace, controller)
+  assert.equal(syncs, 0)
+  comparison = 'UNAVAILABLE'
+  workspace.reload = async () => {}
+  await requestPreviousComparison(workspace, controller)
+  assert.equal(syncs, 1)
+  state.coverage = { partial: true }
+  assert.equal(await requestPreviousComparison(workspace, controller), 'current_required')
+  assert.equal(syncs, 1)
+  state.coverage = null
+  workspace.reload = async () => { state.filters = { statuses: ['SUCCESS'] } }
+  await requestPreviousComparison(workspace, controller)
+  assert.equal(syncs, 1)
+})

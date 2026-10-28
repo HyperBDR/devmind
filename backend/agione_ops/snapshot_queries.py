@@ -1,7 +1,10 @@
 """One authenticated entry point for local immutable query projections."""
 
+from datetime import timedelta
 from uuid import UUID
 
+from django.db import connection as db_connection, transaction
+from django.utils import timezone
 from rest_framework.exceptions import NotFound
 
 from agione_ops.client import AgioneOpsError
@@ -23,7 +26,51 @@ def query_operation(connection, user, query):
         validate = validate_native_snapshot
     else:
         raise AgioneOpsError("SOURCE_KIND_FORBIDDEN", status_code=403)
-    return cached_operation(connection, user, query, compute, validate)
+    with transaction.atomic():
+        signature = validate(connection, user, query)
+        versions = {signature.get("dataVersion"), signature.get("previousVersion")}
+        for key in ("parts", "previousParts"):
+            versions.update(part.get("version") for part in signature.get(key, []))
+        versions.discard(None)
+        if versions:
+            from agione_ops.native_sync_models import (
+                NativePublishedSnapshot, NativeSnapshotLease,
+            )
+
+            if db_connection.vendor == "postgresql":
+                table = db_connection.ops.quote_name(
+                    NativePublishedSnapshot._meta.db_table,
+                )
+                placeholders = ",".join(["%s"] * len(versions))
+                with db_connection.cursor() as cursor:
+                    cursor.execute(
+                        f"SELECT version_id FROM {table} "
+                        f"WHERE version_id IN ({placeholders}) FOR KEY SHARE",
+                        sorted(versions),
+                    )
+                    locked = {str(item[0]) for item in cursor.fetchall()}
+            else:
+                locked = {str(value) for value in
+                          NativePublishedSnapshot.objects.select_for_update()
+                          .filter(version_id__in=versions)
+                          .values_list("version_id", flat=True)}
+            if locked != versions:
+                raise AgioneOpsError("DATA_VERSION_EXPIRED", status_code=409)
+            current = timezone.now()
+            protected = {str(value) for value in NativeSnapshotLease.objects.filter(
+                version_id__in=versions,
+                expires_at__gt=current + timedelta(hours=12),
+            ).values_list("version_id", flat=True)}
+            NativeSnapshotLease.objects.bulk_create(
+                [NativeSnapshotLease(version_id=value,
+                                     expires_at=current + timedelta(days=1))
+                 for value in versions - protected],
+                update_conflicts=True, update_fields=["expires_at"],
+                unique_fields=["version"],
+            )
+            validate(connection, user, query, expected=signature)
+        return cached_operation(connection, user, query, compute, validate)
+
 
 
 def dashboard_frame(

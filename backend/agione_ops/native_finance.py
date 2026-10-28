@@ -2,8 +2,9 @@
 
 import re
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from zoneinfo import ZoneInfo
 
 from agione_ops.native_analytics import entity, fail
 
@@ -24,6 +25,98 @@ def amount(value):
         return None
     return value
 
+
+def read_recharge(client, customer):
+    """Summarize verified successful orders without retaining private fields."""
+    result = client.page(
+        "/financial/account/recharge/pageQuery",
+        {"tenantId": customer, "status": 3}, page_field="pageIndex",
+        size_field="pageSize", rows_field="data", key_field="orderNo",
+    )
+    totals = defaultdict(Decimal)
+    orders = []
+    for row in result["items"]:
+        value = amount(row.get("payAmt"))
+        currency = row.get("payCurrency")
+        if (entity(row.get("tenantId")) != customer or row.get("status") != 3
+                or value is None or value < 0
+                or not isinstance(currency, str)
+                or not re.fullmatch(r"[A-Za-z]{1,16}", currency)):
+            fail()
+        order_no = row.get("orderNo")
+        channel = row.get("payChannel")
+        paid_at = row.get("payTime")
+        if (not isinstance(order_no, str) or not 1 <= len(order_no) <= 100
+                or (channel is not None and (not isinstance(channel, str)
+                                              or len(channel) > 100))
+                or (paid_at is not None and (
+                    isinstance(paid_at, bool)
+                    or not isinstance(paid_at, (int, str))
+                    or len(str(paid_at)) > 40))):
+            fail()
+        currency = currency.upper()
+        totals[currency] += value
+        orders.append({"orderNo": order_no, "payAmt": str(value),
+                       "payCurrency": currency, "payChannel": channel,
+                       "payTime": paid_at})
+    def paid_time(row):
+        value = row["payTime"]
+        try:
+            if isinstance(value, int) or (isinstance(value, str) and value.isdigit()):
+                return int(value)
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return int(parsed.replace(tzinfo=parsed.tzinfo or ZoneInfo(
+                "Asia/Shanghai"
+            )).timestamp() * 1000)
+        except (TypeError, ValueError, OverflowError):
+            return -1
+
+    # shortcut: retain 5 orders per customer, add paged storage for full history.
+    orders.sort(key=paid_time, reverse=True)
+    return {"orders": orders[:5], "successfulCount": len(orders),
+            "paidTotals": [{"currency": key, "amount": str(value)}
+                           for key, value in sorted(totals.items())]}
+
+
+
+def balance_distribution(unit, balances):
+    """Classify each customer's aggregated available balance."""
+    values = list(balances)
+    return {
+        "unit": unit, "threshold": "40",
+        "healthyCustomers": sum(x >= 80 for x in values),
+        "normalCustomers": sum(40 <= x < 80 for x in values),
+        "lowCustomers": sum(0 < x < 40 for x in values),
+        "zeroCustomers": sum(x == 0 for x in values),
+        "negativeCustomers": sum(x < 0 for x in values),
+        "belowThresholdCustomers": sum(x < 40 for x in values),
+        "negativeTotal": str(-sum((x for x in values if x < 0), Decimal())),
+    }
+
+
+def current_balance_policy(finance):
+    """Reclassify existing snapshots only when customer data is complete."""
+    old = finance.get("balanceDistributions", [])
+    if not old or all(row.get("threshold") == "40" and
+                      "normalCustomers" in row for row in old):
+        return finance
+    balances = defaultdict(lambda: defaultdict(Decimal))
+    for cid, customer in finance.get("customerFinance", {}).items():
+        for account in customer.get("accounts", []):
+            value = amount(account.get("balance"))
+            unit = account.get("currency")
+            if value is not None and account.get("accountPurpose") == "USER_AVAILABLE":
+                balances[unit][cid] += value
+    result = []
+    for row in old:
+        unit = row.get("unit")
+        expected = sum(row.get(key, 0) for key in (
+            "healthyCustomers", "lowCustomers", "zeroCustomers", "negativeCustomers",
+        ))
+        if len(balances[unit]) != expected:
+            continue
+        result.append(balance_distribution(unit, balances[unit].values()))
+    return {**finance, "balanceDistributions": result}
 
 def aggregate_finance(records, total, month, fetched_at, offset=0):
     """Aggregate only customer-owned USER_AVAILABLE accounts and Credit."""
@@ -110,23 +203,10 @@ def aggregate_finance(records, total, month, fetched_at, offset=0):
                     if value > 0:
                         positive[period][key].add(cid)
                     covered.add(cid)
-    distributions = []
-    for unit, values in sorted(balances.items()):
-        values = list(values.values())
-        distributions.append(
-            {
-                "unit": unit,
-                "threshold": "100",
-                "healthyCustomers": sum(x >= 100 for x in values),
-                "lowCustomers": sum(0 < x < 100 for x in values),
-                "zeroCustomers": sum(x == 0 for x in values),
-                "negativeCustomers": sum(x < 0 for x in values),
-                "belowThresholdCustomers": sum(x < 100 for x in values),
-                "negativeTotal": str(
-                    -sum((x for x in values if x < 0), Decimal())
-                ),
-            }
-        )
+    distributions = [
+        balance_distribution(unit, values.values())
+        for unit, values in sorted(balances.items())
+    ]
     summaries = []
     for period, values in sorted(periods.items()):
         summaries.append(
@@ -231,6 +311,7 @@ def finance_for_window(finance, start, end):
     """Use daily consumption only when the entire selected range is covered."""
     from zoneinfo import ZoneInfo
 
+    finance = current_balance_policy(finance)
     zone = ZoneInfo("Asia/Shanghai")
     first = start.astimezone(zone).date()
     last = (end - timedelta(microseconds=1)).astimezone(zone).date()

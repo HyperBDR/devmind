@@ -138,7 +138,6 @@ def test_unknown_role_is_not_fabricated_as_verified():
         "/admin/user/info?token=private",
         "/admin/../user/info",
         "/financial/api/finance/v1/admin/account-transactions/1/context",
-        "/financial/account/recharge/pageQuery",
         "/auth/oauth2/token",
         "/financial/api/finance/v1/admin/customers/../accounts",
     ],

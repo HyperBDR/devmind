@@ -166,8 +166,21 @@ class NativePublishedSnapshot(ImmutableModel):
         return None
 
 
+class NativeSnapshotLease(models.Model):
+    """Protect recently accessed versions from retention cleanup."""
+
+    version = models.OneToOneField(
+        "agione_ops.DatasetVersion", primary_key=True,
+        on_delete=models.CASCADE, related_name="native_lease",
+    )
+    expires_at = models.DateTimeField(db_index=True)
+
+    class Meta:
+        db_table = "devmind_agione_native_snapshot_lease"
+
+
 # Imported at the bottom of models.py by the owning integration agent.
 MODEL_CLASSES = (
     NativeSyncState, NativeSyncShard, NativeStagedRecord,
-    NativePublishedSnapshot,
+    NativePublishedSnapshot, NativeSnapshotLease,
 )

@@ -174,6 +174,8 @@ def live(monkeypatch, settings):
                     }
                 ]
             if path.endswith("/overview"):
+                if params.get("range") == "lastMonth" and "previous" in state:
+                    return deepcopy(state["previous"])
                 return {
                     "tenantId": CID,
                     "currentCycle": "2026-10",
@@ -183,6 +185,10 @@ def live(monkeypatch, settings):
                     "cycleRoundOffCredit": None,
                 }
             raise AssertionError(path)
+
+        def page(self, path, params=None, **kwargs):
+            assert path == "/financial/account/recharge/pageQuery"
+            return {"items": deepcopy(state.get("recharges", []))}
 
         def close(self):
             self.closed = True
@@ -333,6 +339,24 @@ def test_finance_presents_new_fields_without_raw_accounts(live):
     assert "PRIVATE" not in json.dumps(result)
 
 
+def test_recharge_totals_require_customer_ownership(live):
+    live["recharges"] = [
+        {"orderNo": "1", "tenantId": CID, "status": 3,
+         "payAmt": "0", "payCurrency": "USD", "payChannel": "SystemGift",
+         "payTime": 1789703422000, "adminEmail": "PRIVATE"},
+        {"orderNo": "2", "tenantId": CID, "status": 3,
+         "payAmt": "12.50", "payCurrency": "USD", "payTime": 1789703423000},
+    ]
+    data = live["query"]("finance")["data"]["customerFinance"][CID]["recharge"]
+    assert data["successfulCount"] == 2
+    assert data["paidTotals"] == [{"currency": "USD", "amount": "12.50"}]
+    assert "PRIVATE" not in json.dumps(data)
+    live["recharges"][0]["tenantId"] = OTHER
+    customer = live["query"]("finance")["data"]["customerFinance"][CID]
+    assert customer["recharge"] is None
+    assert customer["rechargeError"] == "SOURCE_SHAPE_CHANGED"
+
+
 def test_finance_date_filter_uses_complete_daily_values_only():
     records = [
         ("100", [], {"currentCycle": "2026-10", "trend": [
@@ -357,6 +381,29 @@ def test_finance_date_filter_uses_complete_daily_values_only():
     assert missing["consumed"] is None
     records[1][2]["trend"].pop()
     assert aggregate_finance(records, 2, "2026-10", START)["trend"] == []
+
+
+def test_finance_reads_previous_month_using_trend_dates(live):
+    from datetime import timedelta
+
+    from django.utils import timezone
+    from zoneinfo import ZoneInfo
+
+    today = timezone.now().astimezone(ZoneInfo("Asia/Shanghai")).date()
+    previous = today.replace(day=1) - timedelta(days=1)
+    live["previous"] = {
+        "tenantId": CID,
+        "currentCycle": today.strftime("%Y-%m"),
+        "trend": [{"date": previous.isoformat(), "consumedCredit": "4.50",
+                   "topUpCredit": "10"}],
+    }
+    result = live["query"]("finance")["data"]
+    assert result["trend"] == [{"date": previous.isoformat(),
+                                "value": "4.50", "topUp": "10"}]
+    start = datetime.fromisoformat(f"{previous.isoformat()}T00:00:00+08:00")
+    selected = finance_for_window(result, start, start + timedelta(days=1))
+    assert selected["periodSummaries"][0]["consumed"] == "4.50"
+    assert selected["periodSummaries"][0]["topUp"] == "10"
 
 
 def test_finance_customer_ownership_is_verified(live):
@@ -506,3 +553,43 @@ def test_dashboard_observations_use_complete_scoped_windows():
     apply_dashboard_observations(data, filtered, None, {"pagingComplete": True})
     assert data["customers"][0]["inactivity"]["state"] == "FILTER_NOT_APPLICABLE"
     assert data["comparison"]["state"] == "UNAVAILABLE"
+
+
+def test_balance_tiers_use_40_and_80_boundaries():
+    from agione_ops.native_finance import aggregate_finance
+
+    values = ['-1', '0', '39.99', '40', '79.99', '80', '100']
+    records = [(str(200 + i), [{
+        'id': str(1000 + i), 'accountPurpose': 'USER_AVAILABLE',
+        'currency': 'Credit', 'balance': value,
+    }], {}) for i, value in enumerate(values)]
+    result = aggregate_finance(records, len(records), '2026-10', START)
+    tier = result['balanceDistributions'][0]
+    assert tier['threshold'] == '40'
+    assert tier['healthyCustomers'] == 2
+    assert tier['normalCustomers'] == 2
+    assert tier['lowCustomers'] == 1
+    assert tier['zeroCustomers'] == 1
+    assert tier['negativeCustomers'] == 1
+    assert tier['belowThresholdCustomers'] == 3
+
+
+def test_legacy_balance_snapshot_is_reclassified_only_with_complete_accounts():
+    from agione_ops.native_finance import current_balance_policy
+
+    old = {'balanceDistributions': [{
+        'unit': 'Credit', 'threshold': '100', 'healthyCustomers': 0,
+        'lowCustomers': 2, 'zeroCustomers': 0, 'negativeCustomers': 0,
+        'belowThresholdCustomers': 2, 'negativeTotal': '0',
+    }], 'customerFinance': {
+        '1': {'accounts': [{'accountPurpose': 'USER_AVAILABLE',
+                            'currency': 'Credit', 'balance': '40'}]},
+        '2': {'accounts': [{'accountPurpose': 'USER_AVAILABLE',
+                            'currency': 'Credit', 'balance': '80'}]},
+    }}
+    result = current_balance_policy(old)['balanceDistributions'][0]
+    assert result['threshold'] == '40'
+    assert result['normalCustomers'] == result['healthyCustomers'] == 1
+    assert old['balanceDistributions'][0]['threshold'] == '100'
+    old['customerFinance'].pop('2')
+    assert current_balance_policy(old)['balanceDistributions'] == []

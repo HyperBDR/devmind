@@ -605,6 +605,29 @@ def test_independent_finance_deduplicates_and_rejects_stale_task(
     source_read.assert_not_called()
 
 
+def test_finance_refresh_endpoint_uses_authorized_projection(native, settings):
+    from rest_framework.test import APIClient
+
+    settings.AGIONE_OPS_FINANCE_REFRESH_ON_SYNC = False
+    operator = SourceConnection.objects.create(
+        name="Operator", platform="pro", principal_kind="operator",
+        source_kind="native", endpoint="https://fake-native.example",
+        expected_tenant_id="101", enabled=True, created_by=native["user"],
+    )
+    ConnectionGrant.objects.create(
+        connection=operator, user=native["user"], can_view=True,
+    )
+    collect(native)
+    client = APIClient()
+    client.force_authenticate(native["user"])
+    response = client.post(
+        f'/api/v1/agione-ops/connections/{native["connection"].pk}/finance/refresh/',
+        {}, format="json",
+    )
+    assert response.status_code == 202
+    assert response.data["data"]["state"] == "queued"
+
+
 def test_finance_dispatch_waits_for_publication_commit(
     native, settings, monkeypatch, django_capture_on_commit_callbacks,
 ):
@@ -697,3 +720,79 @@ def test_cleanup_removes_only_old_successful_staging(native):
     assert not NativeStagedRecord.objects.filter(run=run).exists()
     snapshot.refresh_from_db()
     assert len(snapshot.data['rows']) == 2
+
+
+def test_dashboard_compares_previous_split_snapshots(native):
+    from agione_ops.snapshot_queries import query_operation
+
+    start = native['start']
+    _, current = collect(native)
+    for offset in (-2, -1):
+        row = deepcopy(native['rows'][0])
+        row['id'] = str(2000 - offset)
+        row['createTime'] = int((start + timedelta(days=offset, hours=1)).timestamp() * 1000)
+        native['rows'].append(row)
+        native['start'] = start + timedelta(days=offset)
+        native['end'] = native['start'] + timedelta(days=1)
+        _, prior = collect(native)
+        assert prior['status'] == 'succeeded'
+    result = query_operation(native['connection'], native['user'], {
+        'operation': 'dashboard', 'data_version': current['dataVersion'],
+        'payload': {},
+    })
+    assert result['data']['comparison']['state'] == 'READY'
+    assert result['data']['comparison']['summary']['requestCount'] == 2
+
+
+def test_retention_preserves_active_and_latest_snapshots(native):
+    from django.db import models
+    from agione_ops.models import DatasetVersion
+    from agione_ops.native_sync_models import NativeSnapshotLease
+    from agione_ops.snapshot_queries import query_operation
+    from agione_ops.tasks import cleanup_native_snapshots
+
+    _, first = collect(native)
+    _, second = collect(native)
+    old = first['dataVersion']
+    models.QuerySet(model=DatasetVersion).filter(pk=old).update(
+        published_at=timezone.now() - timedelta(days=91),
+    )
+    query = {'operation': 'dashboard', 'data_version': old, 'payload': {}}
+    query_operation(native['connection'], native['user'], query)
+    assert NativeSnapshotLease.objects.filter(version_id=old).exists()
+    assert cleanup_native_snapshots() == 0
+    NativeSnapshotLease.objects.filter(version_id=old).update(
+        expires_at=timezone.now() - timedelta(seconds=1),
+    )
+    assert cleanup_native_snapshots() == 1
+    assert DatasetVersion.objects.filter(pk=old).exists()
+    assert NativePublishedSnapshot.objects.filter(version_id=second['dataVersion']).exists()
+    with pytest.raises(AgioneOpsError, match='DATA_VERSION_EXPIRED'):
+        query_operation(native['connection'], native['user'], query)
+
+
+def test_comparison_cache_refreshes_after_prior_snapshot_expires(native):
+    from django.db import models
+    from agione_ops.models import DatasetVersion
+    from agione_ops.native_sync_models import NativeSnapshotLease
+    from agione_ops.snapshot_queries import query_operation
+    from agione_ops.tasks import cleanup_native_snapshots
+
+    start = native['start']
+    _, current = collect(native)
+    native['start'] = start - timedelta(days=2)
+    native['end'] = start
+    _, prior = collect(native)
+    models.QuerySet(model=DatasetVersion).filter(pk=prior['dataVersion']).update(
+        published_at=timezone.now() - timedelta(days=91),
+    )
+    query = {'operation': 'dashboard', 'data_version': current['dataVersion'],
+             'payload': {}}
+    before = query_operation(native['connection'], native['user'], query)
+    assert before['data']['comparison']['state'] == 'READY'
+    NativeSnapshotLease.objects.filter(version_id=prior['dataVersion']).update(
+        expires_at=timezone.now() - timedelta(seconds=1),
+    )
+    assert cleanup_native_snapshots() == 1
+    after = query_operation(native['connection'], native['user'], query)
+    assert after['data']['comparison']['state'] == 'UNAVAILABLE'

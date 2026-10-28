@@ -48,7 +48,8 @@ test('workspace starts with controls without a repeated page heading', () => {
 test('AGIOne follows the portal language while preserving Chinese copy', () => {
   assert.match(page, /useScope: 'global'/)
   assert.doesNotMatch(page, /inheritLocale: false|locale: 'zh-CN'/)
-  assert.doesNotMatch(page, /localStorage|sessionStorage|document\.body/)
+  assert.doesNotMatch(page, /localStorage|document\.body/)
+  assert.match(page, /dateStorage = window\.sessionStorage/)
   const messages = JSON.parse(read('../src/locales/zh-CN.json')).agione
   assert.equal(messages.demoNavLabel, '以问题组织经营工作')
   assert.equal(messages.demoDashboard, '经营看板')

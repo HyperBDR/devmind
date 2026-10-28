@@ -98,7 +98,7 @@ def validate_snapshot_data(data, content_digest):
             }.issubset(finance)
             or finance["mode"] != "snapshot"
             or not isinstance(finance["trend"], list)
-            or len(finance["trend"]) > 31
+            or len(finance["trend"]) > 62
             or len(json.dumps(finance, ensure_ascii=True)) > 262144
         ):
             invalid()
@@ -132,7 +132,12 @@ def validate_snapshot_data(data, content_digest):
         )
         for field, keys in shapes:
             if not isinstance(finance[field], list) or any(
-                not isinstance(row, dict) or set(row) != keys
+                not isinstance(row, dict) or (
+                    set(row) != keys and not (
+                        field == "balanceDistributions"
+                        and set(row) == keys | {"normalCustomers"}
+                    )
+                )
                 for row in finance[field]
             ):
                 invalid()
@@ -141,10 +146,48 @@ def validate_snapshot_data(data, content_digest):
             invalid()
         for customer_id, value in customer_finance.items():
             entity(customer_id)
-            if not isinstance(value, dict) or set(value) != {
-                "accounts", "overview",
-            }:
+            if not isinstance(value, dict) or set(value) not in (
+                {"accounts", "overview"},
+                {"accounts", "overview", "recharge", "rechargeError"},
+            ):
                 invalid()
+            recharge = value.get("recharge")
+            error = value.get("rechargeError")
+            if error is not None and (not isinstance(error, str) or not
+                                      re.fullmatch(r"[A-Z_0-9]{1,80}", error)):
+                invalid()
+            if recharge is not None:
+                if (not isinstance(recharge, dict) or set(recharge) != {
+                    "orders", "successfulCount", "paidTotals",
+                } or type(recharge["successfulCount"]) is not int
+                    or recharge["successfulCount"] < 0
+                    or not isinstance(recharge["orders"], list)
+                    or len(recharge["orders"]) > min(5, recharge["successfulCount"])
+                    or not isinstance(recharge["paidTotals"], list)
+                    or len(recharge["paidTotals"]) > 100):
+                    invalid()
+                for row in recharge["paidTotals"]:
+                    if (not isinstance(row, dict) or set(row) != {"currency", "amount"}
+                        or not isinstance(row["currency"], str)
+                        or not re.fullmatch(r"[A-Z]{1,16}", row["currency"])
+                        or amount(row["amount"]) is None or amount(row["amount"]) < 0):
+                        invalid()
+                for row in recharge["orders"]:
+                    if (not isinstance(row, dict) or set(row) != {
+                        "orderNo", "payAmt", "payCurrency", "payChannel", "payTime",
+                    } or not isinstance(row["orderNo"], str)
+                        or not 1 <= len(row["orderNo"]) <= 100
+                        or not isinstance(row["payCurrency"], str)
+                        or not re.fullmatch(r"[A-Z]{1,16}", row["payCurrency"])
+                        or amount(row["payAmt"]) is None or amount(row["payAmt"]) < 0
+                        or (row["payChannel"] is not None and (
+                            not isinstance(row["payChannel"], str)
+                            or len(row["payChannel"]) > 100))
+                        or (row["payTime"] is not None and (
+                            isinstance(row["payTime"], bool)
+                            or not isinstance(row["payTime"], (int, str))
+                            or len(str(row["payTime"])) > 40))):
+                        invalid()
             if not isinstance(value["accounts"], list) or any(
                 not isinstance(account, dict)
                 or set(account) != {

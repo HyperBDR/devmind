@@ -141,6 +141,7 @@ function safeError(error) {
 export function createAgioneController(api, onChange = () => {}, options = {}) {
   const nativeOnly = options.nativeOnly !== false
   const localNative = options.localNative === true
+  const dateStorage = options.dateStorage
   const now = options.now || (() => new Date())
   const schedule = options.schedule || ((fn, delay) => setTimeout(fn, delay))
   const cancel = options.cancel || clearTimeout
@@ -154,6 +155,7 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
   let timer = null
   let disposed = false
   let previousRun = false
+  let restoredCustom = false
 
   function publish(patch) {
     state = { ...state, ...patch }
@@ -174,6 +176,19 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
     stopPolling()
     session = sessionKey
     state = initial(now())
+    restoredCustom = false
+    if (localNative && sessionKey && sessionKey !== 'user:pending') {
+      try {
+        const saved = JSON.parse(dateStorage?.getItem(`agione-dates:${sessionKey}`) || 'null')
+        if (saved) {
+          syncWindow(saved.startDate, saved.endDate, now())
+          state = { ...state, startDate: saved.startDate, endDate: saved.endDate }
+          restoredCustom = true
+        }
+      } catch (_) {
+        try { dateStorage?.removeItem(`agione-dates:${sessionKey}`) } catch (_) {}
+      }
+    }
     if (!disposed) onChange(state)
   }
 
@@ -313,12 +328,14 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
   async function load() {
     if (!session || disposed) return
     const version = ++revision
+    const loadSession = session
     queryRevision += 1
     stopPolling()
     publish({
       connections: [],
       connectionId: '',
-      ...(state.readOnly ? { startDate: '', endDate: '' } : {}),
+      ...(state.readOnly && !(localNative && state.sourceKind === 'native')
+        ? { startDate: '', endDate: '' } : {}),
       readOnly: false,
       dashboard: null,
       run: null,
@@ -357,6 +374,11 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
           errorCode: 'NATIVE_CONNECTION_NOT_CONFIGURED'
         } : {}) })
       if (available.length) await selectConnection(available[0].id)
+      if (restoredCustom && session === loadSession && !disposed &&
+          state.windowMissing && state.sourceKind === 'native' && !state.error) {
+        restoredCustom = false
+        await sync()
+      }
     } catch (error) {
       if (!current(version)) return
       publish({
@@ -380,6 +402,15 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
     } catch (_) {
       publish({ error: 'invalidWindow', errorCode: '' })
       return false
+    }
+    if (localNative && session && session !== 'user:pending') {
+      try {
+        const recent = previousCompleteWeek(now())
+        const key = `agione-dates:${session}`
+        if (startDate === recent.startDate && endDate === recent.endDate)
+          dateStorage?.removeItem(key)
+        else dateStorage?.setItem(key, JSON.stringify({ startDate, endDate }))
+      } catch (_) {}
     }
     if (state.startDate === startDate && state.endDate === endDate) {
       publish({ error: '', errorCode: '' })
