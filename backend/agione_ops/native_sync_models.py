@@ -184,3 +184,33 @@ MODEL_CLASSES = (
     NativeSyncState, NativeSyncShard, NativeStagedRecord,
     NativePublishedSnapshot, NativeSnapshotLease,
 )
+
+
+class NativeAccountScope(models.Model):
+    """Sanitized account classifications for one authorized viewer."""
+
+    connection = models.ForeignKey(
+        "agione_ops.SourceConnection", on_delete=models.PROTECT,
+        related_name="account_scopes",
+    )
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    operator = models.ForeignKey(
+        "agione_ops.SourceConnection", on_delete=models.PROTECT,
+        related_name="operator_account_scopes",
+    )
+    run = models.ForeignKey("agione_ops.SyncRun", on_delete=models.PROTECT)
+    config_version = models.PositiveBigIntegerField()
+    credential_version = models.PositiveBigIntegerField()
+    operator_config_version = models.PositiveBigIntegerField()
+    operator_credential_version = models.PositiveBigIntegerField()
+    status = models.CharField(max_length=16, default="queued")
+    data = models.JSONField(default=dict)
+    names = models.JSONField(default=dict)
+    content_digest = models.CharField(max_length=64, default="", blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "devmind_agione_native_account_scope"
+        constraints = [models.UniqueConstraint(
+            fields=["connection", "user"], name="dm_agione_account_scope_uq",
+        )]

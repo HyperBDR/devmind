@@ -19,8 +19,10 @@ from agione_ops.native_analytics import (
     normalize_log,
     parse_time,
     summary,
+    tenant_display_name,
 )
 from agione_ops.native_client import NativeClient
+from agione_ops.native_account_scope import external_finance_directory
 from agione_ops.native_finance import (
     aggregate_finance,
     read_recharge,
@@ -219,12 +221,7 @@ class LiveSource:
         )
         return {
             entity(row[key]): {
-                "name": business_text(
-                    row.get("customerName")
-                    or row.get("organizationName")
-                    or row.get("companyName"),
-                    entity(row[key]),
-                ),
+                "name": tenant_display_name(row, entity(row[key])),
                 "organizationName": business_text(row.get("organizationName")),
             }
             for row in rows
@@ -317,7 +314,11 @@ def _finance(source, user, factory, payload, fetched_at, customer=None):
             operator.guard()
 
         operator.client.io_guard = finance_guard
-        directory = operator.directory()
+        rows = operator.pages(
+            "/coperation/tenant/op-customers", {"identityCode": "EU"},
+            directory=True, key="tenantId",
+        )
+        directory = external_finance_directory(rows)
         if customer is not None:
             if customer not in directory:
                 return unavailable_finance(

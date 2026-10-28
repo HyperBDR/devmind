@@ -1445,7 +1445,7 @@
 @media(max-width:560px){.agione-demo .scope-groups .group-picker{flex:1;min-width:0}.agione-demo #savedGroup{width:100%}.agione-demo .group-menu{right:auto;left:0;width:calc(100vw - 72px);max-width:calc(100vw - 72px)}}
 
 /* Diagnostics share the dashboard's cards, metrics and action hierarchy. */
-.agione-demo #diagnosticNav {position:sticky;top:12px;z-index:24;display:flex;align-items:center;gap:16px;padding:12px 16px;margin-bottom:18px;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 4px 16px #15283f0e;scroll-margin-top:12px}
+.agione-demo .diagnostic-nav {position:sticky;top:12px;z-index:24;display:flex;align-items:center;gap:16px;padding:12px 16px;margin-bottom:18px;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 4px 16px #15283f0e;scroll-margin-top:12px}
 .agione-demo #diagnosticNav[hidden] {display:none}
 .agione-demo .diagnostic-back {display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:40px;padding:8px 16px;white-space:nowrap;font-size:13px;font-weight:600;flex-shrink:0}
 .agione-demo .diagnostic-back>span {font-size:18px;line-height:18px}
@@ -1487,7 +1487,7 @@
 .agione-demo .diagnostic-measurements strong {display:block;font-size:24px;line-height:34px;margin-top:5px;font-variant-numeric:tabular-nums}
 .agione-demo.dark .diagnostic-tabs button[aria-current="page"],.agione-demo.dark .diagnostic-actions button,.agione-demo.dark .diagnostic-boundary summary {color:#aac6ff}
 @media(max-width:1250px){.agione-demo .diagnostic-split{grid-template-columns:1fr}}
-@media(max-width:650px){.agione-demo #diagnosticNav{top:8px;padding:12px;gap:10px;flex-wrap:wrap;border-radius:9px}.agione-demo .diagnostic-back{width:100%;min-height:42px}.agione-demo .diagnostic-tabs{width:100%;margin:0}.agione-demo .diagnostic-tabs button{flex:1;padding:6px 8px}.agione-demo .diagnostic-content .panel{padding:16px}.agione-demo .diagnostic-metrics{gap:8px}.agione-demo .diagnostic-metrics>div{padding:12px 10px}.agione-demo .diagnostic-metrics strong{font-size:24px;line-height:32px;margin:6px 0}.agione-demo .diagnostic-metrics small{font-size:11px}.agione-demo .diagnostic-metrics p{font-size:10px;min-height:54px}.agione-demo .diagnostic-customer{gap:14px;padding:18px 0}.agione-demo .diagnostic-identity{flex-basis:100%}.agione-demo .diagnostic-facts{flex-basis:100%;gap:8px}.agione-demo .diagnostic-facts dd{font-size:20px}.agione-demo .diagnostic-actions{width:100%;margin:0}.agione-demo .diagnostic-actions button{width:100%}.agione-demo .diagnostic-note{padding:10px 12px;font-size:11px}.agione-demo .diagnostic-split{gap:0}}
+@media(max-width:650px){.agione-demo .diagnostic-nav{top:8px;padding:12px;gap:10px;flex-wrap:wrap;border-radius:9px}.agione-demo .diagnostic-back{width:100%;min-height:42px}.agione-demo .diagnostic-tabs{width:100%;margin:0}.agione-demo .diagnostic-tabs button{flex:1;padding:6px 8px}.agione-demo .diagnostic-content .panel{padding:16px}.agione-demo .diagnostic-metrics{gap:8px}.agione-demo .diagnostic-metrics>div{padding:12px 10px}.agione-demo .diagnostic-metrics strong{font-size:24px;line-height:32px;margin:6px 0}.agione-demo .diagnostic-metrics small{font-size:11px}.agione-demo .diagnostic-metrics p{font-size:10px;min-height:54px}.agione-demo .diagnostic-customer{gap:14px;padding:18px 0}.agione-demo .diagnostic-identity{flex-basis:100%}.agione-demo .diagnostic-facts{flex-basis:100%;gap:8px}.agione-demo .diagnostic-facts dd{font-size:20px}.agione-demo .diagnostic-actions{width:100%;margin:0}.agione-demo .diagnostic-actions button{width:100%}.agione-demo .diagnostic-note{padding:10px 12px;font-size:11px}.agione-demo .diagnostic-split{gap:0}}
 
 /* Lead with the diagnosis, then its evidence and next action. */
 .agione-demo .diagnostic-overview .panel-head {margin-bottom:14px}
@@ -2481,3 +2481,21 @@
 .agione-demo .df-summary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 22px}.df-summary-metric{min-width:0}.df-summary-metric span{display:block;font-size:11px;color:var(--muted);margin-bottom:5px}.df-summary-metric strong{font-size:21px;line-height:1.2;font-variant-numeric:tabular-nums;letter-spacing:-.3px}.df-summary-metric small{font-size:10px;color:var(--muted);margin-left:5px}.df-finance-empty{display:flex;flex-direction:column;justify-content:center;min-height:105px;color:var(--muted)}.df-finance-empty strong{font-size:14px;color:var(--ink);margin-bottom:7px}.df-finance-empty span{font-size:12px}.df-footer{align-items:center;padding-top:13px;font-size:11px;color:var(--muted)}
 @media(max-width:1100px){.df-body{grid-template-columns:1fr}.df-period-section{border-left:0;border-top:1px solid var(--line);padding-left:0!important;margin-left:0}.df-balance-legend{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:600px){.dashboard-finance{padding:18px 14px}.df-head,.df-section-head,.df-footer{flex-wrap:wrap}.df-summary-grid{grid-template-columns:1fr 1fr}.df-distribution-lead strong{font-size:22px}.df-balance-legend{grid-template-columns:1fr 1fr}}
+
+.agione-demo .drawer-identity-row {display:flex;align-items:baseline;gap:12px;margin-top:10px;font-size:13px}
+.agione-demo .drawer-identity-row > span {flex:0 0 92px;color:var(--muted)}
+.agione-demo .drawer-identity-row > strong {min-width:0;overflow-wrap:anywhere;font-weight:500}
+.agione-demo .drawer-identity-row > button {flex:none}
+.agione-demo .drawer-copy-status {display:block;color:var(--muted);font-size:12px;margin-top:8px}
+
+.agione-demo .df-head {display:grid;grid-template-columns:1.05fr .95fr;gap:0}
+.agione-demo .df-head-main,.agione-demo .df-head-period {min-width:0}
+.agione-demo .df-head-period {display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding-left:56px}
+.agione-demo .df-coverage {display:flex;flex-direction:column;gap:3px;min-width:0;font-size:11px;color:var(--muted);overflow-wrap:anywhere}
+@media(max-width:1100px){.agione-demo .df-head {grid-template-columns:1fr;gap:10px}.agione-demo .df-head-period {padding-left:0}}
+
+.agione-demo .saved-listbox {width:210px}
+.agione-demo .saved-listbox-menu {position:absolute;top:calc(100% + 6px);left:0;width:100%;max-height:300px}
+.agione-demo .scope-groups .saved-listbox-menu>[role=option] {color:var(--ink)}
+.agione-demo .scope-groups .saved-listbox-menu>[role=option][aria-selected=true] {color:var(--blue)}
+@media(max-width:560px){.agione-demo .scope-groups .saved-listbox {width:auto;flex:1;min-width:0}}

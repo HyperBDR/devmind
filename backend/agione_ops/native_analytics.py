@@ -63,6 +63,16 @@ def business_text(value, fallback=None):
     return value.strip() or fallback
 
 
+def tenant_display_name(row, tenant_id):
+    """Prefer organization names, then a safe administrator username."""
+    for key in ("customerName", "organizationName", "companyName",
+                "adminUsername", "username"):
+        name = business_text(row.get(key))
+        if name and name != tenant_id:
+            return name
+    return tenant_id
+
+
 def token(value):
     """Unknown usage stays unknown; bool and nonintegral usage are invalid."""
     return value if type(value) is int and 0 <= value <= 10**15 else None
@@ -272,6 +282,8 @@ class LiveAnalytics:
         }[key]()
 
     def label(self, key, value):
+        if key == "userId":
+            return getattr(self, "user_names", {}).get(value, value)
         if key == "customerTenantId":
             return self.customers.get(value, {}).get("name", value)
         if key == "modelId":
@@ -482,6 +494,8 @@ class LiveAnalytics:
             for key, value in {
                 **row,
                 "customerName": self.customers[row["customer_id"]]["name"],
+                "userName": self.label("userId", user_key(row)) if getattr(self, "user_names", {}).get(user_key(row)) else row.get("user_id"),
+                "modelName": self.models.get(row.get("model_id"), row.get("model_id")),
                 "financialLinkState": "UNAVAILABLE",
             }.items()
             if key not in {"project_id", "subject_type"}

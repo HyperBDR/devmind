@@ -41,6 +41,7 @@ def native(settings, monkeypatch):
     settings.AGIONE_OPS_NATIVE_SHARD_CONCURRENCY = 1
     settings.AGIONE_OPS_NATIVE_OVERLAP_SECONDS = 86400
     monkeypatch.setattr(run_sync, "apply_async", Mock())
+    monkeypatch.setattr("agione_ops.tasks.refresh_native_accounts.delay", Mock())
     user = get_user_model().objects.create_user(username=str(uuid.uuid4()))
     user.user_permissions.add(*Permission.objects.filter(
         content_type__app_label="agione_ops",
@@ -796,3 +797,52 @@ def test_comparison_cache_refreshes_after_prior_snapshot_expires(native):
     assert cleanup_native_snapshots() == 1
     after = query_operation(native['connection'], native['user'], query)
     assert after['data']['comparison']['state'] == 'UNAVAILABLE'
+
+
+def test_account_scope_filters_all_call_analytics(native, monkeypatch):
+    """Dashboard, analysis, requests and portrait use the same scope."""
+    native["rows"][1]["userId"] = "401"
+    _, publication = collect(native)
+    monkeypatch.setattr(
+        "agione_ops.native_account_refresh.scope_for",
+        lambda connection, user: ({"200:400": "internal", "200:401": "unknown"}, "v1"),
+    )
+    base = {"data_version": publication["dataVersion"]}
+    def query(operation, payload=None):
+        return query_native_snapshot(native["connection"], native["user"], {
+            **base, "operation": operation, "payload": payload or {},
+        })["data"]
+
+    assert query("dashboard")["summary"]["requestCount"] == 1
+    assert query("analysis", {"groupBy": ["customerTenantId"]})["summary"]["requestCount"] == 1
+    assert query("requests")["summary"]["requestCount"] == 1
+    assert query("profile", {"customerId": "200"})["summary"]["requestCount"] == 1
+
+
+def test_account_scope_invalidates_cached_queries_and_honors_grants(native):
+    """A classification refresh changes results without exposing stale grants."""
+    from agione_ops.native_sync import digest
+    from agione_ops.native_sync_models import NativeAccountScope
+    from agione_ops.snapshot_queries import query_operation
+
+    operator = SourceConnection.objects.create(
+        name="Operator", platform="pro", principal_kind="operator",
+        source_kind="native", endpoint="https://fake-native.example",
+        expected_tenant_id="101", enabled=True, created_by=native["user"],
+    )
+    grant = ConnectionGrant.objects.create(
+        connection=operator, user=native["user"], can_view=True,
+    )
+    native["rows"][1]["userId"] = "401"
+    run, publication = collect(native)
+    query = {"operation": "dashboard", "data_version": publication["dataVersion"]}
+    assert query_operation(native["connection"], native["user"], query)["data"]["summary"]["requestCount"] == 2
+    scope = NativeAccountScope.objects.get(run=run)
+    scope.data = {"200:400": "internal", "200:401": "unknown"}
+    scope.content_digest = digest(scope.data)
+    scope.status = "ready"
+    scope.save()
+    assert query_operation(native["connection"], native["user"], query)["data"]["summary"]["requestCount"] == 1
+    grant.can_view = False
+    grant.save()
+    assert query_operation(native["connection"], native["user"], query)["data"]["summary"]["requestCount"] == 2

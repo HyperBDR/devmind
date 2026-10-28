@@ -636,6 +636,7 @@ class DemoSnapshotBinding(ImmutableModel):
 
 from agione_ops.snapshot_store_models import ImmutableDemoSnapshot
 from agione_ops.native_sync_models import (
+    NativeAccountScope,
     NativeFinanceProjection,
     NativePublishedSnapshot,
     NativeSnapshotLease,

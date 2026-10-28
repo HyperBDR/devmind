@@ -60,6 +60,13 @@ const phrases = `
 客户画像|Customer insights
 客户档案|Customer profile
 财务与额度|Credits & Billing
+入账 / 消耗覆盖：|Credits added / used coverage:\x20
+入账客户|Customers with credits added
+入账覆盖：|Credits added coverage:\x20
+消耗覆盖：|Credits used coverage:\x20
+入账数据未完整采集|Credits added data incomplete
+消耗数据未完整采集|Credits used data incomplete
+日调账暂不可用|Daily adjustments unavailable
 入账日数据覆盖：|Daily credits added coverage:\x20
 消耗日数据覆盖：|Daily credits used coverage:\x20
 暂无完整日数据|No complete daily data
@@ -253,6 +260,8 @@ Token 指标|Token metric
 项目 ID|Project ID
 项目|Project
 所属客户|Customer
+未获取客户名称|Customer name unavailable
+复制|Copy
 归属于谁|Customer ownership
 谁发起调用|Callers
 请求|Requests
@@ -507,6 +516,7 @@ P95 耗时|P95 latency
 不随调用日期变化。不同支付币种分别统计。|Independent of request dates. Payment currencies are reported separately.
 租户 ID：|Tenant ID:
 租户 ID|Tenant ID
+调用用户|API user
 调用用户 ID：|API user ID:
 调用用户 ID|API user ID
 项目 ID：|Project ID:
@@ -551,7 +561,7 @@ export function workspaceText(value, locale = 'zh-CN') {
 // Business strings become opaque tokens before any UI text is translated.
 export function protectWorkspaceData(value, protectBusiness = true) {
   const values = []
-  const businessKeys = /^(?:name|label|groupLabel|organizationName|customerName|modelName|metaModelName|projectName|userName|displayName|industry|application|channel)$/
+  const businessKeys = /^(?:name|label|groupLabel|organizationName|customerName|callerName|modelName|metaModelName|projectName|userName|displayName|industry|application|channel)$/
   const copy = (item, key = '', owner = {}) => {
     const semanticLabel = key === 'label' && !owner.id && (!owner.seriesKey || ['ALL','all','total'].includes(owner.seriesKey)) &&
       !owner.customerTenantId && !owner.modelId && !owner.userId &&

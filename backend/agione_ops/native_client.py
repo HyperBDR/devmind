@@ -22,7 +22,7 @@ from agione_ops.observability import add_counter
 MAX_BYTES = 8 * 1024 * 1024
 MAX_PAGES = 100
 READ_PATHS = re.compile(
-    r"^(?:/admin/user/info"
+    r"^(?:/admin/user/info|/admin/user/details/[0-9]{1,40}"
     r"|/coperation/tenant/(?:op-customers|provider-customers|"
     r"op-customer-overviews)"
     r"|/xapi/observability/(?:call-logs|models/options|inventory/users)"

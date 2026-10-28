@@ -22,7 +22,7 @@ from agione_ops.client import AgioneOpsError
 from agione_ops.models import ConnectionGrant, DatasetVersion, SourceConnection
 from agione_ops.models import SyncRun
 from agione_ops.native_analytics import (
-    business_text, entity, normalize_log, parse_time, token,
+    business_text, entity, normalize_log, parse_time, tenant_display_name, token,
 )
 from agione_ops.native_finance import amount
 from agione_ops.native_client import NativeClient
@@ -360,11 +360,7 @@ def _prepare(run, connection, client, checkpoint):
                     raise AgioneOpsError("SOURCE_DUPLICATE_PAGE")
                 seen.add(cid)
                 directory[cid] = {
-                    "name": business_text(
-                        row.get("customerName")
-                        or row.get("organizationName")
-                        or row.get("companyName"), cid,
-                    ),
+                    "name": tenant_display_name(row, cid),
                     "organizationName": business_text(
                         row.get("organizationName"),
                     ),
@@ -684,6 +680,12 @@ def _publish(run, connection, state, finance, checkpoint):
             finished_at=timezone.now(), heartbeat_at=timezone.now(),
         )
         _release(connection)
+        try:
+            from agione_ops.native_account_refresh import schedule_account_scope
+
+            schedule_account_scope(run.pk)
+        except Exception:
+            logger.exception("Native account classification scheduling failed")
         if not getattr(settings, "AGIONE_OPS_FINANCE_REFRESH_ON_SYNC", True):
             try:
                 from agione_ops.native_finance_refresh import schedule_finance

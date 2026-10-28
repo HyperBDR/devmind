@@ -34,7 +34,7 @@ const html=computed(()=>{
  if(state.dashboard) state.dashboard=applyRules(state.dashboard,thresholds.value)
  const result=renderOriginalWorkspace(state,'focus',{locale:locale.value,transform:markup=>{
   let result=markup
- if(diagnosis.value!=='all')result=`<button class="primary diagnostic-back" data-diagnose="all"><span aria-hidden="true">←</span> 返回经营看板</button><nav class="diagnostic-tabs" aria-label="诊断分类">${Object.entries({decline:'使用下降',conversion:'接入受阻',failure:'失败原因'}).map(([key,label])=>`<button data-diagnose="${key}" aria-current="${diagnosis.value===key?'page':'false'}">${label}</button>`).join('')}</nav>`+result
+ if(diagnosis.value!=='all')result=`<div class="diagnostic-nav"><button class="primary diagnostic-back" data-diagnose="all"><span aria-hidden="true">←</span> 返回经营看板</button><nav class="diagnostic-tabs" aria-label="诊断分类">${Object.entries({decline:'使用下降',conversion:'接入受阻',failure:'失败原因'}).map(([key,label])=>`<button data-diagnose="${key}" aria-current="${diagnosis.value===key?'page':'false'}">${label}</button>`).join('')}</nav></div>`+result
   return readonlyWorkspaceMarkup(result,props.state)
  }})
  return DOMPurify.sanitize(result,{USE_PROFILES:{html:true,svg:true,svgFilters:true}})

@@ -38,6 +38,14 @@ def refresh_native_finance(projection_id, run_id):
     return execute_finance(projection_id, run_id)
 
 
+@shared_task(name="agione_ops.tasks.refresh_native_accounts", acks_late=True)
+def refresh_native_accounts(scope_id, run_id):
+    """Classify known calling users in the background."""
+    from agione_ops.native_account_refresh import execute_account_scope
+
+    return execute_account_scope(scope_id, run_id)
+
+
 def submit_recent_sync(connection, user, end):
     """Submit a bounded, auditable seven-day prefetch for one connection."""
     from datetime import timedelta

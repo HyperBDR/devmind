@@ -374,16 +374,25 @@
                   {{ t('agione.resetScope') }}
                 </button>
                 <div class="scope-groups" :aria-label="t('agione.savedFilters')">
-                  <label class="saved-select">
-                    <span class="sr-only">{{ t('agione.savedFilters') }}</span>
-                    <select v-model="selectedSavedFilter" @change="applySavedFilter">
-                      <option value="">{{ t('agione.noSavedFilters') }}</option>
-                      <option v-for="item in savedFilters" :key="item.name" :value="item.name">{{ item.name }}</option>
-                    </select>
-                    <svg class="ui-chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                      <path d="m5 7.5 5 5 5-5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
-                    </svg>
-                  </label>
+                  <Listbox :model-value="selectedSavedFilter" @update:model-value="selectSavedFilter">
+                    <div class="saved-select saved-listbox">
+                      <ListboxButton class="ui-select-trigger" :aria-label="t('agione.savedFilters')">
+                        <span>{{ selectedSavedFilter || (savedFilters.length ? t('agione.savedFilters') : t('agione.noSavedFilters')) }}</span>
+                        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                          <path d="m6 8 4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                      </ListboxButton>
+                      <ListboxOptions class="ui-select-menu saved-listbox-menu">
+                        <ListboxOption v-if="!savedFilters.length" as="button" type="button" value="" disabled>
+                          <span>{{ t('agione.noSavedFilters') }}</span>
+                        </ListboxOption>
+                        <ListboxOption v-for="item in savedFilters" :key="item.name" v-slot="{ selected }" as="button" type="button" :value="item.name">
+                          <span>{{ item.name }}</span>
+                          <svg v-if="selected" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="m5 10 3 3 7-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                        </ListboxOption>
+                      </ListboxOptions>
+                    </div>
+                  </Listbox>
                   <button class="save-group-button" type="button" @click="saveCurrentFilter">
                     {{ t('agione.saveFilters') }}
                   </button>
@@ -1142,6 +1151,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
+import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headlessui/vue'
 import AppHeader from '@/components/layout/AppHeader.vue'
 import { useI18n } from 'vue-i18n'
 import { agioneOpsApi } from '@/api/agioneOps'
@@ -1343,6 +1353,10 @@ function confirmSaveFilter() {
   ]
   selectedSavedFilter.value = name
   closeSaveFilter()
+}
+function selectSavedFilter(value) {
+  selectedSavedFilter.value = value
+  applySavedFilter()
 }
 function applySavedFilter() {
   const item = savedFilters.value.find(

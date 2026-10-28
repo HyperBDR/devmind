@@ -88,6 +88,10 @@ def _authorize(connection, user, operation):
             "actor_id": str(actor.pk),
         }
         identity["source_id"] = "native:" + str(current.pk)
+        if current.source_kind == "native":
+            from agione_ops.native_account_refresh import scope_for
+
+            _, identity["account_scope_version"] = scope_for(current, actor)
         if operation == "dashboard" and current.source_kind == "native":
             from agione_ops.native_sync_models import NativePublishedSnapshot
 

@@ -593,3 +593,56 @@ def test_legacy_balance_snapshot_is_reclassified_only_with_complete_accounts():
     assert old['balanceDistributions'][0]['threshold'] == '100'
     old['customerFinance'].pop('2')
     assert current_balance_policy(old)['balanceDistributions'] == []
+
+
+def test_finance_excludes_internal_tenant_before_aggregation(live, monkeypatch):
+    """Internal tenant balances and activity do not enter finance totals."""
+    original = module.LiveSource.pages
+
+    def pages(source, path, params=None, **kwargs):
+        rows = original(source, path, params, **kwargs)
+        if path.endswith("op-customers"):
+            for row in rows:
+                row["adminEmail"] = "internal@oneprocloud.cn"
+        return rows
+
+    monkeypatch.setattr(module.LiveSource, "pages", pages)
+    result = live["query"]("finance")["data"]
+    assert result["totalCustomers"] == 0
+    assert result["balanceDistributions"] == []
+    assert result["periodSummaries"] == []
+    assert result["customerFinance"] == {}
+    assert not any("/financial/api/finance/v1/admin/customers/" in path
+                   for _, path, _ in live["calls"])
+
+
+def test_tenant_name_uses_safe_admin_username_only_when_name_missing():
+    from agione_ops.native_analytics import tenant_display_name
+
+    assert tenant_display_name({"customerName": "客户", "adminUsername": "owner"}, "12") == "客户"
+    assert tenant_display_name({"adminUsername": "owner"}, "12") == "owner"
+    assert tenant_display_name({"adminUsername": "owner@example.com"}, "12") == "12"
+    assert tenant_display_name({}, "12") == "12"
+
+
+def test_calling_user_label_prefers_captured_name_and_falls_back_to_id():
+    from agione_ops.native_analytics import LiveAnalytics
+
+    engine = LiveAnalytics({}, {}, [], datetime.fromisoformat(START),
+                           datetime.fromisoformat(END), {})
+    engine.user_names = {"123:456": "Onepro"}
+    assert engine.label("userId", "123:456") == "Onepro"
+    assert engine.label("userId", "123:789") == "123:789"
+
+
+def test_request_evidence_shows_known_caller_and_model_names():
+    from agione_ops.native_analytics import LiveAnalytics
+
+    row = {"customer_id": "123", "user_id": "456", "model_id": "789", "subject_type": "USER"}
+    engine = LiveAnalytics({"123": {"name": "客户"}}, {"789": "模型"}, [], datetime.fromisoformat(START), datetime.fromisoformat(END), {})
+    engine.user_names = {"123:456": "provider_onepro"}
+    evidence = engine.evidence(row)
+    assert evidence["userName"] == "provider_onepro"
+    assert evidence["modelName"] == "模型"
+    engine.user_names = {}
+    assert engine.evidence(row)["userName"] == "456"
