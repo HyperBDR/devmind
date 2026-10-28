@@ -82,3 +82,20 @@ class AccountScopeTest(unittest.TestCase):
         ]
         directory.append({"tenantId": "external", "adminEmail": None})
         self.assertEqual(external_finance_directory(directory), {"external"})
+
+    def test_admin_internal_tenants_apply_to_all_subjects(self):
+        from agione_ops.native_account_scope import (
+            external_rows, internal_tenant_types,
+        )
+
+        directory = [
+            {"tenantId": "12", "adminEmail": "admin@oneprocloud.com"},
+            {"tenantId": "13", "adminEmail": "client@example.com"},
+            {"tenantId": "14", "adminEmail": None},
+        ]
+        types = internal_tenant_types(directory)
+        self.assertEqual(types, {"tenant:12": "internal"})
+        rows = [{"customer_id": "12", "subject_type": "PROJECT"},
+                {"customer_id": "13", "subject_type": "USER"},
+                {"customer_id": "14", "subject_type": "USER"}]
+        self.assertEqual(external_rows(rows, types), rows[1:])

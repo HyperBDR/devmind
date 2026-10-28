@@ -6,7 +6,9 @@ from django.db import transaction
 from rest_framework.exceptions import APIException
 
 from agione_ops.models import SourceConnection, SyncRun
-from agione_ops.native_account_scope import classify_rows, merge_account_types
+from agione_ops.native_account_scope import (
+    classify_rows, internal_tenant_types, merge_account_types,
+)
 from agione_ops.native_finance_refresh import _operator, _valid
 from agione_ops.native_sync_models import NativeAccountScope, NativePublishedSnapshot
 
@@ -29,7 +31,7 @@ def scope_for(connection, user):
         return {}, None
     if not isinstance(scope.data, dict) or digest(scope.data) != scope.content_digest:
         return {}, None
-    if any(not re.fullmatch(r"[0-9]{1,40}:[0-9]{1,40}", str(key))
+    if any(not re.fullmatch(r"(?:[0-9]{1,40}|tenant):[0-9]{1,40}", str(key))
            or value not in {"internal", "external", "unknown"}
            for key, value in scope.data.items()):
         return {}, None
@@ -113,6 +115,11 @@ def execute_account_scope(scope_id, run_id):
                         raise
                     return None
 
+            directory = source.pages(
+                "/coperation/tenant/op-customers", {"identityCode": "EU"},
+                directory=True, key="tenantId",
+            )
+            tenant_types = internal_tenant_types(directory)
             types = classify_rows(snapshot.data.get("rows", []), lookup)
         finally:
             source.close()
@@ -122,7 +129,9 @@ def execute_account_scope(scope_id, run_id):
             authorize_native_run(scope.run, connection)
             if str(current.run_id) != str(run_id) or not _valid(current, connection, scope.user):
                 return
-            merged = merge_account_types(current.data, types)
+            previous = {key: value for key, value in current.data.items()
+                        if not key.startswith("tenant:")}
+            merged = {**merge_account_types(previous, types), **tenant_types}
             current.data = merged
             current.names = {**current.names, **names}
             current.content_digest = digest(merged)

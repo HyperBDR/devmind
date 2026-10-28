@@ -354,7 +354,8 @@ def query_native_snapshot(connection, user, query):
 
     account_types, _ = scope_for(connection, user)
     customers = {key: value for key, value in snapshot.data["customers"].items()
-                 if str(key) not in INTERNAL_TENANT_IDS}
+                 if str(key) not in INTERNAL_TENANT_IDS
+                 and account_types.get(f"tenant:{key}") != "internal"}
     rows = [row for row in external_rows(snapshot.data["rows"], account_types) if (
         start <= parse_time(row["occurred_at"]) < end
     )]

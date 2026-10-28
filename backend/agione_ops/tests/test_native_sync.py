@@ -855,6 +855,60 @@ def test_internal_tenant_excluded_from_analytics_and_directory(native, monkeypat
     assert query("requests")["summary"]["requestCount"] == 0
 
 
+def test_admin_internal_tenant_excluded_from_snapshot(native, monkeypatch):
+    _, publication = collect(native)
+    monkeypatch.setattr(
+        "agione_ops.native_account_refresh.scope_for",
+        lambda connection, user: ({"tenant:200": "internal"}, "v2"),
+    )
+    base = {"data_version": publication["dataVersion"], "payload": {}}
+
+    def query(operation):
+        return query_native_snapshot(native["connection"], native["user"], {
+            **base, "operation": operation,
+        })["data"]
+
+    assert query("dashboard")["summary"]["requestCount"] == 0
+    assert "200" not in {
+        row["customerTenantId"] for row in query("customers")["items"]
+    }
+    assert query("requests")["summary"]["requestCount"] == 0
+
+
+def test_scope_refresh_collects_tenant_admin_classification(native, monkeypatch):
+    from agione_ops.native_account_refresh import execute_account_scope, scope_for
+    from agione_ops.native_sync_models import NativeAccountScope
+
+    operator = SourceConnection.objects.create(
+        name="Operator", platform="pro", principal_kind="operator",
+        source_kind="native", endpoint="https://fake-native.example",
+        expected_tenant_id="101", enabled=True, created_by=native["user"],
+    )
+    ConnectionGrant.objects.create(
+        connection=operator, user=native["user"], can_view=True,
+    )
+    run, _ = collect(native)
+    scope = NativeAccountScope.objects.get(run=run)
+    source = Mock()
+    source.pages.return_value = [
+        {"tenantId": "200", "adminEmail": "admin@oneprocloud.com"},
+        {"tenantId": "300", "adminEmail": "client@example.com"},
+    ]
+    source.get.return_value = {
+        "tenantId": "200", "userId": "400", "email": "client@example.com",
+    }
+    monkeypatch.setattr("agione_ops.native_queries.LiveSource", Mock(return_value=source))
+    execute_account_scope(scope.pk, str(run.pk))
+    scope.refresh_from_db()
+    assert scope.status == "ready"
+    types, version = scope_for(native["connection"], native["user"])
+    assert version
+    assert types["tenant:200"] == "internal"
+    assert types["200:400"] == "external"
+    assert "tenant:300" not in types
+    assert "@" not in str(types)
+
+
 def test_account_scope_invalidates_cached_queries_and_honors_grants(native):
     """A classification refresh changes results without exposing stale grants."""
     from agione_ops.native_sync import digest

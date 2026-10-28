@@ -62,6 +62,7 @@ def external_rows(rows, types):
     """Remove verified internal users; retain unverifiable and project calls."""
     return [row for row in rows
             if str(row.get("customer_id")) not in INTERNAL_TENANT_IDS
+            and types.get(f"tenant:{row.get('customer_id')}") != "internal"
             and (row.get("subject_type") != "USER"
                  or include_external(types.get(
                      f"{row.get('customer_id')}:{row.get('user_id')}",
@@ -90,3 +91,12 @@ def external_finance_directory(rows):
                 or email.rsplit("@", 1)[1] not in INTERNAL_DOMAINS):
             eligible.add(tenant)
     return eligible
+
+
+def internal_tenant_types(rows):
+    """Classify authorized tenants using the same policy as finance."""
+    external = external_finance_directory(rows)
+    return {
+        f"tenant:{row['tenantId']}": "internal"
+        for row in rows if str(row.get("tenantId") or "") not in external
+    }
