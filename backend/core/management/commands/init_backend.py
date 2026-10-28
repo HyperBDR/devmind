@@ -87,6 +87,12 @@ class Command(BaseCommand):
         if phase == "schema":
             return
 
+        if os.environ.get("AGIONE_OPS_BOOTSTRAP_CREDENTIALS"):
+            from agione_ops.native_auto_setup import initialize_native_connections
+
+            with self._timed_step("Initializing AGIOne connections"):
+                initialize_native_connections()
+
         with self._timed_step("Registering periodic tasks"):
             discover_and_register()
             count = len(TASK_REGISTRY)

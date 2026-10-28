@@ -66,6 +66,16 @@ python manage.py import_agione_native_credentials --user-id <用户ID> --allow-s
 授权和对应动作权限；普通用户还需要由管理员在 DevMind 角色管理中启用
 `agione_ops` 功能。功能可见不等于业务数据访问授权。
 
+### 部署时自动初始化
+
+生产的密钥渠道可为 runtime 初始化容器提供
+`AGIONE_OPS_BOOTSTRAP_CREDENTIALS`（上述 JSON 数组）和
+`AGIONE_OPS_BOOTSTRAP_USER_ID`（已存在且启用的用户 ID）。在没有原生
+连接时，初始化会导入凭据、授予该用户采集权限、验证上游身份并提交首次
+采集。还必须提供上面所列的启用开关、域名白名单和稳定加密密钥。
+已有原生连接时不会覆盖；轮换密钥需使用受控导入流程。实际凭据必须由
+部署密钥渠道提供，PR 和示例配置不会包含凭据。
+
 ## 首次采集和核验
 
 确认 API、Celery worker、Redis 和数据库均正常，且 worker 注册了
