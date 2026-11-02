@@ -1,10 +1,14 @@
 """DevMind-owned live operations; no Demo transport or dataset persistence."""
 
+import json
 import math
+import logging
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal
+from threading import Lock
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
@@ -27,6 +31,7 @@ from agione_ops.native_analytics import (
 from agione_ops.native_client import NativeClient
 from agione_ops.native_finance import (
     aggregate_finance,
+    amount,
     read_recharge,
     unavailable_finance,
 )
@@ -46,6 +51,50 @@ OPERATIONS = {
     "evidence",
     "finance",
 }
+logger = logging.getLogger(__name__)
+
+
+def retry_finance_request(function, *args, **kwargs):
+    """Retry temporary source failures with bounded backoff."""
+    for attempt in range(3):
+        try:
+            return function(*args, **kwargs)
+        except AgioneOpsError as error:
+            if attempt == 2 or error.code not in {
+                "SOURCE_TIMEOUT", "SOURCE_UNREACHABLE", "SOURCE_UNAVAILABLE",
+                "SOURCE_RATE_LIMITED",
+            }:
+                raise
+            time.sleep(1 if attempt == 0 else 3)
+
+
+def finance_checkpoint(cid, accounts, overview, previous, recharge,
+                       month, previous_month, fetched_at):
+    """Keep only validated fields used by the finance projection."""
+    current = aggregate_finance([(cid, accounts, overview)], 1, month, fetched_at)
+    old = aggregate_finance(
+        [(cid, [], {**previous, "currentCycle": previous_month})],
+        1, previous_month, fetched_at,
+    )
+    safe_accounts = []
+    for row in accounts:
+        if row.get("accountPurpose") != "USER_AVAILABLE":
+            continue
+        value = amount(row.get("balance", row.get("availableBalance")))
+        safe_accounts.append({
+            "id": entity(row.get("id")), "accountPurpose": "USER_AVAILABLE",
+            "currency": row.get("currency", row.get("currencyCode")),
+            "balance": str(value) if value is not None else None,
+        })
+
+    def trend(data):
+        return [{"date": item["date"], "consumedCredit": item["value"],
+                 "topUpCredit": item["topUp"]} for item in data["trend"]]
+
+    clean_overview = dict(current["customerFinance"].get(cid, {}).get("overview", {}))
+    clean_overview["trend"] = trend(current)
+    clean_previous = {"tenantId": cid, "trend": trend(old)}
+    return (cid, safe_accounts, clean_overview, clean_previous, recharge, None)
 
 
 def _epoch(connection):
@@ -113,11 +162,12 @@ class LiveSource:
     def get(self, path, params=None):
         return self.call(self.client.get, path, params)
 
-    def pages(self, path, params=None, *, directory=False, key="id"):
+    def pages(self, path, params=None, *, directory=False, key="id",
+              directory_page_size=50):
         field = "pageIndex" if directory else "current"
         size_field = "pageSize" if directory else "size"
         rows_field = "data" if directory else "records"
-        size = 50 if directory else 500
+        size = directory_page_size if directory else 500
         result, seen, expected = [], set(), None
 
         def validate(raw, expected_total=None):
@@ -221,6 +271,8 @@ class LiveSource:
             directory=True,
             key=key,
         )
+        if operator:
+            self._operator_directory = rows
         return {
             entity(row[key]): {
                 "name": tenant_display_name(row, entity(row[key])),
@@ -288,7 +340,67 @@ def _window(query):
     return start, end
 
 
-def _finance(source, user, factory, payload, fetched_at, customer=None):
+def batch_balance(rows, directory, now):
+    """Build a short-lived balance-only projection from complete snapshots."""
+    if not directory or len(directory) > 500:
+        return None
+    selected = {}
+    for row in rows:
+        cid = str(row.get("tenantId", ""))
+        if cid not in directory:
+            continue
+        if cid in selected:
+            return None
+        stamp = row.get("snapshotSyncTime")
+        try:
+            if type(stamp) not in (int, float):
+                return None
+            observed = datetime.fromtimestamp(stamp / 1000, dt_timezone.utc)
+        except (ValueError, OverflowError, OSError):
+            return None
+        if not now - timedelta(hours=3) <= observed <= now:
+            return None
+        balances = row.get("balances")
+        if not isinstance(balances, list) or not 1 <= len(balances) <= 8:
+            return None
+        accounts, currencies = [], set()
+        for entry in balances:
+            if not isinstance(entry, dict):
+                return None
+            unit = entry.get("currency")
+            value = amount(entry.get("balance"))
+            if (not isinstance(unit, str)
+                    or not re.fullmatch(r"[A-Za-z]{1,16}", unit)
+                    or unit in currencies or value is None):
+                return None
+            currencies.add(unit)
+            accounts.append({"accountPurpose": "USER_AVAILABLE",
+                             "currency": unit, "balance": str(value)})
+        selected[cid] = observed, accounts
+    if set(selected) != set(directory):
+        return None
+    records, times, next_id = [], [], 0
+    for cid, (observed, accounts) in sorted(selected.items()):
+        times.append(observed)
+        normalized = []
+        for account in accounts:
+            next_id += 1
+            normalized.append({**account, "id": str(next_id)})
+        records.append((cid, normalized, {}))
+    month = now.astimezone(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m")
+    result = aggregate_finance(records, len(directory), month, now.isoformat())
+    result.update({"oldestReadAt": min(times).isoformat(),
+                   "latestReadAt": max(times).isoformat(),
+                   "accountCount": None, "partial": True,
+                   "balanceSnapshotOnly": True})
+    if len(json.dumps(result, ensure_ascii=True)) > 240000:
+        return None
+    return result
+
+
+def _finance(source, user, factory, payload, fetched_at, customer=None,
+             historical_cache=False, history_write=False, on_balance=None,
+             checkpoint_scope=None):
     selected = source.connection
     candidates = list(
         connections_for(user, "view_business").filter(
@@ -316,11 +428,17 @@ def _finance(source, user, factory, payload, fetched_at, customer=None):
             operator.guard()
 
         operator.client.io_guard = finance_guard
-        rows = operator.pages(
-            "/coperation/tenant/op-customers", {"identityCode": "EU"},
-            directory=True, key="tenantId",
-        )
-        directory = external_finance_directory(rows)
+        rows = getattr(operator, "_operator_directory", None)
+        if rows is None:
+            rows = retry_finance_request(
+                operator.pages,
+                "/coperation/tenant/op-customers", {"identityCode": "EU"},
+                directory=True, key="tenantId",
+            )
+        from agione_ops.tenant_directory import operator_overrides
+
+        overrides = operator_overrides(operator.connection)
+        directory = external_finance_directory(rows, overrides)
         if customer is not None:
             if customer not in directory:
                 return unavailable_finance(
@@ -340,35 +458,129 @@ def _finance(source, user, factory, payload, fetched_at, customer=None):
                 fail("INVALID_PAGINATION", 400)
             total = len(directory)
             selected_customers = sorted(directory)[offset : offset + limit]
+        if on_balance is not None and customer is None and offset == 0:
+            try:
+                batch = operator.pages(
+                    "/coperation/tenant/op-customer-overviews",
+                    {"identityCode": "EU"}, directory=True, key="tenantId",
+                    directory_page_size=100,
+                )
+                quick = batch_balance(batch, directory, timezone.now())
+                if quick is not None:
+                    on_balance(quick)
+            except AgioneOpsError as error:
+                if error.code not in {
+                    "SOURCE_REJECTED", "SOURCE_TIMEOUT", "SOURCE_RATE_LIMITED",
+                    "SOURCE_UNAVAILABLE", "SOURCE_UNREACHABLE",
+                    "SOURCE_SHAPE_CHANGED", "SOURCE_NON_JSON",
+                    "SOURCE_RESPONSE_TOO_LARGE", "SOURCE_INCOMPLETE_PAGING",
+                    "SOURCE_CHANGED_DURING_PAGING", "SOURCE_DUPLICATE_PAGE",
+                    "SOURCE_PAGE_LIMIT",
+                }:
+                    raise
+                logger.warning("AGIOne batch balance unavailable: %s", error.code)
         finance_client = operator.client
         finance_client.io_guard = finance_guard
         month = timezone.now().astimezone(ZoneInfo("Asia/Shanghai")).date()
         previous_month = (month.replace(day=1) - timedelta(days=1)).strftime(
             "%Y-%m"
         )
+        history_times = []
+        timings = {}
+        timings_lock = Lock()
+
+        def timed(name, function, *args, **kwargs):
+            started = time.perf_counter()
+            failed = False
+            try:
+                return retry_finance_request(function, *args, **kwargs)
+            except Exception:
+                failed = True
+                raise
+            finally:
+                elapsed = (time.perf_counter() - started) * 1000
+                with timings_lock:
+                    entry = timings.setdefault(name, [0, 0, 0.0])
+                    entry[0] += 1
+                    entry[1] += int(failed)
+                    entry[2] += elapsed
 
         def read_customer(cid):
             """Read one customer through the shared task-owned client."""
             finance_guard()
+            checkpoint_key = None
+            if checkpoint_scope:
+                from django.core.cache import cache
+
+                checkpoint_key = f"agione:finance-checkpoint:{checkpoint_scope}:{cid}"
+                try:
+                    saved = cache.get(checkpoint_key)
+                except Exception:
+                    saved = None
+                if saved:
+                    finance_guard()
+                    history_times.append(saved[1])
+                    return saved[0]
             path = "/financial/api/finance/v1/admin/customers/" + cid
-            accounts = finance_client.get(path + "/accounts")
-            overview = finance_client.get(
+            accounts = timed("accounts", finance_client.get, path + "/accounts")
+            overview = timed(
+                "current", finance_client.get,
                 path + "/overview", {"range": "thisMonth"}
             )
-            try:
-                previous = finance_client.get(
-                    path + "/overview", {"range": "lastMonth"}
+            previous = None
+            history_key = None
+            oldest_read = fetched_at
+            if historical_cache or history_write:
+                from django.core.cache import cache
+
+                history_key = (
+                    f"agione:finance-history:v1:{operator.connection.pk}:"
+                    f"{user.pk}:{operator.connection.config_version}:"
+                    f"{operator.connection.credential_version}:"
+                    f"{previous_month}:{cid}"
                 )
-            except AgioneOpsError as exc:
-                if exc.code not in {
-                    "SOURCE_TIMEOUT", "SOURCE_RATE_LIMITED",
-                    "SOURCE_UNAVAILABLE", "SOURCE_UNREACHABLE",
-                    "SOURCE_REJECTED",
-                }:
-                    raise
-                previous = None
+                cached = None
+                if historical_cache:
+                    try:
+                        cached = cache.get(history_key)
+                    except Exception:
+                        cached = None
+                if cached:
+                    previous, observed_at = cached
+                    history_times.append(observed_at)
+                    oldest_read = min(oldest_read, observed_at)
+            if previous is None:
+                try:
+                    previous = timed(
+                        "previous", finance_client.get,
+                        path + "/overview", {"range": "lastMonth"}
+                    )
+                except AgioneOpsError as exc:
+                    if exc.code not in {
+                        "SOURCE_TIMEOUT", "SOURCE_RATE_LIMITED",
+                        "SOURCE_UNAVAILABLE", "SOURCE_UNREACHABLE",
+                        "SOURCE_REJECTED",
+                    }:
+                        raise
+                    previous = None
+                if history_key and isinstance(previous, dict):
+                    normalized = aggregate_finance(
+                        [(cid, [], {**previous, "currentCycle": previous_month})],
+                        1, previous_month, fetched_at,
+                    )["trend"]
+                    if normalized:
+                        safe = {"tenantId": cid, "trend": [
+                            {"date": item["date"],
+                             "consumedCredit": item["value"],
+                             "topUpCredit": item["topUp"]}
+                            for item in normalized
+                        ]}
+                        try:
+                            cache.set(history_key, (safe, fetched_at), 21600)
+                        except Exception:
+                            pass
             try:
-                recharge = read_recharge(finance_client, cid)
+                recharge = timed("recharge", read_recharge, finance_client, cid)
                 recharge_error = None
             except AgioneOpsError as exc:
                 recharge = None
@@ -376,14 +588,35 @@ def _finance(source, user, factory, payload, fetched_at, customer=None):
                     r"[A-Z_0-9]{1,80}", str(exc.code)
                 ) else "SOURCE_UNAVAILABLE"
             finance_guard()
+            if checkpoint_key and isinstance(previous, dict) and recharge is not None:
+                saved = finance_checkpoint(
+                    cid, accounts, overview, previous, recharge,
+                    month.strftime("%Y-%m"), previous_month, fetched_at,
+                )
+                try:
+                    cache.set(checkpoint_key, (saved, oldest_read), timeout=600)
+                except Exception:
+                    pass
             return cid, accounts, overview, previous, recharge, recharge_error
 
-        workers = min(5, len(selected_customers))
-        if workers:
-            with ThreadPoolExecutor(max_workers=workers) as executor:
-                readings = list(executor.map(read_customer, selected_customers))
-        else:
-            readings = []
+        configured_workers = getattr(settings, "AGIONE_OPS_FINANCE_CONCURRENCY", 5)
+        if type(configured_workers) is not int or not 1 <= configured_workers <= 8:
+            configured_workers = 5
+        workers = min(configured_workers, len(selected_customers))
+        try:
+            if workers:
+                with ThreadPoolExecutor(max_workers=workers) as executor:
+                    readings = list(executor.map(read_customer, selected_customers))
+            else:
+                readings = []
+        finally:
+            logger.info(
+                "AGIOne finance request timing workers=%s metrics=%s",
+                workers,
+                {name: {"count": item[0], "failures": item[1],
+                        "total_ms": round(item[2])}
+                 for name, item in timings.items()},
+            )
         if timezone.now().astimezone(ZoneInfo("Asia/Shanghai")).strftime(
             "%Y-%m"
         ) != month.strftime("%Y-%m"):
@@ -397,6 +630,8 @@ def _finance(source, user, factory, payload, fetched_at, customer=None):
             fetched_at,
             offset,
         )
+        if history_times:
+            result["oldestReadAt"] = min([fetched_at, *history_times])
         if all(isinstance(previous, dict) for _, _, _, previous, _, _ in readings):
             historical = aggregate_finance(
                 [(cid, [], {
@@ -446,9 +681,13 @@ def _overview(stats, directory_count, fetched_at):
 
 
 def collect_native_finance(
-    connection, user, *, client_factory=None, heartbeat=None,
+    connection, user, *, client_factory=None, heartbeat=None, reuse_cache=False,
+    on_balance=None, checkpoint_scope=None,
 ):
     """Collect one complete authorized Operator finance projection."""
+    from agione_ops.tenant_directory import classification_version
+
+    version = classification_version(connection, user)
     candidates = list(
         connections_for(user, "view_business").filter(
             platform=connection.platform,
@@ -468,6 +707,23 @@ def collect_native_finance(
         operator = None
     else:
         operator = candidates[0]
+    cache_key = None
+    if operator is not None and reuse_cache and client_factory is None:
+        from django.core.cache import cache
+
+        cache_key = (
+            f"agione:finance:v1:{operator.pk}:{user.pk}:"
+            f"{operator.config_version}:{operator.credential_version}:{version}:"
+            f"{timezone.now().astimezone(ZoneInfo('Asia/Shanghai')):%Y-%m}"
+        )
+        try:
+            cached = cache.get(cache_key)
+        except Exception:
+            cached = None
+        if cached is not None:
+            if classification_version(connection, user) != version:
+                raise AgioneOpsError("CLASSIFICATION_CHANGED", status_code=409)
+            return cached
     if operator is not None:
         result = _legacy_live_operation(
             operator,
@@ -478,13 +734,33 @@ def collect_native_finance(
             },
             client_factory=client_factory,
             heartbeat=heartbeat,
+            historical_cache=reuse_cache,
+            history_write=True,
+            checkpoint_scope=(
+                f"{checkpoint_scope}:{operator.pk}:{user.pk}:"
+                f"{operator.config_version}:{operator.credential_version}:{version}"
+            ) if checkpoint_scope else None,
+            on_balance=(lambda data: on_balance({
+                **data, "classificationVersion": version, "mode": "snapshot",
+                "coverageBasis": FINANCE_SCOPE_VERSION,
+                "scopeLabel": "余额为上游快照，账期明细仍在采集",
+            })) if on_balance else None,
         )["data"]
-    return {
+    if classification_version(connection, user) != version:
+        raise AgioneOpsError("CLASSIFICATION_CHANGED", status_code=409)
+    result = {
         **result,
+        "classificationVersion": version,
         "mode": "snapshot",
         "scopeLabel": "Operator 已授权目录财务快照，独立于调用筛选",
         "coverageBasis": FINANCE_SCOPE_VERSION,
     }
+    if cache_key and result.get("available") and not result.get("partial"):
+        try:
+            cache.set(cache_key, result, timeout=300)
+        except Exception:
+            pass
+    return result
 
 
 def query_live_operation(connection, user, query, *, client_factory=None):
@@ -502,6 +778,8 @@ def query_live_operation(connection, user, query, *, client_factory=None):
 
 def _legacy_live_operation(
     connection, user, query, *, client_factory=None, heartbeat=None,
+    historical_cache=False, history_write=False, on_balance=None,
+    checkpoint_scope=None,
 ):
     """Legacy source helper retained for explicit background use only."""
     if not isinstance(query, dict) or query.get("operation") not in OPERATIONS:
@@ -517,7 +795,8 @@ def _legacy_live_operation(
     fetched_at = timezone.now().isoformat()
     source = LiveSource(connection, user, factory, heartbeat=heartbeat)
     try:
-        customers = source.directory()
+        customers = (retry_finance_request(source.directory)
+                     if operation == "finance" else source.directory())
         directory_count = len(customers)
         if connection.principal_kind == "provider":
             own_tenant = entity(connection.expected_tenant_id)
@@ -531,7 +810,11 @@ def _legacy_live_operation(
                 cid = entity(cid)
                 if cid not in customers:
                     fail("CUSTOMER_NOT_FOUND", 404)
-            data = _finance(source, user, factory, payload, fetched_at, cid)
+            data = _finance(source, user, factory, payload, fetched_at, cid,
+                            historical_cache=historical_cache,
+                            history_write=history_write,
+                            on_balance=on_balance,
+                            checkpoint_scope=checkpoint_scope)
             quarantined, boundary_excluded, count = 0, 0, 0
             stats = summary([])
         else:

@@ -330,6 +330,8 @@ def finance_for_window(finance, start, end):
         days and all(top_ups.get(day) is not None for day in days)
     ) else None
     label = f"{first.isoformat()} — {last.isoformat()}"
+    if finance.get("balanceSnapshotOnly") is True:
+        return {**finance, "requestedMonth": label, "periodSummaries": []}
     return {
         **finance,
         "scopeLabel": "余额为最新快照；消耗按所选日期汇总，缺失不补零。",

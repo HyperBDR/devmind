@@ -6,8 +6,22 @@ AGIOne 替代 `/llm-ops` 的前端入口。LLM Operations 的历史数据库与�
 
 ## 密钥与环境
 
-在生产环境的受控密钥管理系统中准备独立的 Fernet 加密密钥，设置以下
-环境变量并确保 API、worker 和后台初始化容器读取相同的配置：
+标准 Docker Compose 部署会在数据库迁移后自动生成独立的 Fernet 密钥，
+存入持久目录 `data/agione-keys/credentials.key`，并由 API、worker 和
+初始化容器共享。接入默认启用，用户可在界面填写 AK/SK。
+
+该目录必须随数据库一起安全备份，不得提交 Git。已有加密凭据而密钥文件
+丢失时初始化会失败，不会生成新密钥覆盖旧凭据。多主机部署必须使用共享
+密钥存储；单机本地目录不会自动跨服务器同步。
+
+通知中的看板链接默认使用
+`https://tower.oneprocloud.com/agione#focus`。其他环境可通过
+`AGIONE_OPS_PUBLIC_URL` 覆盖；已有环境文件中的旧 localhost 地址也会
+覆盖默认值，部署前需核对。
+
+已有部署仍可通过密钥管理系统显式提供以下环境变量，配置值优先于自动
+密钥文件；旧环境中若明确设置了 `AGIONE_OPS_NATIVE_ENABLED=false`，
+需要由管理员修改该开关：
 
 ```text
 AGIONE_OPS_NATIVE_ENABLED=true
@@ -97,7 +111,41 @@ python manage.py import_agione_native_credentials --user-id <用户ID> --allow-s
 ### 查询与采集调度
 
 - 日期筛选最多 31 个完整自然日。查询会复用同连接、同配置版本的已发布快照；部分日期缺失时标记不完整，并通过现有后台任务补采。
-- 默认同时采集 2 个日期（`AGIONE_OPS_NATIVE_SHARD_CONCURRENCY`，范围 1–3）；每个任务默认最多运行 120 秒（`AGIONE_OPS_NATIVE_MAX_SECONDS`，范围 30–1800）。已完成的暂存分片可在 24 小时内续用。
+- 默认同时采集 2 个日期（`AGIONE_OPS_NATIVE_SHARD_CONCURRENCY`，范围 1–3）；每个任务默认最多运行 600 秒（`AGIONE_OPS_NATIVE_MAX_SECONDS`，范围 30–1800）。已完成的暂存分片可在 24 小时内续用，失败 attempt 会复用已完整落地的分片。
 - 定时任务 `agione_recent_data_prefetch` 每天北京时间 01:20 使用具有查看、采集权限的有效授权预采最近 7 个完整自然日。若没有符合条件的授权或连接正忙则跳过；调度配置在 Celery Beat 中管理。
-- `agione_staging_cleanup` 每天北京时间 02:20 清理已成功发布或已终止、保留超过 30 天的临时采集记录；`AGIONE_OPS_STAGING_RETENTION_DAYS` 可调整，最少 7 天。已发布快照和未完成任务的数据不在此清理范围。
-- `agione_snapshot_cleanup` 每天北京时间 02:40 清理超过 90 天（按发布时间）的正式快照内容，保留版本及任务记录；`AGIONE_OPS_SNAPSHOT_RETENTION_DAYS` 可调整，最少 30 天。每个连接保留最新快照，查询使用的各快照在最近一次访问后保护 24 小时；过期历史数据需要重新采集。
+- `agione_staging_cleanup` 每天北京时间 02:20 清理已成功发布或已终止、保留超过 14 天的临时采集记录；`AGIONE_OPS_STAGING_RETENTION_DAYS` 可调整，最少 7 天。已发布快照和未完成任务的数据不在此清理范围。
+- `agione_snapshot_cleanup` 每天北京时间 02:40 清理正式快照内容。日报/自动快照默认保留 90 天，手动快照默认保留 30 天，分别由 `AGIONE_OPS_SNAPSHOT_RETENTION_DAYS` 和 `AGIONE_OPS_MANUAL_SNAPSHOT_RETENTION_DAYS` 控制。每个连接保留最新快照，查询租约会继续保护正在使用的快照。
+- `agione_notification_history_cleanup` 每天北京时间 03:00 清理 90 天前已结束的通知投递和已恢复事件；活动异常不删除。
+
+### 自动增量刷新与异常巡检
+
+在“经营看板 → 待核实线索 → 规则设置”开启自动刷新，调用数据可选择每
+2、3 或 4 小时刷新（默认 3 小时）。财务和租户目录使用独立周期，默认
+12 小时，可选择 6、12 或 24 小时。配置按连接和用户保存在数据库中；
+`agione_auto_refresh_dispatch` 每分钟检查到期配置，真正的采集仍由连接租约
+保证同一数据源同时只有一个任务。
+
+调用采集使用上次快照复用、分片分页、稳定记录 ID 去重和一小时重叠窗口。
+`AGIONE_OPS_NATIVE_OVERLAP_SECONDS` 可调整，但修改前应根据上游迟到数据
+实测结果确定。只有采集、分页完整性验证、快照发布与巡检链路成功后才记录
+自动刷新成功；失败时保留上一版可用结果和安全错误码。
+
+异常观察窗口默认 120 分钟，但每次自动任务会扫描上次成功巡检到本次固定
+结束时间的完整区间。区间内已经恢复的持续失败或已确认余额不足事件，默认
+发送一条“已恢复的历史异常”，可在高级通知设置关闭。自动与手动刷新只发送
+紧急事件，绝不会发送日报；日报只由用户设置的北京时间触发。
+
+看板顶部状态条分别展示调用、财务、租户和巡检的状态与最近成功时间。规则
+设置还展示自动任务最近状态和下次预计时间。财务或租户失败不会回滚已发布的
+调用数据，也不会覆盖各自上一版可用结果。
+
+部署后必须执行：
+
+```text
+python manage.py migrate
+python manage.py register_periodic_tasks
+```
+
+已有 django-celery-beat 记录不会被注册命令覆盖。确认 API、worker 和 beat
+使用同一数据库与 Redis，并重启 API、Celery worker 和 Celery Beat，使新任务
+和迁移生效。测试环境应模拟上游与通知发送，不要填写真实飞书 Webhook。

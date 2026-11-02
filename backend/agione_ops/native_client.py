@@ -398,7 +398,7 @@ class NativeClient:
             return body["result"]
         raise _error("SOURCE_AUTH_FAILED")
 
-    def _validate_identity(self, info):
+    def _identity_facts(self, info):
         if not isinstance(info, dict) or not isinstance(
             info.get("sysUser"), dict
         ):
@@ -408,18 +408,13 @@ class NativeClient:
         if (
             isinstance(tenant, bool)
             or not isinstance(tenant, (str, int))
-            or str(tenant) != self._expected_tenant
-            or (
-                self._credentials.get("username") is not None
-                and user.get("username") != self._credentials["username"]
-            )
+            or not str(tenant)
         ):
             raise _error("SOURCE_IDENTITY_MISMATCH", 403)
         roles = info.get("roles", [])
         permissions = info.get("permissions", [])
         if not isinstance(roles, list) or not isinstance(permissions, list):
             raise _error("SOURCE_SHAPE_CHANGED")
-        declared = self.connection.principal_kind
         role_values = set()
         for role in roles:
             value = role if isinstance(role, str) else None
@@ -428,10 +423,23 @@ class NativeClient:
             if isinstance(value, str):
                 role_values.add(value.lower().removeprefix("role_"))
         observed = role_values.intersection({"provider", "operator"})
+        return str(tenant), observed, user
+
+    def _validate_identity(self, info):
+        tenant, observed, user = self._identity_facts(info)
+        if (
+            tenant != self._expected_tenant
+            or (
+                self._credentials.get("username") is not None
+                and user.get("username") != self._credentials["username"]
+            )
+        ):
+            raise _error("SOURCE_IDENTITY_MISMATCH", 403)
+        declared = self.connection.principal_kind
         if observed and declared not in observed:
             raise _error("SOURCE_IDENTITY_MISMATCH", 403)
         return {
-            "tenant_id": str(tenant),
+            "tenant_id": tenant,
             "platform": self.connection.platform,
             "principal_kind": declared,
             "role_verified": declared in observed,
@@ -440,6 +448,23 @@ class NativeClient:
             ),
             "fetchedAt": self.fetched_at,
         }
+
+    def discover_identity(self):
+        """Discover one verified role during personal connection setup."""
+        with self._lock:
+            tenant, observed, _user = self._identity_facts(
+                self._result("/admin/user/info")
+            )
+            if len(observed) != 1:
+                raise _error("SOURCE_ROLE_NOT_VERIFIED", 409)
+            return {
+                "tenant_id": tenant,
+                "platform": self.connection.platform,
+                "principal_kind": next(iter(observed)),
+                "role_verified": True,
+                "role_state": "verified",
+                "fetchedAt": self.fetched_at,
+            }
 
     def identity(self):
         """Check actual tenant, optional username and explicit role evidence."""

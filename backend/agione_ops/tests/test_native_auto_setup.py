@@ -10,6 +10,31 @@ from agione_ops.models import SourceConnection
 pytestmark = pytest.mark.django_db
 
 
+def test_deployment_key_is_persistent_and_not_recreated_for_existing_data(tmp_path):
+    from agione_ops.deployment_key import ensure_deployment_key
+    from django.core.management.base import CommandError
+
+    path = tmp_path / "credentials.key"
+    first = ensure_deployment_key(path, has_credentials=False)
+    assert ensure_deployment_key(path, has_credentials=True) == first
+    assert path.stat().st_mode & 0o777 == 0o600
+    path.unlink()
+    with pytest.raises(CommandError):
+        ensure_deployment_key(path, has_credentials=True)
+    assert not path.exists()
+
+
+def test_deployment_key_rejects_corrupted_file(tmp_path):
+    from agione_ops.deployment_key import ensure_deployment_key
+    from django.core.management.base import CommandError
+
+    path = tmp_path / "credentials.key"
+    path.write_text("invalid")
+    with pytest.raises(CommandError):
+        ensure_deployment_key(path, has_credentials=False)
+    assert path.read_text() == "invalid"
+
+
 def test_auto_setup_imports_only_when_no_native_connection(settings, monkeypatch):
     from agione_ops.native_auto_setup import initialize_native_connections
 

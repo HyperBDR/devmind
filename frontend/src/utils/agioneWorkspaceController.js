@@ -109,6 +109,7 @@ export function createAgioneWorkspaceController(api, onChange = () => {}) {
   let authEpoch = 0
   let activeLoad = null
   let financeTimer = null
+  let attachedFrame = null
   const canonical = (value) => JSON.stringify(value, (_, item) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return item
     return Object.fromEntries(Object.entries(item).sort(([a], [b]) =>
@@ -253,6 +254,7 @@ export function createAgioneWorkspaceController(api, onChange = () => {}) {
   }
   function reset(key = '') {
     clearWork()
+    attachedFrame = null
     authEpoch++
     epoch++
     request++
@@ -267,6 +269,7 @@ export function createAgioneWorkspaceController(api, onChange = () => {}) {
     if (!frameKey || !connectionId) {
       if (state.connectionId) {
         clearWork()
+        attachedFrame = null
         authEpoch++
         epoch++
         request++
@@ -286,8 +289,9 @@ export function createAgioneWorkspaceController(api, onChange = () => {}) {
         publish({ cachedWindow: frame.window })
         return setWindow(selectedWindow)
       }
-      return
+      if (frame === attachedFrame) return
     }
+    attachedFrame = frame
     const view = state.view
     const retain = state.connectionId === connectionId && !live &&
       (view === 'focus' ? state.dashboard :
@@ -496,7 +500,9 @@ export function createAgioneWorkspaceController(api, onChange = () => {}) {
     clearTimeout(financeTimer)
     financeTimer = null
     if (!valid(generation, seq) ||
-        !['queued', 'running'].includes(finance?.refreshState)) return
+        !['stale', 'queued', 'running', 'retrying'].includes(
+          finance?.refreshState
+        )) return
     financeTimer = setTimeout(() => loadFinance(generation, seq, key), 5000)
     financeTimer?.unref?.()
   }
@@ -825,6 +831,13 @@ export function createAgioneWorkspaceController(api, onChange = () => {}) {
     attach,
     load,
     reload: () => { clearWork(true); request++; return load() },
+    classificationChanged: () => {
+      clearWork(); request++; detail++
+      publish({ customerIds: [], selectedCustomerId: '', forceSelected: false,
+        profile: null, drawer: null, evidence: null,
+        refreshing: true, stale: true })
+      return load()
+    },
     setView,
     configure,
     options,

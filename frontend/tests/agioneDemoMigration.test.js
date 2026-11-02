@@ -42,7 +42,10 @@ test('workspace starts with controls without a repeated page heading', () => {
     'utf8'
   )
   assert.doesNotMatch(page, /<div class="heading">/)
-  assert.match(page, /<main class="main">\s*<div v-if="connection/)
+  assert.match(page, /<main class="main">/)
+  assert.ok(
+    page.indexOf('<div v-if="connection') > page.indexOf('<main class="main">')
+  )
 })
 
 test('AGIOne follows the portal language while preserving Chinese copy', () => {

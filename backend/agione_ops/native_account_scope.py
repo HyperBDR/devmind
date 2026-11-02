@@ -40,6 +40,16 @@ def include_external(account_type):
     return account_type in {"external", "unknown"}
 
 
+def tenant_classification(tenant_id, types, overrides):
+    """Resolve a manual override before automatic classification."""
+    tenant_id = str(tenant_id)
+    if tenant_id in overrides:
+        return overrides[tenant_id], "manual"
+    if tenant_id in INTERNAL_TENANT_IDS:
+        return "internal", "automatic"
+    return types.get(f"tenant:{tenant_id}", "unknown"), "automatic"
+
+
 def classify_rows(rows, lookup):
     """Build a tenant-scoped classification without retaining identities."""
     pairs = {
@@ -58,16 +68,27 @@ def classify_rows(rows, lookup):
     return result
 
 
-def external_rows(rows, types):
+def external_rows(rows, types, overrides=None):
     """Remove verified internal users; retain unverifiable and project calls."""
-    return [row for row in rows
-            if str(row.get("customer_id")) not in INTERNAL_TENANT_IDS
-            and types.get(f"tenant:{row.get('customer_id')}") != "internal"
-            and (row.get("subject_type") != "USER"
-                 or include_external(types.get(
-                     f"{row.get('customer_id')}:{row.get('user_id')}",
-                     "unknown",
-                 )))]
+    overrides = overrides or {}
+    result = []
+    for row in rows:
+        classification, source = tenant_classification(
+            row.get("customer_id"),
+            types,
+            overrides,
+        )
+        if classification == "internal":
+            continue
+        if source == "manual" or row.get("subject_type") != "USER":
+            result.append(row)
+            continue
+        if include_external(types.get(
+            f"{row.get('customer_id')}:{row.get('user_id')}",
+            "unknown",
+        )):
+            result.append(row)
+    return result
 
 
 def merge_account_types(previous, current):
@@ -79,16 +100,18 @@ def merge_account_types(previous, current):
     return result
 
 
-def external_finance_directory(rows):
+def external_finance_directory(rows, overrides=None):
     """Exclude tenants whose administrator has a verified internal email."""
     eligible = set()
+    overrides = overrides or {}
     for row in rows:
         tenant = str(row.get("tenantId") or "")
         email = row.get("adminEmail")
         email = email.strip().lower() if isinstance(email, str) else ""
-        if tenant not in INTERNAL_TENANT_IDS and (
+        automatic = tenant not in INTERNAL_TENANT_IDS and (
                 not EMAIL_PATTERN.fullmatch(email)
-                or email.rsplit("@", 1)[1] not in INTERNAL_DOMAINS):
+                or email.rsplit("@", 1)[1] not in INTERNAL_DOMAINS)
+        if overrides.get(tenant, "external" if automatic else "internal") == "external":
             eligible.add(tenant)
     return eligible
 

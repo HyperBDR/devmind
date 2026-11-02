@@ -230,6 +230,19 @@ def test_daily_finance_projection_passes_snapshot_validation(native):
     validate_snapshot_data(data, digest(data))
 
 
+def test_snapshot_validation_allows_customer_email_labels(native):
+    from agione_ops.native_sync import digest, validate_snapshot_data
+
+    _, result = collect(native)
+    snapshot = NativePublishedSnapshot.objects.get(
+        version_id=result["dataVersion"],
+    )
+    data = deepcopy(snapshot.data)
+    data["customers"]["200"]["name"] = "owner@example.com"
+
+    validate_snapshot_data(data, digest(data))
+
+
 def test_native_submit_is_uuid_only_no_source_and_single_inflight(native):
     run = submit(native, "same")
     again = submit(native, "same")
@@ -321,10 +334,15 @@ def test_two_daily_shards_are_fetched_concurrently(native, settings):
     )
     assert len(snapshot.data["rows"]) == 2
 
-def test_deadline_allows_new_run_to_reuse_completed_shard(native, monkeypatch):
+def test_deadline_allows_new_run_to_reuse_completed_shard(
+    native,
+    monkeypatch,
+    settings,
+):
     from types import SimpleNamespace
     from agione_ops import native_sync
 
+    settings.AGIONE_OPS_NATIVE_MAX_SECONDS = 120
     clock = [0]
     monkeypatch.setattr(native_sync, "time", SimpleNamespace(monotonic=lambda: clock[0]))
     calls = [0]
@@ -366,6 +384,46 @@ def test_overlap_incremental_keeps_old_revision_and_deduplicates(native):
             if path.endswith("call-logs")]
     assert len(logs) == 1
     assert len({row["record_id"] for row in newest.data["rows"]}) == 2
+
+
+def test_incremental_refetch_starts_at_exact_overlap_cutoff(native, settings):
+    settings.AGIONE_OPS_NATIVE_OVERLAP_SECONDS = 3600
+    native["end"] += timedelta(hours=6)
+    _, first = collect(native)
+    assert first["status"] == "succeeded"
+
+    before = len(native["calls"])
+    _, second = collect(native)
+
+    assert second["status"] == "succeeded"
+    logs = [
+        params for path, params in native["calls"][before:]
+        if path.endswith("call-logs")
+    ]
+    assert len(logs) == 1
+    assert logs[0]["startTime"] == (
+        native["end"] - timedelta(hours=1)
+    ).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def test_scheduled_incremental_keeps_daily_reconciliation(native, settings):
+    settings.AGIONE_OPS_NATIVE_OVERLAP_SECONDS = 3600
+    native["end"] += timedelta(hours=6)
+    _, first = collect(native)
+    assert first["status"] == "succeeded"
+
+    before = len(native["calls"])
+    run = submit(native, "agione-scheduled-2026-10-30-7")
+    _, second = collect(native, run)
+
+    assert second["status"] == "succeeded"
+    logs = [
+        params for path, params in native["calls"][before:]
+        if path.endswith("call-logs")
+    ]
+    assert min(params["startTime"] for params in logs) == (
+        native["end"] - timedelta(days=1)
+    ).strftime("%Y-%m-%d %H:%M:%S")
 
 
 
@@ -541,6 +599,15 @@ def test_independent_finance_publishes_without_blocking_and_fences_access(
     row.save()
     current, _ = finance_for(connection, native["user"])
     assert current["available"]
+    from agione_ops.models import TenantClassificationChange
+
+    TenantClassificationChange.objects.create(
+        operator=operator, tenant_id="200", classification="automatic",
+        actor=native["user"],
+    )
+    stale, _ = finance_for(connection, native["user"])
+    assert not stale["available"]
+    assert stale["reason"] == "CLASSIFICATION_CHANGED"
     other = get_user_model().objects.create_user(username=str(uuid.uuid4()))
     other.user_permissions.add(*Permission.objects.filter(
         content_type__app_label="agione_ops", codename="view_business",
@@ -586,7 +653,206 @@ def test_independent_finance_failure_keeps_last_result(native, settings, monkeyp
     row.refresh_from_db()
     assert row.status == "failed"
     assert row.data == old
-    assert row.error_code == "FINANCE_REFRESH_FAILED"
+    assert row.error_code == "SOURCE_TIMEOUT"
+
+
+def test_transient_finance_failure_is_queued_for_retry(native, settings, monkeypatch):
+    from agione_ops.native_finance import unavailable_finance
+    from agione_ops.native_finance_refresh import execute_finance
+    from agione_ops.native_sync import digest
+    from agione_ops.native_sync_models import NativeFinanceProjection
+
+    settings.AGIONE_OPS_FINANCE_REFRESH_ON_SYNC = False
+    operator = SourceConnection.objects.create(
+        name="Operator", platform="pro", principal_kind="operator",
+        source_kind="native", endpoint="https://fake-native.example",
+        expected_tenant_id="101", enabled=True, created_by=native["user"],
+    )
+    ConnectionGrant.objects.create(
+        connection=operator, user=native["user"], can_view=True,
+    )
+    run, _ = collect(native)
+    row = NativeFinanceProjection.objects.get(run=run)
+    old = {**unavailable_finance("LAST_GOOD"), "mode": "snapshot"}
+    row.data, row.content_digest = old, digest(old)
+    row.save(update_fields=["data", "content_digest", "updated_at"])
+    monkeypatch.setattr(
+        "agione_ops.native_queries.collect_native_finance",
+        Mock(side_effect=AgioneOpsError("SOURCE_TIMEOUT", status_code=504)),
+    )
+    result = execute_finance(row.pk, str(run.pk), can_retry=True)
+    row.refresh_from_db()
+    assert result == "SOURCE_TIMEOUT"
+    assert row.status == "retrying"
+    assert row.error_code == "SOURCE_TIMEOUT"
+    assert row.data == old
+
+
+def test_finance_task_stops_retrying_after_three_failures(
+    native, settings, monkeypatch,
+):
+    from agione_ops.native_sync_models import NativeFinanceProjection
+    from agione_ops.tasks import refresh_native_finance
+
+    settings.AGIONE_OPS_FINANCE_REFRESH_ON_SYNC = False
+    operator = SourceConnection.objects.create(
+        name="Operator", platform="pro", principal_kind="operator",
+        source_kind="native", endpoint="https://fake-native.example",
+        expected_tenant_id="101", enabled=True, created_by=native["user"],
+    )
+    ConnectionGrant.objects.create(
+        connection=operator, user=native["user"], can_view=True,
+    )
+    run, _ = collect(native)
+    row = NativeFinanceProjection.objects.get(run=run)
+    reader = Mock(side_effect=AgioneOpsError("SOURCE_TIMEOUT", status_code=504))
+    monkeypatch.setattr("agione_ops.native_queries.collect_native_finance", reader)
+    from celery.exceptions import Retry
+
+    monkeypatch.setattr(refresh_native_finance, "retry", Mock(side_effect=Retry()))
+    for attempt in range(3):
+        refresh_native_finance.push_request(retries=attempt)
+        try:
+            if attempt < 2:
+                with pytest.raises(Retry):
+                    refresh_native_finance.run(
+                        row.pk, str(run.pk), "test-generation",
+                    )
+            else:
+                refresh_native_finance.run(row.pk, str(run.pk), "test-generation")
+        finally:
+            refresh_native_finance.pop_request()
+    row.refresh_from_db()
+    assert reader.call_count == 3
+    assert row.status == "failed"
+    assert row.error_code == "SOURCE_TIMEOUT"
+
+
+def test_fast_balance_is_visible_then_previous_finance_is_restored_on_failure(
+    native, settings, monkeypatch,
+):
+    from agione_ops.native_account_scope import FINANCE_SCOPE_VERSION
+    from agione_ops.native_finance import unavailable_finance
+    from agione_ops.native_finance_refresh import execute_finance, finance_for
+    from agione_ops.native_queries import batch_balance
+    from agione_ops.native_sync import digest
+    from agione_ops.native_sync_models import NativeFinanceProjection
+    from agione_ops.tenant_directory import classification_version
+
+    settings.AGIONE_OPS_FINANCE_REFRESH_ON_SYNC = False
+    operator = SourceConnection.objects.create(
+        name="Operator", platform="pro", principal_kind="operator",
+        source_kind="native", endpoint="https://fake-native.example",
+        expected_tenant_id="101", enabled=True, created_by=native["user"],
+    )
+    ConnectionGrant.objects.create(
+        connection=operator, user=native["user"], can_view=True,
+    )
+    run, _ = collect(native)
+    row = NativeFinanceProjection.objects.get(run=run)
+    old = {**unavailable_finance("LAST_GOOD"), "mode": "snapshot"}
+    row.data, row.content_digest = old, digest(old)
+    row.save(update_fields=["data", "content_digest", "updated_at"])
+    now = timezone.now()
+    fast = batch_balance([{
+        "tenantId": "200", "snapshotSyncTime": int(now.timestamp() * 1000),
+        "balances": [{"currency": "Credit", "balance": "12"}],
+    }], {"200"}, now)
+    fast.update({"classificationVersion": classification_version(
+        native["connection"], native["user"]), "mode": "snapshot",
+        "coverageBasis": FINANCE_SCOPE_VERSION,
+        "scopeLabel": "余额为上游快照，账期明细仍在采集"})
+
+    def fail_after_balance(*args, **kwargs):
+        kwargs["on_balance"](fast)
+        visible, _ = finance_for(native["connection"], native["user"])
+        assert visible["balanceCustomers"] == 1
+        assert visible["refreshState"] == "running"
+        raise AgioneOpsError("SOURCE_TIMEOUT", status_code=504)
+
+    monkeypatch.setattr(
+        "agione_ops.native_queries.collect_native_finance", fail_after_balance,
+    )
+    execute_finance(row.pk, str(run.pk))
+    row.refresh_from_db()
+    assert row.status == "failed"
+    assert row.data == old
+    assert row.content_digest == digest(old)
+
+
+def test_finance_rejects_a_classification_change_during_collection(
+    native, settings, monkeypatch,
+):
+    from agione_ops.models import TenantClassificationChange
+    from agione_ops.native_finance import unavailable_finance
+    from agione_ops.native_finance_refresh import execute_finance
+    from agione_ops.native_sync_models import NativeFinanceProjection
+    from agione_ops.tenant_directory import classification_version
+
+    settings.AGIONE_OPS_FINANCE_REFRESH_ON_SYNC = False
+    operator = SourceConnection.objects.create(
+        name="Operator", platform="pro", principal_kind="operator",
+        source_kind="native", endpoint="https://fake-native.example",
+        expected_tenant_id="101", enabled=True, created_by=native["user"],
+    )
+    ConnectionGrant.objects.create(
+        connection=operator, user=native["user"], can_view=True,
+    )
+    run, _ = collect(native)
+    row = NativeFinanceProjection.objects.get(run=run)
+    old_version = classification_version(native["connection"], native["user"])
+
+    def collect_during_change(*args):
+        TenantClassificationChange.objects.create(
+            operator=operator, tenant_id="200", classification="automatic",
+            actor=native["user"],
+        )
+        return {**unavailable_finance("OLD"), "mode": "snapshot",
+                "classificationVersion": old_version}
+
+    monkeypatch.setattr(
+        "agione_ops.native_queries.collect_native_finance", collect_during_change,
+    )
+    execute_finance(row.pk, str(run.pk))
+    row.refresh_from_db()
+    assert row.status == "failed"
+    assert row.data is None
+
+
+def test_matching_new_snapshot_finance_does_not_require_projection(
+    native, settings, monkeypatch,
+):
+    from agione_ops.models import TenantClassificationChange
+    from agione_ops.native_finance import unavailable_finance
+    from agione_ops.tenant_directory import classification_version
+
+    settings.AGIONE_OPS_FINANCE_REFRESH_ON_SYNC = True
+    operator = SourceConnection.objects.create(
+        name="Operator", platform="pro", principal_kind="operator",
+        source_kind="native", endpoint="https://fake-native.example",
+        expected_tenant_id="101", enabled=True, created_by=native["user"],
+    )
+    ConnectionGrant.objects.create(
+        connection=operator, user=native["user"], can_view=True,
+    )
+    TenantClassificationChange.objects.create(
+        operator=operator, tenant_id="200", classification="automatic",
+        actor=native["user"],
+    )
+    finance = {**unavailable_finance("CURRENT"), "mode": "snapshot",
+               "classificationVersion": classification_version(
+                   native["connection"], native["user"],
+               )}
+    monkeypatch.setattr(
+        "agione_ops.native_queries.collect_native_finance",
+        Mock(return_value=finance),
+    )
+    _, result = collect(native)
+    data = query_native_snapshot(native["connection"], native["user"], {
+        "data_version": result["dataVersion"], "operation": "finance",
+        "payload": {},
+    })["data"]
+    assert data["reason"] == "CURRENT"
 
 
 def test_independent_finance_deduplicates_and_rejects_stale_task(
@@ -853,6 +1119,15 @@ def test_internal_tenant_excluded_from_analytics_and_directory(native, monkeypat
         row["customerTenantId"] for row in query("customers")["items"]
     }
     assert query("requests")["summary"]["requestCount"] == 0
+
+    monkeypatch.setattr(
+        "agione_ops.tenant_directory.overrides_for",
+        lambda connection, user: {"200": "external"},
+    )
+    assert query("dashboard")["summary"]["requestCount"] == 2
+    assert "200" in {
+        row["customerTenantId"] for row in query("customers")["items"]
+    }
 
 
 def test_admin_internal_tenant_excluded_from_snapshot(native, monkeypatch):

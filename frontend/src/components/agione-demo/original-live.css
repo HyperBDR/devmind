@@ -680,8 +680,6 @@ body:has(.compact-lead) .scope-bottom {margin-top:12px;padding-top:12px}
 .dashboard-models .model-list::-webkit-scrollbar {display:block;width:8px}
 .dashboard-models .model-list::-webkit-scrollbar-track {background:var(--bg);border-radius:8px}
 .dashboard-models .model-list::-webkit-scrollbar-thumb {background:var(--blue);border:2px solid var(--bg);border-radius:8px}
-.model-scroll-hint {display:flex;align-items:center;justify-content:center;gap:8px;background:var(--soft);color:var(--blue);border:1px solid var(--line);border-radius:6px;font-size:12px;font-weight:600;padding:7px 10px;margin-bottom:8px;flex-shrink:0}
-.model-scroll-hint>span {font-size:18px;line-height:1}
 .event-list.is-paginated {display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto;align-items:stretch}
 .event-list.is-paginated>.event-item {grid-column:1;min-width:0}
 .event-size-sample {visibility:hidden;pointer-events:none;user-select:none}

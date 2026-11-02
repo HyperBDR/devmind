@@ -662,6 +662,74 @@
         color: var(--ink);
         margin-bottom: 5px;
       }
+      .empty-scope-callout {
+        display: grid;
+        grid-template-columns: 42px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 14px;
+        width: min(100%, 920px);
+        margin: 0 auto 14px;
+        padding: 14px 16px;
+        box-sizing: border-box;
+        border: 1px solid #9dbfff;
+        border-left: 4px solid #2864ed;
+        border-radius: 10px;
+        background: linear-gradient(105deg, #edf4ff 0%, #f7faff 70%);
+        box-shadow: 0 7px 20px #2864ed14;
+      }
+      .empty-scope-icon {
+        display: grid;
+        place-items: center;
+        width: 42px;
+        height: 42px;
+        border-radius: 50%;
+        background: #2864ed;
+        color: #fff;
+        box-shadow: 0 5px 12px #2864ed33;
+      }
+      .empty-scope-icon svg {
+        width: 23px;
+        height: 23px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.8;
+        stroke-linecap: round;
+      }
+      .empty-scope-copy b {
+        display: block;
+        color: #183c82;
+        font-size: 14px;
+        line-height: 1.45;
+      }
+      .empty-scope-copy p {
+        margin: 3px 0 0;
+        color: #58729b;
+        line-height: 1.55;
+      }
+      .empty-scope-callout button {
+        min-height: 36px;
+        padding: 8px 14px;
+        border: 1px solid #2864ed;
+        border-radius: 7px;
+        background: #2864ed;
+        color: #fff;
+        font-weight: 600;
+        white-space: nowrap;
+        box-shadow: 0 5px 12px #2864ed29;
+      }
+      .empty-scope-callout button:hover {
+        border-color: #174fd4;
+        background: #174fd4;
+      }
+      @media (max-width: 700px) {
+        .empty-scope-callout {
+          grid-template-columns: 42px minmax(0, 1fr);
+        }
+        .empty-scope-callout button {
+          grid-column: 2;
+          justify-self: start;
+        }
+      }
       .tabs {
         display: flex;
         gap: 7px;

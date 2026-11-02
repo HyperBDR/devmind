@@ -941,6 +941,43 @@ test('reload reads updated comparison even when snapshot version is unchanged', 
   assert.equal(calls.filter(x => x.body.operation === 'dashboard').length, 2)
 })
 
+test('a new response refreshes finance even when its snapshot version is unchanged', async () => {
+  const { c } = setup()
+  const embedded = (refreshState, amount) => ({
+    ...frame,
+    summary: { requests: 1 },
+    provenance: { mode: 'snapshot', kind: 'native_snapshot' },
+    snapshotResponse: {
+      operation: 'dashboard',
+      dataVersion: frame.dataVersion,
+      window: frame.window,
+      data: {
+        summary: { requestCount: 1 },
+        finance: { available: true, refreshState, amount }
+      },
+      capabilities: { directUpstream: false },
+      provenance: { mode: 'snapshot', kind: 'native_snapshot' }
+    }
+  })
+  await c.attach(embedded('running', 10), 'a')
+  await c.attach(embedded('ready', 20), 'a')
+  assert.equal(c.snapshot().finance.refreshState, 'ready')
+  assert.equal(c.snapshot().finance.amount, 20)
+})
+
+test('classification changes discard cached data and selected customer', async () => {
+  const { c, calls } = setup()
+  await c.attach(frame, 'a')
+  await c.setFilters(['10'], { modelIds: [], statuses: [], failureTypes: [] })
+  await c.openCustomer('10')
+  const before = calls.length
+  await c.classificationChanged()
+  assert.deepEqual(c.snapshot().customerIds, [])
+  assert.equal(c.snapshot().forceSelected, false)
+  assert(calls.length > before)
+  assert(!('customerIds' in calls.at(-1).body))
+})
+
 test('same snapshot can attach a wider composite window', async () => {
   const { c, calls } = setup((id, body) => wrap(body, dashboardData(1)))
   await c.attach(frame, 'a')

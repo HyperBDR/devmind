@@ -48,26 +48,29 @@ def entity(value, optional=False):
     return value
 
 
-def business_text(value, fallback=None):
-    """Only short organization/model labels, never contact or raw prose."""
+def business_text(value, fallback=None, *, allow_email=False):
+    """Sanitize short business labels, allowing email only when requested."""
     if not isinstance(value, str) or len(value) > 160:
         return fallback
+    invalid_chars = r"[<>\x00-\x1f]" if allow_email else r"[<>\x00-\x1f@]"
     if re.search(
-        r"[<>\x00-\x1f@]|https?://|bearer\s|password|secret|api.key",
+        invalid_chars + r"|https?://|bearer\s|password|secret|api.key",
         value,
         re.I,
     ):
         return fallback
-    if re.search(r"(?:\+?\d[\s-]?){11,}", value) and not value.isdecimal():
+    if (re.search(r"(?:\+?\d[\s-]?){11,}", value)
+            and not value.isdecimal()
+            and not (allow_email and "@" in value)):
         return fallback
     return value.strip() or fallback
 
 
-def tenant_display_name(row, tenant_id):
+def tenant_display_name(row, tenant_id, *, allow_email=False):
     """Prefer organization names, then a safe administrator username."""
     for key in ("customerName", "organizationName", "companyName",
                 "adminUsername", "username"):
-        name = business_text(row.get(key))
+        name = business_text(row.get(key), allow_email=allow_email)
         if name and name != tenant_id:
             return name
     return tenant_id
@@ -520,6 +523,29 @@ class LiveAnalytics:
             "summary": summary(rows),
         }
 
+    def hourly_distribution(self):
+        """Aggregate the scoped requests by local time of day."""
+        zone = ZoneInfo("Asia/Shanghai")
+        buckets = [{"hour": hour, "requestCount": 0, "customers": set()}
+                   for hour in range(24)]
+        for row in self.global_rows:
+            hour = parse_time(row["occurred_at"]).astimezone(zone).hour
+            buckets[hour]["requestCount"] += 1
+            if row["customer_id"] is not None:
+                buckets[hour]["customers"].add(row["customer_id"])
+        start = self.start.astimezone(zone).date()
+        end = (self.end - timedelta(microseconds=1)).astimezone(zone).date()
+        return {
+            "timezone": "Asia/Shanghai",
+            "dayCount": (end - start).days + 1,
+            "points": [
+                {"hour": item["hour"],
+                 "requestCount": item["requestCount"],
+                 "activeCustomers": len(item["customers"])}
+                for item in buckets
+            ],
+        }
+
     def dashboard(self):
         customers = self.customer_rows()
         blocked = [x for x in customers if "blocked" in x["signals"]]
@@ -545,6 +571,7 @@ class LiveAnalytics:
                 "summary": None,
             },
             "trend": self.trend(self.global_rows),
+            "hourlyDistribution": self.hourly_distribution(),
             "models": self.groups(self.global_rows, ["modelId"]),
             "failureBreakdown": self.groups(
                 [x for x in self.global_rows if x["result"] == "FAILURE"],

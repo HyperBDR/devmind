@@ -4,6 +4,7 @@
     class="agione-demo integrated-controls"
     :class="{
       dark,
+      'tenant-page': classificationOpen,
       'dashboard-home': work.view === 'focus' && diagnosis === 'all',
       'workspace-compact': work.view !== 'focus',
       'analysis-page': work.view === 'aggregate',
@@ -25,32 +26,99 @@
           @keydown="workspaceNavKeys"
         >
           <button
-            :class="{ active: work.view === 'focus' }"
-            :aria-current="work.view === 'focus' ? 'page' : undefined"
+            :class="{ active: !classificationOpen && work.view === 'focus' }"
+            :aria-current="!classificationOpen && work.view === 'focus' ? 'page' : undefined"
             @click="navigateWorkspace('focus')"
           >
             <span class="nav-num">01</span>{{ t('agione.demoDashboard') }}
           </button>
           <button
-            :class="{ active: work.view === 'aggregate' }"
-            :aria-current="work.view === 'aggregate' ? 'page' : undefined"
+            :class="{ active: !classificationOpen && work.view === 'aggregate' }"
+            :aria-current="!classificationOpen && work.view === 'aggregate' ? 'page' : undefined"
             @click="navigateWorkspace('aggregate')"
           >
             <span class="nav-num">02</span>{{ t('agione.demoAnalysis') }}
           </button>
           <button
-            :class="{ active: work.view === 'portrait' }"
-            :aria-current="work.view === 'portrait' ? 'page' : undefined"
+            :class="{ active: !classificationOpen && work.view === 'portrait' }"
+            :aria-current="!classificationOpen && work.view === 'portrait' ? 'page' : undefined"
             @click="navigateWorkspace('portrait')"
           >
             <span class="nav-num">03</span>{{ t('agione.demoPortrait') }}
           </button>
+          <button :class="{ active: classificationOpen }"
+                  :aria-current="classificationOpen ? 'page' : undefined"
+                  @click="openClassification">
+            <span class="nav-num">04</span>{{ t('agione.tenant.title') }}
+          </button>
         </nav>
-        <div class="nav-bottom">
-          AGIOne · {{ t('agione.demoCustomerOps') }}<br /><RouterLink
-            to="/dashboard"
-            >{{ t('agione.returnDevmind') }} ↗</RouterLink
+        <div ref="connectionControl" class="nav-bottom">
+          <button
+            ref="connectionTrigger"
+            class="sidebar-connection-trigger"
+            type="button"
+            aria-haspopup="menu"
+            :aria-expanded="menuOpen"
+            @click.stop="toggleMenu()"
+            @keydown.down.prevent="toggleMenu(true, true)"
+            @keydown.up.prevent="toggleMenu(true, true)"
           >
+            <span
+              class="sidebar-connection-dot"
+              :class="{ connected: !!connection }"
+              aria-hidden="true"
+            ></span>
+            <span>
+              <b>{{ connectionTitle }}</b>
+              <small>{{ connection ? '已连接' : '点击配置数据源' }}</small>
+            </span>
+            <span class="sidebar-connection-chevron" aria-hidden="true">⌃</span>
+          </button>
+          <div
+            ref="connectionMenu"
+            class="connection-menu sidebar-connection-menu"
+            role="menu"
+            aria-label="AGIOne 连接"
+            :hidden="!menuOpen"
+            :style="menuPosition"
+            @click.stop
+            @keydown="menuKeys"
+          >
+            <div class="connection-menu-heading">AGIOne 连接</div>
+            <button
+              v-for="item in state.configurableConnections"
+              :key="item.id"
+              role="menuitemradio"
+              :aria-checked="item.id === state.connectionId"
+              :disabled="!item.enabled && !item.selfManaged"
+              @click="item.enabled ? selectConnection(item.id) : openConnectionSettings(item)"
+            >
+              <span
+                class="sidebar-connection-dot"
+                :class="{ connected: item.enabled }"
+                aria-hidden="true"
+              ></span>
+              <span class="connection-menu-copy">
+                <b>AGIOne {{ item.platform === 'cc' ? 'CC' : 'Pro' }}</b>
+                <small>{{ accountLabel(item.principalKind) }} · {{ item.enabled ? '已连接' : '已断开' }}</small>
+              </span>
+              <span v-if="item.id === state.connectionId" class="connection-check">✓</span>
+            </button>
+            <div class="connection-menu-actions">
+              <button
+                v-if="connection?.selfManaged"
+                type="button"
+                role="menuitem"
+                @click="openConnectionSettings(connection)"
+              >连接设置</button>
+              <button
+                v-if="state.canSelfManageConnections"
+                type="button"
+                role="menuitem"
+                @click="openNewConnection"
+              >＋ 添加连接</button>
+            </div>
+          </div>
         </div>
       </aside>
       <div class="workspace">
@@ -60,104 +128,6 @@
               {{ t('agione.demoCustomerOps') }}
               <span aria-hidden="true"> / </span
               ><b id="crumb">{{ workspaceTitle }}</b>
-            </div>
-            <div ref="connectionControl" class="connection-control">
-              <span class="connection-divider" aria-hidden="true"></span>
-              <button
-                id="connectionTrigger"
-                ref="connectionTrigger"
-                class="connection-trigger"
-                aria-haspopup="menu"
-                :aria-expanded="menuOpen"
-                aria-controls="connectionMenu"
-                :disabled="!state.connections.length"
-                @click="toggleMenu()"
-                @keydown.down.prevent="toggleMenu(true, true)"
-                @keydown.up.prevent="toggleMenu(true, true)"
-              >
-                <b>{{
-                  connection?.platform === 'cc'
-                    ? 'CC'
-                    : connection?.platform === 'pro'
-                      ? 'Pro'
-                      : '—'
-                }}</b
-                ><span class="connection-slash">/</span
-                ><span>{{
-                  connection
-                    ? accountLabel(connection.principalKind)
-                    : t('agione.connection')
-                }}</span
-                ><svg
-                  class="connection-chevron"
-                  viewBox="0 0 20 20"
-                  fill="none"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="m6 8 4 4 4-4"
-                    stroke="currentColor"
-                    stroke-width="1.6"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  />
-                </svg>
-              </button>
-              <div
-                id="connectionMenu"
-                ref="connectionMenu"
-                class="connection-menu"
-                role="menu"
-                :aria-label="t('agione.connectionAndWindow')"
-                :hidden="!menuOpen"
-                :style="menuPosition"
-                @keydown="menuKeys"
-              >
-                <div
-                  v-for="platform in platforms"
-                  :key="platform"
-                  class="connection-group"
-                  role="group"
-                  :aria-label="platform === 'pro' ? 'Pro' : 'CC'"
-                >
-                  <div class="connection-menu-label">
-                    <b>{{ platform === 'pro' ? 'Pro' : 'CC' }}</b
-                    ><span>{{
-                      t(
-                        readOnly
-                          ? 'agione.realSnapshotShort'
-                          : 'agione.localDemo'
-                      )
-                    }}</span>
-                  </div>
-                  <button
-                    v-for="item in state.connections.filter(
-                      (x) => x.platform === platform
-                    )"
-                    :key="item.id"
-                    role="menuitemradio"
-                    :aria-checked="item.id === state.connectionId"
-                    @click="selectConnection(item.id)"
-                  >
-                    <b>{{ accountLabel(item.principalKind) }}</b
-                    ><span>{{ item.name }}</span
-                    ><span class="connection-check" aria-hidden="true"
-                      ><svg
-                        v-if="item.id === state.connectionId"
-                        viewBox="0 0 20 20"
-                        fill="none"
-                      >
-                        <path
-                          d="m5 10 3 3 7-7"
-                          stroke="currentColor"
-                          stroke-width="1.8"
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                        /></svg
-                    ></span>
-                  </button>
-                </div>
-              </div>
             </div>
           </div>
           <div
@@ -169,6 +139,10 @@
           <AppHeader inline :show-menu-button="false" />
         </header>
         <main class="main">
+          <TenantClassification v-if="classificationOpen"
+            :connection-id="state.connectionId"
+            @changed="workspace.classificationChanged()" />
+          <template v-else>
           <div v-if="connection && !readOnly" class="notice" role="note">
             <b>{{ sourceBadge }}</b>
             {{
@@ -979,10 +953,16 @@
               </template></span
             >
           </footer>
+          </template>
         </main>
       </div>
     </div>
     <ScopeDialog ref="scopeDialog" :state="work" @apply="({customerIds,filters})=>workspace.setFilters(customerIds,filters)" @directory="workspace.queryDirectory" />
+    <NativeConnectionDialog
+      ref="nativeConnectionDialog"
+      @changed="connectionChanged"
+      @disconnected="connectionDisconnected"
+    />
     <RequestDrawer
       :state="work"
       @close="workspace.closeDrawer"
@@ -1150,7 +1130,6 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { RouterLink } from 'vue-router'
 import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headlessui/vue'
 import AppHeader from '@/components/layout/AppHeader.vue'
 import { useI18n } from 'vue-i18n'
@@ -1179,9 +1158,11 @@ import CustomerWorkspace from '@/components/agione-demo/CustomerWorkspace.vue'
 import RequestDrawer from '@/components/agione-demo/RequestDrawer.vue'
 import FinancePanel from '@/components/agione-demo/FinancePanel.vue'
 import FocusWorkspace from '@/components/agione-demo/FocusWorkspace.vue'
+import TenantClassification from '@/components/agione-demo/TenantClassification.vue'
 import { claimOriginalDialog, releaseOriginalDialog } from '@/utils/agioneDialog'
 import ScopeDialog from '@/components/agione-demo/ScopeDialog.vue'
 import DashboardSignals from '@/components/agione-demo/DashboardSignals.vue'
+import NativeConnectionDialog from '@/components/agione-demo/NativeConnectionDialog.vue'
 import '@/components/agione-demo/demo-scoped.css'
 import '@/components/agione-demo/english-typography.css'
 
@@ -1224,8 +1205,10 @@ const workspace = createAgioneWorkspaceController(agioneOpsApi, (next) => {
   work.value = next
 })
 const work = ref(workspace.snapshot())
+const classificationOpen = ref(false)
 const workspaceTitle = computed(
   () =>
+    classificationOpen.value ? t('agione.tenant.title') :
     ({
       focus: t('agione.demoDashboard'),
       aggregate: t('agione.demoAnalysis'),
@@ -1267,6 +1250,7 @@ function workspaceNavKeys(event) {
   list[target]?.click()
 }
 function navigateWorkspace(view) {
+  classificationOpen.value = false
   if (window.location.hash !== `#${view}`)
     window.history.replaceState(
       null,
@@ -1274,6 +1258,15 @@ function navigateWorkspace(view) {
       `${window.location.pathname}${window.location.search}#${view}`
     )
   return workspace.setView(view)
+}
+function openClassification() {
+  classificationOpen.value = true
+  if (window.location.hash !== '#tenant-classification')
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}${window.location.search}#tenant-classification`
+    )
 }
 function openWorkspaceCustomer(id) {
   window.history.replaceState(
@@ -1284,6 +1277,7 @@ function openWorkspaceCustomer(id) {
   workspace.openCustomer(id)
 }
 function restoreWorkspace() {
+  classificationOpen.value = window.location.hash === '#tenant-classification'
   workspace.setView(viewFromHash(window.location.hash))
 }
 watch(
@@ -1293,7 +1287,7 @@ watch(
   ([id, frame, loading, listLoading, readOnly, error]) => {
     if (!id || !readOnly || id !== work.value.connectionId ||
         (!frame && (!loading || error))) workspace.attach(null, '')
-    if (loading || listLoading) return
+    if (listLoading) return
     if (readOnly && frame) {
       let selectedWindow = null
       if (state.value.sourceKind === 'native' && !state.value.isLive) {
@@ -1302,7 +1296,7 @@ watch(
       }
       workspace.attach(frame, id, selectedWindow)
     }
-    else if (!frame) workspace.attach(null, '')
+    else if (!loading && !frame) workspace.attach(null, '')
   },
   { flush: 'sync' }
 )
@@ -1382,6 +1376,7 @@ function removeFilter(kind, value) {
 const connectionControl = ref(null)
 const connectionTrigger = ref(null)
 const connectionMenu = ref(null)
+const nativeConnectionDialog = ref(null)
 const menuOpen = ref(false)
 const menuPosition = ref({})
 const dateDialog = ref(null)
@@ -1451,6 +1446,9 @@ watch(
 const connection = computed(() =>
   state.value.connections.find((x) => x.id === state.value.connectionId)
 )
+const connectionTitle = computed(() => connection.value
+  ? `AGIOne ${connection.value.platform === 'cc' ? 'CC' : 'Pro'} · ${accountLabel(connection.value.principalKind)}`
+  : '连接 AGIOne')
 const readOnly = computed(() => state.value.readOnly)
 const isLive = computed(() => state.value.isLive)
 const directoryCoverage = computed(
@@ -1500,9 +1498,6 @@ function refreshCurrent() {
   if (readOnly.value) return controller.refresh()
   return controller.sync()
 }
-const platforms = computed(() => [
-  ...new Set(state.value.connections.map((x) => x.platform))
-])
 const ready = computed(
   () =>
     state.value.dashboard?.state === 'ready' && !!state.value.dashboard.summary
@@ -1593,6 +1588,20 @@ function selectConnection(id) {
   menuOpen.value = false
   controller.selectConnection(id)
 }
+function openNewConnection() {
+  menuOpen.value = false
+  nativeConnectionDialog.value?.open()
+}
+function openConnectionSettings(item) {
+  menuOpen.value = false
+  nativeConnectionDialog.value?.open(item)
+}
+async function connectionChanged(id) {
+  await controller.load(id)
+}
+async function connectionDisconnected() {
+  await controller.load()
+}
 async function toggleMenu(force = !menuOpen.value, focus = false) {
   menuOpen.value = force
   if (!force) return
@@ -1601,7 +1610,7 @@ async function toggleMenu(force = !menuOpen.value, focus = false) {
   if (bounds)
     menuPosition.value = {
       left: `${Math.max(8, Math.min(bounds.left, window.innerWidth - 248))}px`,
-      top: `${bounds.bottom + 9}px`
+      bottom: `${Math.max(8, window.innerHeight - bounds.top + 8)}px`
     }
   if (focus)
     (
@@ -1858,5 +1867,9 @@ onBeforeUnmount(() => {
 </style>
 
 <style>
+/* Reserve the scrollbar gutter for the AGIOne page at all times so opening
+   the drawer never changes the content width. */
+html:has(.agione-demo) { scrollbar-gutter: stable; }
 html.agione-drawer-open { overflow: hidden; scrollbar-gutter: stable; }
+html.agione-drawer-open body { padding-right: var(--agione-drawer-gap, 0); }
 </style>

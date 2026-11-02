@@ -573,34 +573,63 @@ SPECTACULAR_SETTINGS = {
 AGIONE_OPS_NATIVE_SHARD_CONCURRENCY = int(os.getenv(
     "AGIONE_OPS_NATIVE_SHARD_CONCURRENCY", "2"
 ))
+AGIONE_OPS_FINANCE_CONCURRENCY = int(os.getenv(
+    "AGIONE_OPS_FINANCE_CONCURRENCY", "5"
+))
+AGIONE_OPS_NATIVE_OVERLAP_SECONDS = int(os.getenv(
+    "AGIONE_OPS_NATIVE_OVERLAP_SECONDS", "3600"
+))
 AGIONE_OPS_NATIVE_MAX_SECONDS = int(os.getenv(
-    "AGIONE_OPS_NATIVE_MAX_SECONDS", "120"
+    "AGIONE_OPS_NATIVE_MAX_SECONDS", "600"
 ))
 AGIONE_OPS_STAGING_RETENTION_DAYS = int(os.getenv(
-    "AGIONE_OPS_STAGING_RETENTION_DAYS", "30"
+    "AGIONE_OPS_STAGING_RETENTION_DAYS", "14"
 ))
 AGIONE_OPS_SNAPSHOT_RETENTION_DAYS = int(os.getenv(
     "AGIONE_OPS_SNAPSHOT_RETENTION_DAYS", "90"
 ))
+AGIONE_OPS_MANUAL_SNAPSHOT_RETENTION_DAYS = int(os.getenv(
+    "AGIONE_OPS_MANUAL_SNAPSHOT_RETENTION_DAYS", "30"
+))
 AGIONE_OPS_SYNTHETIC_ENABLED = False
 AGIONE_OPS_TASK_PROJECTION_ENABLED = False
 AGIONE_OPS_NATIVE_ENABLED = os.getenv(
-    "AGIONE_OPS_NATIVE_ENABLED", "false"
+    "AGIONE_OPS_NATIVE_ENABLED", "true"
 ).lower() == "true"
 AGIONE_OPS_NATIVE_ONLY = os.getenv(
     "AGIONE_OPS_NATIVE_ONLY", "true"
 ).lower() == "true"
+AGIONE_OPS_PUBLIC_URL = os.getenv(
+    "AGIONE_OPS_PUBLIC_URL",
+    "https://tower.oneprocloud.com/agione#focus",
+).strip()
 AGIONE_OPS_FINANCE_REFRESH_ON_SYNC = os.getenv(
     "AGIONE_OPS_FINANCE_REFRESH_ON_SYNC", "false"
 ).lower() == "true"
 AGIONE_OPS_ALLOWED_ENDPOINT_HOSTS = tuple(
     host.strip().lower()
     for host in os.getenv(
-        "AGIONE_OPS_ALLOWED_ENDPOINT_HOSTS", ""
+        "AGIONE_OPS_ALLOWED_ENDPOINT_HOSTS", "agione.pro,agione.cc"
     ).split(",")
     if host.strip()
 )
+AGIONE_OPS_SELF_SERVICE_ENDPOINTS = {
+    "pro": os.getenv(
+        "AGIONE_OPS_PRO_ENDPOINT", "https://agione.pro"
+    ).rstrip("/"),
+    "cc": os.getenv(
+        "AGIONE_OPS_CC_ENDPOINT", "https://agione.cc"
+    ).rstrip("/"),
+}
 _agione_key = os.getenv("AGIONE_OPS_ENCRYPTION_KEY", "").strip()
+if not _agione_key:
+    from pathlib import Path
+
+    _agione_key_file = Path(os.getenv(
+        "AGIONE_OPS_AUTO_KEY_PATH", "/opt/agione-keys/credentials.key"
+    ))
+    if _agione_key_file.is_file():
+        _agione_key = _agione_key_file.read_text().strip()
 AGIONE_OPS_ACTIVE_KEY_ID = os.getenv(
     "AGIONE_OPS_ACTIVE_KEY_ID", "agione-v1"
 ).strip() if _agione_key else ""

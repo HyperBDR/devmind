@@ -8,16 +8,18 @@ const header = read('../src/components/layout/AppHeader.vue')
 const layout = read('../src/components/layout/AppLayout.vue')
 const quotation = read('../src/pages/Quotation.vue')
 
-test('AGIOne embeds native controls in the business breadcrumb row', () => {
+test('AGIOne keeps portal controls in the header and source setup in sidebar', () => {
   assert.doesNotMatch(page, /AppLayout/)
   assert.equal((page.match(/<header\b/g) || []).length, 1)
   const topbar = page.match(/<header class="topbar">([\s\S]*?)<\/header>/)?.[1]
   assert.ok(topbar)
   assert.match(topbar, /class="header-context"/)
   assert.match(topbar, /class="crumb"/)
-  assert.match(topbar, /ref="connectionControl"/)
+  assert.doesNotMatch(topbar, /ref="connectionControl"/)
   assert.match(topbar, /<AppHeader inline :show-menu-button="false"\s*\/>/)
   assert.ok(topbar.indexOf('class="crumb"') < topbar.indexOf('<AppHeader'))
+  assert.match(page, /class="sidebar-connection-trigger"/)
+  assert.match(page, /<NativeConnectionDialog/)
 })
 
 test('AppHeader inline is opt-in and does not add a nested header', () => {
@@ -36,7 +38,10 @@ test('Quote Desk and AGIOne use the same native controls and menu logic', () => 
   assert.equal((header.match(/<PlatformSwitcher\s*\/>/g) || []).length, 1)
   assert.equal((header.match(/const toggleUserMenu =/g) || []).length, 1)
   assert.equal((header.match(/const handleLogout =/g) || []).length, 1)
-  assert.match(header, /devmind-inline-header-controls flex items-center space-x-4/)
+  assert.match(
+    header,
+    /devmind-inline-header-controls flex items-center space-x-4/
+  )
   assert.doesNotMatch(page, /<LanguageSwitcher|<PlatformSwitcher|handleLogout/)
 })
 

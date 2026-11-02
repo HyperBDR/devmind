@@ -6,6 +6,26 @@ from agione_ops import views
 
 urlpatterns = [
     path(
+        "connections/self-service/",
+        views.SelfServiceConnectionListCreateAPIView.as_view(),
+        name="agione-ops-self-service-connections",
+    ),
+    path(
+        "connections/self-service/<uuid:connection_id>/",
+        views.SelfServiceConnectionDetailAPIView.as_view(),
+        name="agione-ops-self-service-connection-detail",
+    ),
+    path(
+        "connections/<uuid:connection_id>/notification-rules/",
+        views.NotificationRulesAPIView.as_view(),
+        name="agione-ops-notification-rules",
+    ),
+    path(
+        "connections/<uuid:connection_id>/tenant-classifications/",
+        views.TenantClassificationListAPIView.as_view(),
+        name="agione-ops-tenant-classifications",
+    ),
+    path(
         "connections/<uuid:connection_id>/live/query/",
         views.LiveOperationAPIView.as_view(),
         name="agione-ops-live-query",

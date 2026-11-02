@@ -1,10 +1,12 @@
 """Synthetic-only API acceptance with real permissions and an in-memory DB."""
 
 from datetime import timedelta
+from unittest.mock import patch
 
 import pytest
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
+from django.test import override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -183,6 +185,77 @@ def test_configuration_is_write_only_and_does_not_grant_data_access(actors):
         .status_code
         == 403
     )
+
+
+@override_settings(
+    AGIONE_OPS_NATIVE_ENABLED=True,
+    AGIONE_OPS_ALLOWED_ENDPOINT_HOSTS=("agione.pro", "agione.cc"),
+    AGIONE_OPS_SELF_SERVICE_ENDPOINTS={
+        "pro": "https://agione.pro",
+        "cc": "https://agione.cc",
+    },
+)
+def test_user_can_create_and_disconnect_an_encrypted_personal_connection(
+    actors,
+):
+    _, owner, _ = actors
+    access_key = "personal-private-ak"
+    secret_key = "personal-private-sk"
+    identity = {
+        "tenant_id": "tenant-42",
+        "principal_kind": "provider",
+    }
+    path = f"{BASE}self-service/"
+    with (
+        patch(
+            "agione_ops.views._probe_personal_connection",
+            return_value=(
+                "https://agione.pro",
+                {
+                    "auth_mode": "aksk",
+                    "api_prefix": "/hyperone",
+                    "access_key": access_key,
+                    "secret_key": secret_key,
+                },
+                identity,
+            ),
+        ),
+        patch("agione_ops.tasks.start_initial_native_sync") as initial_sync,
+    ):
+        response = client_for(owner).post(
+            path,
+            {
+                "platform": "pro",
+                "accessKey": access_key,
+                "secretKey": secret_key,
+            },
+            format="json",
+        )
+    assert response.status_code == 201, response.data
+    data = response.data["data"]
+    assert data["selfManaged"] is True
+    assert access_key not in response.content.decode()
+    assert secret_key not in response.content.decode()
+    connection = SourceConnection.objects.get(pk=data["id"])
+    assert connection.get_credentials()["secret_key"] == secret_key
+    assert connection.expected_tenant_id == "tenant-42"
+    assert connection.enabled is True
+    grant = ConnectionGrant.objects.get(connection=connection, user=owner)
+    assert grant.can_view is True
+    assert grant.can_sync is True
+    initial_sync.assert_called_once_with(connection, owner)
+
+    listed = client_for(owner).get(BASE)
+    assert listed.data["data"]["capabilities"][
+        "canSelfManageConnections"
+    ] is True
+    assert listed.data["data"]["results"][0]["selfManaged"] is True
+    disconnected = client_for(owner).delete(
+        f"{path}{connection.pk}/"
+    )
+    assert disconnected.status_code == 204
+    connection.refresh_from_db()
+    assert connection.enabled is False
 
 
 @pytest.mark.parametrize("staff,superuser", [(True, False), (True, True)])

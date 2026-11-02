@@ -8,7 +8,7 @@ django_celery_beat. No Django signals; keeps the flow explicit and portable.
 import importlib
 import logging
 
-from django.conf import settings
+from django.apps import apps
 from django.core.management.base import BaseCommand
 
 from core.periodic_registry import (
@@ -26,7 +26,8 @@ def discover_and_register(force=False):
     """
     TASK_REGISTRY.clear()
 
-    for app in settings.INSTALLED_APPS:
+    for app_config in apps.get_app_configs():
+        app = app_config.name
         try:
             module = importlib.import_module(f"{app}.periodic_tasks")
         except ModuleNotFoundError:

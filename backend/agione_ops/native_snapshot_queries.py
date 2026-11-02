@@ -351,12 +351,15 @@ def query_native_snapshot(connection, user, query):
             }),
         )
     from agione_ops.native_account_refresh import scope_for
+    from agione_ops.native_account_scope import tenant_classification
+    from agione_ops.tenant_directory import classification_version, overrides_for
 
     account_types, _ = scope_for(connection, user)
+    overrides = overrides_for(connection, user)
     customers = {key: value for key, value in snapshot.data["customers"].items()
-                 if str(key) not in INTERNAL_TENANT_IDS
-                 and account_types.get(f"tenant:{key}") != "internal"}
-    rows = [row for row in external_rows(snapshot.data["rows"], account_types) if (
+                 if tenant_classification(key, account_types, overrides)[0]
+                 != "internal"}
+    rows = [row for row in external_rows(snapshot.data["rows"], account_types, overrides) if (
         start <= parse_time(row["occurred_at"]) < end
     )]
     engine = LiveAnalytics(
@@ -369,11 +372,19 @@ def query_native_snapshot(connection, user, query):
     engine.user_names = scope.names if scope and scope_for(connection, user)[1] else {}
     stats = summary(engine.global_rows)
     finance = snapshot.data.get("finance", {})
+    from agione_ops.native_sync import digest
+
+    recorded = finance.get("classificationVersion")
+    current = classification_version(connection, user)
+    if recorded != current and (recorded or current != digest([{}, None])):
+        finance = unavailable_finance("CLASSIFICATION_CHANGED")
     if (finance.get("available")
             and finance.get("coverageBasis") != FINANCE_SCOPE_VERSION):
         finance = unavailable_finance("NATIVE_FINANCE_NOT_COLLECTED")
-    if operation in {"dashboard", "finance", "profile"} and not getattr(
-        settings, "AGIONE_OPS_FINANCE_REFRESH_ON_SYNC", True,
+    if operation in {"dashboard", "finance", "profile"} and (
+        (recorded != current and current != digest([{}, None])) or not getattr(
+            settings, "AGIONE_OPS_FINANCE_REFRESH_ON_SYNC", True,
+        )
     ):
         from agione_ops.native_finance_refresh import finance_for
 
@@ -425,14 +436,14 @@ def query_native_snapshot(connection, user, query):
                         prior_rows_by_id[item["record_id"]] = item
             previous = LiveAnalytics(
                 customers, snapshot.data["models"],
-                external_rows(list(prior_rows_by_id.values()), account_types),
+                external_rows(list(prior_rows_by_id.values()), account_types, overrides),
                 prior_start, start, query,
             )
         elif prior_snapshot and prior_snapshot.version.coverage.get(
             "pagingComplete"
         ) and not prior_snapshot.version.coverage.get("partial"):
             prior_rows = [row for row in external_rows(
-                prior_snapshot.data["rows"], account_types
+                prior_snapshot.data["rows"], account_types, overrides
             ) if (
                 prior_start <= parse_time(row["occurred_at"]) < start
             )]

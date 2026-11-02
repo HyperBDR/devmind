@@ -99,3 +99,23 @@ class AccountScopeTest(unittest.TestCase):
                 {"customer_id": "13", "subject_type": "USER"},
                 {"customer_id": "14", "subject_type": "USER"}]
         self.assertEqual(external_rows(rows, types), rows[1:])
+
+    def test_manual_tenant_override_has_priority_for_calls_and_finance(self):
+        from agione_ops.native_account_scope import (
+            external_finance_directory, external_rows,
+        )
+
+        fixed = "85086211957448704"
+        rows = [
+            {"customer_id": fixed, "user_id": "1", "subject_type": "USER"},
+            {"customer_id": fixed, "user_id": "2", "subject_type": "USER"},
+            {"customer_id": "12", "subject_type": "PROJECT"},
+        ]
+        directory = [
+            {"tenantId": fixed, "adminEmail": "a@oneprocloud.com"},
+            {"tenantId": "12", "adminEmail": "a@example.org"},
+        ]
+        overrides = {fixed: "external", "12": "internal"}
+        types = {f"{fixed}:1": "internal"}
+        self.assertEqual(external_rows(rows, types, overrides), rows[:2])
+        self.assertEqual(external_finance_directory(directory, overrides), {fixed})

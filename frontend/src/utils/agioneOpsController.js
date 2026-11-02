@@ -68,6 +68,7 @@ function initial(now) {
     readOnly: false,
     isLive: false,
     canManageConnections: false,
+    canSelfManageConnections: false,
     configurableConnections: [],
     connectionConfigured: false,
     dashboard: null,
@@ -156,6 +157,7 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
   let disposed = false
   let previousRun = false
   let restoredCustom = false
+  const dashboardCache = new Map()
 
   function publish(patch) {
     state = { ...state, ...patch }
@@ -174,6 +176,7 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
     revision += 1
     queryRevision += 1
     stopPolling()
+    dashboardCache.clear()
     session = sessionKey
     state = initial(now())
     restoredCustom = false
@@ -214,6 +217,8 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
         publish({ dashboard: data.state === 'not_collected' && state.dashboard?.state === 'ready'
           ? state.dashboard : data, windowMissing: missing,
           loading: false, run: null, syncing: false })
+        if (data.state === 'ready')
+          dashboardCache.set(`${session}:${id}`, data)
         return
       }
       if (state.isLive) {
@@ -274,7 +279,10 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
     } catch (error) {
       if (!current(version) || query !== queryRevision) return
       const failure = safeError(error)
-      if (failure.error === 'accessDenied') stopPolling()
+      if (failure.error === 'accessDenied') {
+        stopPolling()
+        dashboardCache.delete(`${session}:${id}`)
+      }
       publish({
         ...(state.readOnly && failure.error === 'accessDenied'
           ? { dashboard: null, startDate: '', endDate: '' }
@@ -299,6 +307,7 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
     const readOnly = isNative || selected.sourceKind === 'demo_snapshot'
     const configured = isNative ? selected.readyForLive !== false &&
       selected.hasCredentials !== false : true
+    const cached = dashboardCache.get(`${session}:${id}`) || null
     publish({
       connectionId: id,
       sourceKind: selected.sourceKind || '',
@@ -310,22 +319,25 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
         : !state.startDate
           ? previousCompleteWeek(now())
           : {}),
-      dashboard: null,
+      dashboard: cached,
       run: null,
       syncing: false,
       error: '',
       errorCode: '',
-      loading: false
+      loading: !!cached
     })
     if (isNative && !configured) {
       publish({ error: 'connectionNotConfigured',
         errorCode: 'NATIVE_CONNECTION_NOT_CONFIGURED' })
       return
     }
+    if (localNative && session && session !== 'user:pending') {
+      try { dateStorage?.setItem(`agione-connection:${session}`, id) } catch (_) {}
+    }
     await refresh()
   }
 
-  async function load() {
+  async function load(preferredId = '') {
     if (!session || disposed) return
     const version = ++revision
     const loadSession = session
@@ -348,11 +360,14 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
     try {
       const connections = []
       let canManageConnections = false
+      let canSelfManageConnections = false
       for (let offset = 0, page = 0; page < 20; page += 1) {
         const data = unwrap(await api.connections({ offset }))
         if (!current(version)) return
         if (!Array.isArray(data?.results)) throw new Error('invalidResponse')
         canManageConnections ||= data.capabilities?.canManageConnections === true
+        canSelfManageConnections ||=
+          data.capabilities?.canSelfManageConnections === true
         connections.push(
           ...data.results.filter((row) => typeof row?.id === 'string')
         )
@@ -365,6 +380,7 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
         connections.filter((row) => row.enabled === true), nativeOnly)
       publish({ connections: available, listLoading: false,
         canManageConnections,
+        canSelfManageConnections,
         configurableConnections: connections.filter((row) =>
           row.sourceKind === 'native'),
         isLive: !localNative &&
@@ -373,7 +389,16 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
           error: 'nativeNotConfigured',
           errorCode: 'NATIVE_CONNECTION_NOT_CONFIGURED'
         } : {}) })
-      if (available.length) await selectConnection(available[0].id)
+      let selected = available.find((item) => item.id === preferredId) ||
+        available[0]
+      if (!preferredId && localNative && session &&
+          session !== 'user:pending') {
+        try {
+          const saved = dateStorage?.getItem(`agione-connection:${session}`)
+          selected = available.find((item) => item.id === saved) || selected
+        } catch (_) {}
+      }
+      if (selected) await selectConnection(selected.id)
       if (restoredCustom && session === loadSession && !disposed &&
           state.windowMissing && state.sourceKind === 'native' && !state.error) {
         restoredCustom = false

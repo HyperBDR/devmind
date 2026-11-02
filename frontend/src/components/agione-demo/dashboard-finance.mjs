@@ -95,14 +95,21 @@ function financeMarkup(finance, { starting = false, locale = 'zh-CN' } = {}) {
   const live = finance.mode === 'live'
   const times = live ? readTime(finance.fetchedAt || finance.latestReadAt, locale) : finance.oldestReadAt === finance.latestReadAt ? readTime(finance.latestReadAt, locale) : `${readTime(finance.oldestReadAt, locale)} — ${readTime(finance.latestReadAt, locale)}`
   const warning = finance.staleCustomers > 0
+  const balanceOnly = finance.balanceSnapshotOnly === true
   const available = finance.available !== false && (!!distribution || !!summary || !!finance.balances?.length || !!finance.cycles?.length)
-  const status = ['queued', 'running'].includes(finance.refreshState)
-    ? (available ? '财务更新中 · 显示上次数据' : '财务更新中')
+  const status = finance.refreshState === 'retrying'
+    ? '财务接口暂时不可用 · 正在等待重试'
+    : ['stale', 'queued', 'running'].includes(
+    finance.refreshState
+  )
+    ? (balanceOnly ? '余额快照 · 账期更新中' : available ? '财务更新中 · 显示上次数据' : '财务更新中')
     : finance.refreshState === 'failed'
-      ? (available ? '财务更新失败 · 保留上次数据' : '财务更新失败')
+      ? (finance.refreshError === 'SOURCE_TIMEOUT' ? (available ? '财务接口超时 · 保留上次数据' : '财务接口超时 · 暂无可用数据') : balanceOnly ? '账期更新失败 · 显示余额快照' : available ? '财务更新失败 · 保留上次数据' : '财务更新失败')
       : live ? (!available ? (finance.reason || '本次上游未返回财务数据') : '本次上游读取结果') : !available ? (finance.reason || '已有缓存不可用') : warning ? '来源快照待更新' : '已采集财务 · 非实时'
   const readOnly = finance.readOnly !== false
-  const pending = ['queued', 'running'].includes(finance.refreshState)
+  const pending = ['stale', 'queued', 'running', 'retrying'].includes(
+    finance.refreshState
+  )
   const emptyReason = pending ? '正在后台采集财务数据。'
     : finance.refreshState === 'failed' ? '更新失败，请点击页面上方刷新数据重试。'
       : /^[A-Z_0-9]+$/.test(finance.reason || '')

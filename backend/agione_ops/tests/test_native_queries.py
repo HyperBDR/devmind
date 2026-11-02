@@ -20,6 +20,123 @@ END = "2026-10-02T00:00:00+08:00"
 STAMP = int(datetime(2026, 10, 1, 2, tzinfo=timezone.utc).timestamp() * 1000)
 
 
+def test_finance_request_retries_transient_errors_only(monkeypatch):
+    monkeypatch.setattr(module.time, "sleep", lambda seconds: None)
+    calls = []
+
+    def flaky():
+        calls.append(1)
+        if len(calls) < 3:
+            raise AgioneOpsError("SOURCE_TIMEOUT", status_code=504)
+        return "ok"
+
+    assert module.retry_finance_request(flaky) == "ok"
+    assert len(calls) == 3
+    calls.clear()
+
+    def forbidden():
+        calls.append(1)
+        raise AgioneOpsError("SOURCE_FORBIDDEN", status_code=403)
+
+    with pytest.raises(AgioneOpsError):
+        module.retry_finance_request(forbidden)
+    assert len(calls) == 1
+    calls.clear()
+
+    def timed_out():
+        calls.append(1)
+        raise AgioneOpsError("SOURCE_TIMEOUT", status_code=504)
+
+    with pytest.raises(AgioneOpsError):
+        module.retry_finance_request(timed_out)
+    assert len(calls) == 3
+
+
+def test_finance_checkpoint_contains_only_normalized_customer_data():
+    accounts = [{"id": "700", "tenantId": CID,
+                 "accountPurpose": "USER_AVAILABLE", "currency": "Credit",
+                 "balance": "12", "private": "SECRET"}]
+    overview = {"tenantId": CID, "currentCycle": "2026-10",
+                "cycleConsumedCredit": "2", "private": "SECRET",
+                "trend": [{"date": "2026-10-01", "consumedCredit": "2",
+                           "topUpCredit": "1", "private": "SECRET"}]}
+    previous = {"tenantId": CID, "trend": [{"date": "2026-09-30",
+                "consumedCredit": "1", "topUpCredit": "0"}]}
+    saved = module.finance_checkpoint(
+        CID, accounts, overview, previous, {"orders": [],
+        "successfulCount": 0, "paidTotals": []}, "2026-10", "2026-09",
+        "2026-10-01T00:00:00+00:00",
+    )
+    assert "SECRET" not in json.dumps(saved)
+    assert saved[1][0]["balance"] == "12"
+    assert saved[2]["trend"][0]["consumedCredit"] == "2"
+    assert saved[3]["trend"][0]["consumedCredit"] == "1"
+
+
+def test_batch_balance_requires_complete_fresh_directory():
+    from datetime import timedelta
+    from agione_ops.native_queries import batch_balance
+
+    now = datetime(2026, 11, 1, 8, tzinfo=timezone.utc)
+    rows = [{"tenantId": CID, "snapshotSyncTime": int(now.timestamp() * 1000),
+             "balances": [{"currency": "Credit", "balance": "-3.25"}]}]
+    result = batch_balance(rows, {CID}, now)
+    assert result["balanceDistributions"][0]["negativeCustomers"] == 1
+    assert result["oldestReadAt"] == now.isoformat()
+    assert result["periodSummaries"] == []
+    assert result["partial"] is True
+    window = finance_for_window(result, now - timedelta(days=1), now)
+    assert window["balanceSnapshotOnly"] is True
+    assert window["periodSummaries"] == []
+    assert batch_balance(rows, {CID, OTHER}, now) is None
+    stale = [{**rows[0], "snapshotSyncTime": int(
+        (now - timedelta(hours=4)).timestamp() * 1000
+    )}]
+    assert batch_balance(stale, {CID}, now) is None
+    assert batch_balance([{**rows[0], "balances": []}], {CID}, now) is None
+
+
+def test_automatic_finance_cache_is_scoped_and_manual_bypasses(
+    monkeypatch, settings,
+):
+    from django.core.cache import cache
+
+    settings.CACHES = {"default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "agione-finance-cache-test",
+    }}
+    cache.clear()
+    operator = SimpleNamespace(
+        pk="operator", platform="pro", principal_kind="operator",
+        config_version=1, credential_version=1, endpoint="https://example.test",
+    )
+    user = SimpleNamespace(pk=1)
+    calls = []
+    monkeypatch.setattr(
+        "agione_ops.tenant_directory.classification_version",
+        lambda *args: "version",
+    )
+    monkeypatch.setattr(module, "connections_for", lambda *args: SimpleNamespace(
+        filter=lambda **kwargs: [operator],
+    ))
+    monkeypatch.setattr(module, "_legacy_live_operation", lambda *args, **kwargs: (
+        calls.append(1) or {"data": {"available": True, "partial": False}}
+    ))
+    clock = [datetime(2026, 10, 31, 15, 59, tzinfo=timezone.utc)]
+    monkeypatch.setattr(module.timezone, "now", lambda: clock[0])
+    module.collect_native_finance(operator, user, reuse_cache=True)
+    module.collect_native_finance(operator, user, reuse_cache=True)
+    assert len(calls) == 1
+    module.collect_native_finance(operator, SimpleNamespace(pk=2), reuse_cache=True)
+    operator.credential_version = 2
+    module.collect_native_finance(operator, user, reuse_cache=True)
+    module.collect_native_finance(operator, user)
+    assert len(calls) == 4
+    clock[0] = datetime(2026, 10, 31, 16, 1, tzinfo=timezone.utc)
+    module.collect_native_finance(operator, user, reuse_cache=True)
+    assert len(calls) == 5
+
+
 @pytest.fixture
 def live(monkeypatch, settings):
     settings.AGIONE_OPS_NATIVE_ENABLED = True
@@ -48,6 +165,9 @@ def live(monkeypatch, settings):
             enabled=True,
         )
     state["connections"] = connections
+    monkeypatch.setattr(
+        "agione_ops.tenant_directory.operator_overrides", lambda operator: {},
+    )
     state["rows"] = [
         {
             "id": "90071992547409930002",
@@ -125,6 +245,11 @@ def live(monkeypatch, settings):
             state["calls"].append((self.connection.pk, path, params))
             if state["mutation"]:
                 state["mutation"](path)
+            if path.endswith("op-customer-overviews"):
+                if state.get("batch_error"):
+                    raise AgioneOpsError("SOURCE_REJECTED", status_code=502)
+                rows = state.get("batch", [])
+                return {"data": deepcopy(rows), "total": len(rows)}
             if path.startswith("/coperation/tenant/"):
                 key = (
                     "tenantId"
@@ -268,6 +393,188 @@ def test_dashboard_does_not_block_on_independent_finance(live):
     result = live["query"]("dashboard")
     assert "finance" not in result["data"]
     assert not any("/financial/" in path for _, path, _ in live["calls"])
+
+
+def test_operator_finance_reads_directory_once(live):
+    live["query"]("dashboard")
+    factory = type(live["clients"][0])
+    live["calls"].clear()
+    result = module._legacy_live_operation(
+        live["connections"]["operator"], object(),
+        {"operation": "finance", "window": {
+            "start": START, "endExclusive": END,
+        }, "payload": {}},
+        client_factory=factory,
+    )
+    assert result["data"]["available"]
+    assert sum(path.endswith("op-customers")
+               for _, path, _ in live["calls"]) == 1
+
+
+def test_finance_fast_balance_and_batch_error_fallback(live):
+    from django.utils import timezone as django_timezone
+
+    live["query"]("dashboard")
+    factory = type(live["clients"][0])
+    live["batch"] = [{
+        "tenantId": CID,
+        "snapshotSyncTime": int(django_timezone.now().timestamp() * 1000),
+        "balances": [{"currency": "Credit", "balance": "12"}],
+    }]
+    query = {"operation": "finance", "window": {
+        "start": START, "endExclusive": END,
+    }, "payload": {}}
+    early = []
+    full = module._legacy_live_operation(
+        live["connections"]["operator"], object(), query,
+        client_factory=factory, on_balance=early.append,
+    )["data"]
+    assert early[0]["balances"][0]["value"] == "12"
+    assert full["balances"][0]["value"] == "-3.25"
+    assert full["partial"] is False
+    live["batch_error"] = True
+    early.clear()
+    full = module._legacy_live_operation(
+        live["connections"]["operator"], object(), query,
+        client_factory=factory, on_balance=early.append,
+    )["data"]
+    assert not early
+    assert full["balances"][0]["value"] == "-3.25"
+
+
+def test_finance_retry_reuses_completed_customer_only_for_same_task(live, settings):
+    from django.core.cache import cache
+
+    settings.CACHES = {"default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "agione-finance-resume-test",
+    }}
+    cache.clear()
+    live["query"]("dashboard")
+    factory = type(live["clients"][0])
+    query = {"operation": "finance", "window": {
+        "start": START, "endExclusive": END,
+    }, "payload": {}}
+    args = (live["connections"]["operator"], SimpleNamespace(pk=123), query)
+    live["calls"].clear()
+    first = module._legacy_live_operation(
+        *args, client_factory=factory, checkpoint_scope="task-a",
+    )["data"]
+    second = module._legacy_live_operation(
+        *args, client_factory=factory, checkpoint_scope="task-a",
+    )["data"]
+    assert first["balances"] == second["balances"]
+    assert sum(path.endswith("/accounts") for _, path, _ in live["calls"]) == 1
+    module._legacy_live_operation(
+        *args, client_factory=factory, checkpoint_scope="task-b",
+    )
+    assert sum(path.endswith("/accounts") for _, path, _ in live["calls"]) == 2
+
+
+def test_finance_timings_are_aggregated_without_customer_ids(
+    live, settings, caplog,
+):
+    import logging
+
+    settings.AGIONE_OPS_FINANCE_CONCURRENCY = 1
+    with caplog.at_level(logging.INFO, logger=module.__name__):
+        live["query"]("finance")
+    message = next(
+        record.getMessage() for record in caplog.records
+        if "AGIOne finance request timing" in record.getMessage()
+    )
+    assert "workers=1" in message
+    assert "accounts" in message and "recharge" in message
+    assert CID not in message
+
+
+def test_automatic_finance_reuses_valid_previous_month_only(live, settings):
+    from datetime import timedelta
+    from django.core.cache import cache
+    from django.utils import timezone as django_timezone
+
+    settings.CACHES = {"default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "agione-history-test",
+    }}
+    cache.clear()
+    live["query"]("dashboard")
+    factory = type(live["clients"][0])
+    previous = django_timezone.localdate().replace(day=1) - timedelta(days=1)
+    live["previous"] = {
+        "tenantId": CID,
+        "trend": [{"date": previous.isoformat(),
+                   "consumedCredit": "4.50", "topUpCredit": "1"}],
+    }
+    query = {"operation": "finance", "window": {
+        "start": START, "endExclusive": END,
+    }, "payload": {}}
+    operator = live["connections"]["operator"]
+    user = SimpleNamespace(pk=123)
+    live["calls"].clear()
+    first = module._legacy_live_operation(
+        operator, user, query, client_factory=factory, historical_cache=True,
+    )["data"]
+    second = module._legacy_live_operation(
+        operator, user, query, client_factory=factory, historical_cache=True,
+    )["data"]
+    assert first["trend"] == second["trend"]
+    assert sum(bool(params and params.get("range") == "lastMonth")
+               for _, _, params in live["calls"]) == 1
+    module._legacy_live_operation(operator, user, query, client_factory=factory)
+    assert sum(bool(params and params.get("range") == "lastMonth")
+               for _, _, params in live["calls"]) == 2
+
+
+def test_manual_finance_populates_history_without_using_stale_history(
+    live, settings,
+):
+    from datetime import timedelta
+    from django.core.cache import cache
+    from django.utils import timezone as django_timezone
+
+    settings.CACHES = {"default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "agione-manual-history-test",
+    }}
+    cache.clear()
+    live["query"]("dashboard")
+    factory = type(live["clients"][0])
+    previous = django_timezone.localdate().replace(day=1) - timedelta(days=1)
+    live["previous"] = {"tenantId": CID, "trend": [{
+        "date": previous.isoformat(), "consumedCredit": "4.50",
+        "topUpCredit": "1",
+    }]}
+    query = {"operation": "finance", "window": {
+        "start": START, "endExclusive": END,
+    }, "payload": {}}
+    args = (live["connections"]["operator"], SimpleNamespace(pk=123), query)
+    live["calls"].clear()
+    module._legacy_live_operation(*args, client_factory=factory,
+                                  history_write=True)
+    automatic = module._legacy_live_operation(
+        *args, client_factory=factory, historical_cache=True,
+        history_write=True,
+    )["data"]
+    assert automatic["trend"][0]["value"] == "4.50"
+    assert sum(bool(params and params.get("range") == "lastMonth")
+               for _, _, params in live["calls"]) == 1
+    live["previous"]["trend"][0]["consumedCredit"] = "8.50"
+    manual = module._legacy_live_operation(
+        *args, client_factory=factory, history_write=True,
+    )["data"]
+    assert manual["trend"][0]["value"] == "8.50"
+    assert sum(bool(params and params.get("range") == "lastMonth")
+               for _, _, params in live["calls"]) == 2
+    updated = module._legacy_live_operation(
+        *args, client_factory=factory, historical_cache=True,
+    )["data"]
+    assert updated["trend"][0]["value"] == "8.50"
+    other = (args[0], SimpleNamespace(pk=456), query)
+    module._legacy_live_operation(*other, client_factory=factory,
+                                  historical_cache=True)
+    assert sum(bool(params and params.get("range") == "lastMonth")
+               for _, _, params in live["calls"]) == 3
 
 
 def test_large_log_windows_read_all_pages_with_isolated_clients(live):
@@ -622,6 +929,12 @@ def test_tenant_name_uses_safe_admin_username_only_when_name_missing():
     assert tenant_display_name({"customerName": "客户", "adminUsername": "owner"}, "12") == "客户"
     assert tenant_display_name({"adminUsername": "owner"}, "12") == "owner"
     assert tenant_display_name({"adminUsername": "owner@example.com"}, "12") == "12"
+    assert tenant_display_name(
+        {"adminUsername": "owner@example.com"}, "12", allow_email=True,
+    ) == "owner@example.com"
+    assert tenant_display_name(
+        {"adminUsername": "password@example.com"}, "12", allow_email=True,
+    ) == "12"
     assert tenant_display_name({}, "12") == "12"
 
 
@@ -646,3 +959,35 @@ def test_request_evidence_shows_known_caller_and_model_names():
     assert evidence["modelName"] == "模型"
     engine.user_names = {}
     assert engine.evidence(row)["userName"] == "456"
+
+
+def test_hourly_distribution_uses_scoped_shanghai_time_and_distinct_customers():
+    from agione_ops.native_analytics import LiveAnalytics
+
+    start = datetime.fromisoformat("2026-10-01T00:00:00+08:00")
+    end = datetime.fromisoformat("2026-10-03T00:00:00+08:00")
+    def row(identifier, customer, at, model):
+        return {
+            "record_id": identifier, "customer_id": customer,
+            "model_id": model, "user_id": None, "project_id": None,
+            "subject_type": "USER", "occurred_at": at,
+            "result": "SUCCESS", "failureKey": "NOT_APPLICABLE",
+            "input_tokens": None, "output_tokens": None,
+            "total_tokens": None,
+        }
+    rows = [
+        row("1", "1", "2026-10-01T02:05:00+00:00", "7"),
+        row("2", "1", "2026-10-02T10:20:00+08:00", "7"),
+        row("3", "2", "2026-10-02T10:30:00+08:00", "7"),
+        row("4", "2", "2026-10-02T11:30:00+08:00", "8"),
+    ]
+    engine = LiveAnalytics({"1": {"name": "A"}, "2": {"name": "B"}},
+                           {}, rows, start, end,
+                           {"filters": {"model_ids": ["7"]}})
+    result = engine.hourly_distribution()
+    assert result["dayCount"] == 2
+    assert len(result["points"]) == 24
+    assert result["points"][10] == {
+        "hour": 10, "requestCount": 3, "activeCustomers": 2,
+    }
+    assert result["points"][11]["requestCount"] == 0

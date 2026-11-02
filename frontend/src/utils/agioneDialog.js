@@ -30,10 +30,18 @@ export function createDialogBackdropDismiss(dismiss) {
   return { onPointerDown, onClick, reset }
 }
 
+function supportsStableGutter(doc) {
+  try { return doc.defaultView.CSS.supports('scrollbar-gutter', 'stable') } catch (_) { return false }
+}
+
 export function releaseOriginalDialog(dialog, {force=false} = {}) {
   if (!dialog || (dialog.open && !force)) return
   activeDrawers.delete(dialog)
-  if (![...activeDrawers].some(node=>node.ownerDocument===dialog.ownerDocument)) dialog.ownerDocument?.documentElement?.classList.remove('agione-drawer-open')
+  if (![...activeDrawers].some(node=>node.ownerDocument===dialog.ownerDocument)) {
+    const root = dialog.ownerDocument?.documentElement
+    root?.classList.remove('agione-drawer-open')
+    root?.style?.removeProperty?.('--agione-drawer-gap')
+  }
   dialog.id = dialog.dataset.agioneDialogId || 'agione-inactive-dialog'
   const body = dialog.querySelector('[data-agione-dialog-body]')
   if (body) body.id = `${dialog.id}-body`
@@ -48,7 +56,16 @@ export function claimOriginalDialog(dialog) {
     releaseOriginalDialog(previous)
   }
   dialog.id = 'dialog'
-  if(dialog.classList.contains('request-drawer')){ activeDrawers.add(dialog); dialog.ownerDocument?.documentElement?.classList.add('agione-drawer-open') }
+  if(dialog.classList.contains('request-drawer')){
+    const doc = dialog.ownerDocument
+    const root = doc?.documentElement
+    if (root && !supportsStableGutter(doc)) {
+      const gap = Math.max(0, (doc.defaultView?.innerWidth || 0) - root.clientWidth)
+      root.style?.setProperty?.('--agione-drawer-gap', `${gap}px`)
+    }
+    activeDrawers.add(dialog)
+    root?.classList.add('agione-drawer-open')
+  }
   const body = dialog.querySelector('[data-agione-dialog-body]')
   if (body) body.id = 'dialogBody'
 }

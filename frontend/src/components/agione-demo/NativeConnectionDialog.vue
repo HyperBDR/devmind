@@ -1,88 +1,386 @@
 <template>
-  <dialog ref="dialog" class="native-connection-dialog" aria-labelledby="nativeConnectionTitle" @close="clearSecrets" @cancel="clearSecrets">
-    <form v-if="canManage" @submit.prevent="save" autocomplete="off">
-      <div class="native-heading"><h2 id="nativeConnectionTitle">AGIOne 原生直连配置</h2><button type="button" aria-label="关闭连接配置" :disabled="busy" @click="close">×</button></div>
-      <p>DevMind 后端直接请求 AGIOne 上游，不中转 8011。密钥仅写入后端加密存储，不会回显。</p>
-      <label>已有原生连接<select v-model="editingId" :disabled="busy" @change="selectExisting"><option value="">新建连接</option><option v-for="item in connections" :key="item.id" :value="item.id">{{ item.name }} · {{ item.platform }} / {{ item.principalKind }}</option></select></label>
-      <div class="native-grid">
-        <label>名称<input v-model.trim="draft.name" maxlength="160" required :disabled="busy" /></label>
-        <label>上游 HTTPS 地址<input v-model.trim="draft.endpoint" type="url" required placeholder="https://AGIOne上游域名" :disabled="busy" /></label>
-        <label>平台<select v-model="draft.platform" :disabled="busy || !!editingId"><option value="pro">Pro</option><option value="cc">CC</option></select></label>
-        <label>账号身份<select v-model="draft.principalKind" :disabled="busy || !!editingId"><option value="provider">Provider</option><option value="operator">Operator</option></select></label>
-        <label>预期租户 ID<input v-model.trim="draft.expectedTenantId" required maxlength="160" :disabled="busy || !!editingId" /></label>
-        <label>认证方式<select v-model="draft.authMode" :disabled="busy" @change="clearSecrets"><option value="aksk">AK / SK 签名</option><option value="password">账号密码登录</option></select></label>
-        <label>API 前缀<input v-model.trim="draft.apiPrefix" placeholder="/hyperone" :disabled="busy" /></label>
-        <label>用户名（可选核验）<input v-model="draft.username" autocomplete="off" :disabled="busy" /></label>
-        <template v-if="draft.authMode === 'aksk'"><label>Access Key<input v-model="draft.accessKey" type="password" autocomplete="new-password" :required="!editingId" :disabled="busy" /></label><label>Secret Key<input v-model="draft.secretKey" type="password" autocomplete="new-password" :required="!editingId" :disabled="busy" /></label></template>
-        <template v-else><label>密码<input v-model="draft.password" type="password" autocomplete="new-password" :required="!editingId" :disabled="busy" /></label><label>密码 AES Key<input v-model="draft.passwordAesKey" type="password" autocomplete="new-password" :required="!editingId" :disabled="busy" /></label><label>Client ID<input v-model="draft.clientId" autocomplete="off" :required="!editingId" :disabled="busy" /></label><label>Client Secret<input v-model="draft.clientSecret" type="password" autocomplete="new-password" :required="!editingId" :disabled="busy" /></label></template>
-        <label>shost（按上游要求）<input v-model.trim="draft.shost" autocomplete="off" :disabled="busy" /></label><label>static_route（按上游要求）<input v-model.trim="draft.staticRoute" autocomplete="off" :disabled="busy" /></label>
+  <dialog
+    ref="dialog"
+    class="native-connection-dialog"
+    aria-labelledby="nativeConnectionTitle"
+    @close="clearSecrets"
+    @cancel="clearSecrets"
+  >
+    <form @submit.prevent="save" autocomplete="off">
+      <div class="native-heading">
+        <div>
+          <h2 id="nativeConnectionTitle">
+            {{ editing ? '连接设置' : '连接 AGIOne' }}
+          </h2>
+          <p>
+            {{
+              editing
+                ? '查看连接状态或更新访问密钥。'
+                : '验证成功后自动采集经营数据。'
+            }}
+          </p>
+        </div>
+        <button
+          type="button"
+          aria-label="关闭连接配置"
+          :disabled="busy"
+          @click="close"
+        >
+          ×
+        </button>
       </div>
-      <label class="native-check"><input v-model="draft.enabled" type="checkbox" :disabled="busy" />启用连接</label>
-      <label v-if="currentUserId" class="native-check"><input v-model="grantSelf" type="checkbox" :disabled="busy" />明确授权当前账号读取此连接（不授权同步或写入）</label>
-      <p>编辑时密钥留空表示保留原凭据；填写新密钥会替换整组认证配置。保存不会自动执行验证操作。</p>
-      <p v-if="error" role="alert">{{ error }}</p><p v-if="status" role="status">{{ status }}</p>
-      <div class="native-footer"><button type="button" :disabled="busy || !editingId" @click="verify">测试直连身份</button><button type="button" :disabled="busy" @click="close">取消</button><button type="submit" :disabled="busy">{{ busy ? '处理中…' : '保存加密配置' }}</button></div>
+      <div v-if="editing" class="native-status">
+        <div>
+          <span class="status-dot"></span
+          ><b>{{ editing.enabled ? '已连接' : '已断开' }}</b>
+        </div>
+        <dl>
+          <div>
+            <dt>平台</dt>
+            <dd>AGIOne {{ platformLabel(editing.platform) }}</dd>
+          </div>
+          <div>
+            <dt>账号身份</dt>
+            <dd>{{ accountLabel(editing.principalKind) }}</dd>
+          </div>
+          <div>
+            <dt>最近验证</dt>
+            <dd>{{ displayTime(editing.verifiedAt) }}</dd>
+          </div>
+        </dl>
+      </div>
+      <label v-if="!editing"
+        >平台
+        <select v-model="draft.platform" :disabled="busy">
+          <option value="pro">AGIOne Pro</option>
+          <option value="cc">AGIOne CC</option>
+        </select>
+      </label>
+      <div v-if="editing" class="native-section-title">更新密钥</div>
+      <label
+        >Access Key
+        <input
+          v-model="draft.accessKey"
+          type="password"
+          autocomplete="new-password"
+          :disabled="busy"
+          :placeholder="editing ? '输入新 AK' : '请输入 AK'"
+        />
+      </label>
+      <label
+        >Secret Key
+        <input
+          v-model="draft.secretKey"
+          type="password"
+          autocomplete="new-password"
+          :disabled="busy"
+          :placeholder="editing ? '输入新 SK' : '请输入 SK'"
+        />
+      </label>
+      <p class="native-security">
+        ▣ 密钥加密保存，不会回显。{{ editing ? '留空则保留当前密钥。' : '' }}
+      </p>
+      <p v-if="error" class="native-error" role="alert">{{ error }}</p>
+      <p v-if="status" class="native-success" role="status">{{ status }}</p>
+      <div class="native-footer">
+        <button
+          v-if="editing && editing.enabled"
+          type="button"
+          class="danger"
+          :disabled="busy"
+          @click="disconnect"
+        >
+          断开连接
+        </button>
+        <span class="native-spacer"></span>
+        <button type="button" :disabled="busy" @click="close">取消</button>
+        <button type="submit" class="primary" :disabled="busy || !canSave">
+          {{ busy ? '正在验证…' : editing ? '保存并验证' : '保存并连接' }}
+        </button>
+      </div>
     </form>
-    <div v-else><h2 id="nativeConnectionTitle">连接配置未授权</h2><p>需要管理员显式配置权限。</p><button type="button" @click="close">关闭</button></div>
   </dialog>
 </template>
 
 <script setup>
-import { onBeforeUnmount, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref } from 'vue'
 import { agioneOpsApi } from '@/api/agioneOps'
-const props = defineProps({ canManage: Boolean, connections: { type: Array, default: () => [] }, currentUserId: { type: [String, Number], default: '' } })
-const emit = defineEmits(['changed'])
-const dialog = ref(null), busy = ref(false), editingId = ref(''), error = ref(''), status = ref(''), grantSelf = ref(false)
-const defaults = () => ({ name: '', endpoint: '', platform: 'pro', principalKind: 'provider', expectedTenantId: '', enabled: true, authMode: 'aksk', apiPrefix: '/hyperone', username: '', accessKey: '', secretKey: '', password: '', passwordAesKey: '', clientId: '', clientSecret: '', shost: '', staticRoute: '' })
-const draft = reactive(defaults())
-function clearSecrets() { for (const key of ['accessKey', 'secretKey', 'password', 'passwordAesKey', 'clientSecret']) draft[key] = '' }
-function close() { if (busy.value) return; clearSecrets(); dialog.value?.close() }
-function open() { if (!props.canManage) return; Object.assign(draft, defaults()); editingId.value = ''; grantSelf.value = false; error.value = ''; status.value = ''; dialog.value?.showModal() }
-function selectExisting() { clearSecrets(); const item = props.connections.find(row => row.id === editingId.value); Object.assign(draft, defaults(), item ? { name: item.name, endpoint: item.endpoint || '', platform: item.platform, principalKind: item.principalKind, expectedTenantId: item.expectedTenantId || '', enabled: item.enabled } : {}); status.value = ''; error.value = ''; grantSelf.value = false }
-function safeError(exc) { const code = exc?.response?.data?.data?.errorCode; return /^[A-Za-z_0-9]{1,100}$/.test(code || '') ? `操作未完成（${code}），请检查地址、权限与配置。` : '操作未完成，请检查连接配置或读取权限。' }
+
+const emit = defineEmits(['changed', 'disconnected'])
+const dialog = ref(null),
+  busy = ref(false),
+  editing = ref(null)
+const error = ref(''),
+  status = ref('')
+const draft = reactive({ platform: 'pro', accessKey: '', secretKey: '' })
+const canSave = computed(() =>
+  editing.value
+    ? (!draft.accessKey && !draft.secretKey) ||
+      (!!draft.accessKey && !!draft.secretKey)
+    : !!draft.accessKey && !!draft.secretKey
+)
+
+function clearSecrets() {
+  draft.accessKey = ''
+  draft.secretKey = ''
+}
+function platformLabel(value) {
+  return value === 'cc' ? 'CC' : 'Pro'
+}
+function accountLabel(value) {
+  return value === 'operator' ? 'Operator' : 'Provider'
+}
+function displayTime(value) {
+  if (!value || !Number.isFinite(Date.parse(value))) return '尚未验证'
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(new Date(value))
+}
+function safeError(exc) {
+  const code =
+    exc?.response?.data?.data?.errorCode ||
+    exc?.response?.data?.data?.detail?.code
+  return (
+    {
+      SOURCE_AUTH_FAILED: 'AK 或 SK 无效，请检查后重试。',
+      SOURCE_FORBIDDEN: '当前密钥没有读取 AGIOne 数据的权限。',
+      SOURCE_ROLE_NOT_VERIFIED: '无法确认账号身份，请联系管理员检查账号角色。',
+      SELF_SERVICE_CONNECTION_EXISTS: '该 AGIOne 账号已经连接。',
+      credential_unavailable: '服务端尚未配置凭据加密密钥。'
+    }[code] || '连接未完成，请检查密钥或稍后重试。'
+  )
+}
+function open(item = null) {
+  editing.value = item
+  draft.platform = item?.platform || 'pro'
+  clearSecrets()
+  error.value = ''
+  status.value = ''
+  dialog.value?.showModal()
+}
+function close() {
+  if (!busy.value) {
+    clearSecrets()
+    dialog.value?.close()
+  }
+}
 async function save() {
-  if (!props.canManage || busy.value) return
-  const actor = props.currentUserId
-  busy.value = true; error.value = ''; status.value = ''
+  if (busy.value || !canSave.value) return
+  if (editing.value && !draft.accessKey && !draft.secretKey) return close()
+  busy.value = true
+  error.value = ''
+  status.value = ''
   try {
-    const payload = { name: draft.name, endpoint: draft.endpoint, enabled: draft.enabled }
-    if (!editingId.value) Object.assign(payload, { sourceKind: 'native', platform: draft.platform, principalKind: draft.principalKind, expectedTenantId: draft.expectedTenantId })
-    const changingSecrets = draft.authMode === 'aksk' ? !!(draft.accessKey || draft.secretKey) : !!(draft.password || draft.passwordAesKey || draft.clientSecret)
-    if (!editingId.value || changingSecrets) {
-      const credentials = { auth_mode: draft.authMode, api_prefix: draft.apiPrefix }
-      for (const [key, value] of Object.entries({ username: draft.username, shost: draft.shost, static_route: draft.staticRoute })) if (value) credentials[key] = value
-      if (draft.authMode === 'aksk') { if (!draft.accessKey || !draft.secretKey) throw new Error('missing'); Object.assign(credentials, { access_key: draft.accessKey, secret_key: draft.secretKey }) }
-      else { if (!draft.password || !draft.passwordAesKey || !draft.clientId || !draft.clientSecret || !draft.username) throw new Error('missing'); Object.assign(credentials, { password: draft.password, password_aes_key: draft.passwordAesKey, client_id: draft.clientId, client_secret: draft.clientSecret }) }
-      payload.credentials = credentials
+    const body = {
+      platform: draft.platform,
+      accessKey: draft.accessKey,
+      secretKey: draft.secretKey
     }
-    const response = editingId.value ? await agioneOpsApi.updateConnection(editingId.value, payload) : await agioneOpsApi.createConnection(payload)
+    const response = editing.value
+      ? await agioneOpsApi.updatePersonalConnection(editing.value.id, body)
+      : await agioneOpsApi.createPersonalConnection(body)
     const connection = response?.data?.data
     if (!connection?.id) throw new Error('invalidResponse')
-    if (!props.canManage || props.currentUserId !== actor) return
-    editingId.value = connection.id
-    if (grantSelf.value && props.currentUserId) await agioneOpsApi.grantConnection(connection.id, props.currentUserId, { canView: true, canSync: false })
-    status.value = '配置已保存。可显式点击“测试直连身份”；业务读取只使用 DevMind 原生接口。'
-    emit('changed')
-  } catch (exc) { error.value = safeError(exc) }
-  finally { clearSecrets(); busy.value = false }
+    status.value = editing.value
+      ? '密钥已更新并验证通过。'
+      : '连接成功，正在自动采集数据。'
+    clearSecrets()
+    emit('changed', connection.id)
+    setTimeout(() => close(), 500)
+  } catch (exc) {
+    error.value = safeError(exc)
+  } finally {
+    busy.value = false
+  }
 }
-async function verify() { if (!props.canManage || !editingId.value || busy.value) return; busy.value = true; error.value = ''; status.value = ''; try { await agioneOpsApi.verifyConnection(editingId.value); status.value = '上游直连身份验证通过。'; emit('changed') } catch (exc) { error.value = safeError(exc) } finally { busy.value = false } }
+async function disconnect() {
+  if (!editing.value || busy.value) return
+  busy.value = true
+  error.value = ''
+  try {
+    await agioneOpsApi.disconnectPersonalConnection(editing.value.id)
+    const id = editing.value.id
+    busy.value = false
+    close()
+    emit('disconnected', id)
+  } catch (exc) {
+    error.value = safeError(exc)
+    busy.value = false
+  }
+}
 onBeforeUnmount(clearSecrets)
 defineExpose({ open, close })
 </script>
 
 <style scoped>
-.native-connection-dialog { width: min(850px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); border: 1px solid #dbe2ec; border-radius: 12px; padding: 24px; color: #17233b; background: #fff; overflow-y: auto; }
-.native-connection-dialog::backdrop { background: #15283f45; }
-.native-heading,.native-footer { display: flex; align-items: center; gap: 12px; justify-content: space-between; }
-.native-heading h2 { font-size: 20px; margin: 0; }
-.native-connection-dialog p { font-size: 13px; line-height: 1.7; color: #586880; margin: 12px 0; }
-.native-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; margin: 16px 0; }
-.native-connection-dialog label { display: flex; flex-direction: column; gap: 7px; font-size: 13px; }
-.native-connection-dialog input,.native-connection-dialog select { border: 1px solid #ccd6e4; border-radius: 6px; padding: 9px; min-width: 0; color: #17233b; background: white; }
-.native-connection-dialog .native-check { flex-direction: row; align-items: center; margin: 12px 0; }
-.native-footer { justify-content: flex-end; margin-top: 20px; }
-.native-footer button,.native-heading button { padding: 8px 12px; border: 1px solid #ccd6e4; border-radius: 6px; background: white; }
-.native-footer button[type=submit] { background: #2563eb; color: white; }
-@media(max-width:600px) { .native-grid { grid-template-columns: 1fr; } .native-footer { flex-wrap: wrap; } }
+.native-connection-dialog {
+  width: min(470px, calc(100vw - 32px));
+  max-height: calc(100dvh - 48px);
+  border: 1px solid #dbe2ec;
+  border-radius: 14px;
+  padding: 0;
+  color: #17233b;
+  background: #fff;
+  box-shadow: 0 20px 65px #15283f35;
+}
+.native-connection-dialog::backdrop {
+  background: #15283f66;
+}
+.native-connection-dialog form {
+  padding: 22px 24px 20px;
+}
+.native-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.native-heading h2 {
+  margin: 0;
+  font-size: 19px;
+}
+.native-heading p {
+  margin: 5px 0 0;
+  font-size: 12px;
+  color: #75859d;
+}
+.native-heading button {
+  border: 0;
+  background: transparent;
+  color: #75859d;
+  font-size: 22px;
+  padding: 0 4px;
+}
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 14px;
+  font-size: 13px;
+  font-weight: 600;
+}
+input,
+select {
+  min-height: 42px;
+  box-sizing: border-box;
+  border: 1px solid #ccd6e4;
+  border-radius: 7px;
+  padding: 9px 11px;
+  color: #17233b;
+  background: #fff;
+  font: inherit;
+}
+input:focus,
+select:focus {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
+.native-status {
+  border: 1px solid #dbe5f3;
+  border-radius: 9px;
+  overflow: hidden;
+  margin-bottom: 18px;
+}
+.native-status > div {
+  padding: 10px 12px;
+  background: #f4f8ff;
+  color: #16865a;
+  font-size: 13px;
+}
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #1fbd78;
+  margin-right: 8px;
+}
+.native-status dl {
+  margin: 0;
+}
+.native-status dl div {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  padding: 8px 12px;
+  border-top: 1px solid #edf1f6;
+  font-size: 12px;
+}
+.native-status dt {
+  color: #75859d;
+}
+.native-status dd {
+  margin: 0;
+}
+.native-section-title {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid #e5eaf1;
+  font-size: 14px;
+  font-weight: 700;
+}
+.native-security {
+  margin: 10px 0 0;
+  color: #75859d;
+  font-size: 12px;
+}
+.native-error,
+.native-success {
+  margin: 12px 0 0;
+  padding: 9px 10px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+.native-error {
+  color: #b42318;
+  background: #fff1f0;
+}
+.native-success {
+  color: #087a4b;
+  background: #ebfbf3;
+}
+.native-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 22px;
+}
+.native-spacer {
+  flex: 1;
+}
+.native-footer button {
+  min-height: 38px;
+  padding: 8px 14px;
+  border: 1px solid #ccd6e4;
+  border-radius: 7px;
+  background: #fff;
+  color: #17233b;
+}
+.native-footer .primary {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #fff;
+}
+.native-footer .danger {
+  border-color: #f2b8b5;
+  color: #c4322b;
+}
+.native-footer button:disabled {
+  opacity: 0.55;
+}
+@media (max-width: 520px) {
+  .native-connection-dialog form {
+    padding: 18px 16px 16px;
+  }
+  .native-footer {
+    flex-wrap: wrap;
+  }
+  .native-spacer {
+    display: none;
+    width: 100%;
+  }
+}
 </style>

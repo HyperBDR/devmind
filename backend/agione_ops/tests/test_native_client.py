@@ -101,6 +101,43 @@ def test_identity_checks_tenant_username_and_observed_role_without_pii():
     assert "username" not in result
 
 
+def test_discover_identity_uses_the_single_observed_upstream_role():
+    candidate = connection(
+        expected_tenant_id="pending",
+        principal_kind="provider",
+        credentials={
+            "access_key": "PRIVATE-AK",
+            "secret_key": "PRIVATE-SK",
+        },
+    )
+    with NativeClient(
+        candidate,
+        transport=httpx.MockTransport(lambda request: response()),
+    ) as source:
+        result = source.discover_identity()
+    assert result["tenant_id"] == "123"
+    assert result["principal_kind"] == "provider"
+    assert result["role_verified"] is True
+
+
+@pytest.mark.parametrize("roles", [[], ["ROLE_PROVIDER", "ROLE_OPERATOR"]])
+def test_discover_identity_rejects_missing_or_ambiguous_roles(roles):
+    candidate = connection(
+        expected_tenant_id="pending",
+        credentials={
+            "access_key": "PRIVATE-AK",
+            "secret_key": "PRIVATE-SK",
+        },
+    )
+    transport = httpx.MockTransport(
+        lambda request: response({**INFO, "roles": roles})
+    )
+    with NativeClient(candidate, transport=transport) as source:
+        with pytest.raises(AgioneOpsError) as error:
+            source.discover_identity()
+    assert error.value.code == "SOURCE_ROLE_NOT_VERIFIED"
+
+
 @pytest.mark.parametrize(
     "info",
     [

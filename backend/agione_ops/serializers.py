@@ -35,6 +35,18 @@ class EmptySerializer(StrictSerializer):
     """An explicit action does not accept source data or credentials."""
 
 
+class SelfServiceConnectionSerializer(StrictSerializer):
+    """Accept only the credentials needed for a personal AGIOne connection."""
+
+    platform = serializers.ChoiceField(choices=["pro", "cc"])
+    access_key = serializers.CharField(
+        min_length=1, max_length=4096, trim_whitespace=False, write_only=True,
+    )
+    secret_key = serializers.CharField(
+        min_length=1, max_length=4096, trim_whitespace=False, write_only=True,
+    )
+
+
 class ConnectionSerializer(StrictSerializer, serializers.ModelSerializer):
     """Configuration metadata with no plaintext or ciphertext response."""
 
@@ -46,6 +58,7 @@ class ConnectionSerializer(StrictSerializer, serializers.ModelSerializer):
     )
     has_credentials = serializers.SerializerMethodField()
     ready_for_live = serializers.SerializerMethodField()
+    self_managed = serializers.SerializerMethodField()
     expected_tenant_id = serializers.CharField(max_length=160)
     synthetic_fixture = serializers.ChoiceField(
         choices=["basic"],
@@ -67,6 +80,7 @@ class ConnectionSerializer(StrictSerializer, serializers.ModelSerializer):
             "credentials",
             "has_credentials",
             "ready_for_live",
+            "self_managed",
             "verified_at",
             "credential_version",
             "config_version",
@@ -88,6 +102,10 @@ class ConnectionSerializer(StrictSerializer, serializers.ModelSerializer):
     def get_ready_for_live(self, obj):
         return bool(obj.source_kind == "native" and obj.enabled and
                     obj.endpoint and obj.credential_ciphertext)
+
+    def get_self_managed(self, obj):
+        request = self.context.get("request")
+        return bool(request and obj.created_by_id == request.user.id)
 
     def validate_credentials(self, value):
         if len(json.dumps(value).encode("utf-8")) > 16384:

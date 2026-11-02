@@ -1,6 +1,8 @@
 """Independent, authorized finance refresh for native snapshots."""
 
 import logging
+import time
+import uuid
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
@@ -47,6 +49,7 @@ def _valid(projection, connection, user):
 def finance_for(connection, user):
     """Return only the requesting user's current authorized finance result."""
     from agione_ops.native_sync import digest
+    from agione_ops.tenant_directory import classification_version
 
     row = NativeFinanceProjection.objects.filter(
         connection=connection, user=user,
@@ -60,11 +63,15 @@ def finance_for(connection, user):
     result = dict(
         row.data or unavailable_finance("NATIVE_FINANCE_NOT_COLLECTED")
     )
+    current = classification_version(connection, user)
+    recorded = result.get("classificationVersion")
+    if recorded != current and (recorded or current != digest([{}, None])):
+        result = unavailable_finance("CLASSIFICATION_CHANGED")
     if (result.get("available")
             and result.get("coverageBasis") != FINANCE_SCOPE_VERSION):
         result = unavailable_finance("NATIVE_FINANCE_NOT_COLLECTED")
     result["mode"] = "snapshot"
-    expired = row.status in {"queued", "running"} and row.updated_at <= (
+    expired = row.status in {"queued", "running", "retrying"} and row.updated_at <= (
         timezone.now() - timedelta(minutes=20)
     )
     result["refreshState"] = "failed" if expired else row.status
@@ -93,7 +100,7 @@ def schedule_finance(run_id):
                 connection=connection, user=user,
             ).first()
             if row and _valid(row, connection, user):
-                if row.status in {"queued", "running"} and row.updated_at > (
+                if row.status in {"queued", "running", "retrying"} and row.updated_at > (
                     timezone.now() - timedelta(minutes=20)
                 ):
                     return
@@ -115,10 +122,11 @@ def schedule_finance(run_id):
                 connection=connection, user=user, defaults=values,
             )
             row_id = row.pk
+            generation = uuid.uuid4().hex
 
             def dispatch():
                 try:
-                    refresh_native_finance.delay(row_id, str(run.pk))
+                    refresh_native_finance.delay(row_id, str(run.pk), generation)
                 except Exception:
                     NativeFinanceProjection.objects.filter(
                         pk=row_id, run_id=run.pk, status="queued",
@@ -131,19 +139,25 @@ def schedule_finance(run_id):
         logger.warning("Native finance refresh is not authorized")
 
 
-def execute_finance(row_id, run_id):
+def execute_finance(row_id, run_id, *, can_retry=False, checkpoint_scope=None):
     """Fence stale tasks and validate permissions around source IO."""
     from agione_ops.native_queries import collect_native_finance
     from agione_ops.native_sync import (
         authorize_native_run, digest, validate_snapshot_data,
     )
 
+    started = time.perf_counter()
     with transaction.atomic():
         row = NativeFinanceProjection.objects.select_for_update().filter(
-            pk=row_id, run_id=run_id, status="queued",
+            pk=row_id, run_id=run_id, status__in=["queued", "retrying"],
         ).select_related("connection", "operator", "run", "user").first()
         if row is None:
             return
+        queue_ms = max(0, round(
+            (timezone.now() - row.updated_at).total_seconds() * 1000
+        ))
+        previous_data = row.data
+        previous_digest = row.content_digest
         row.status = "running"
         row.save(update_fields=["status", "updated_at"])
     try:
@@ -154,7 +168,39 @@ def execute_finance(row_id, run_id):
         authorize_native_run(row.run, connection)
         if not _valid(row, connection, user):
             raise ValueError("FINANCE_AUTHORITY_CHANGED")
-        data = collect_native_finance(connection, user)
+
+        def publish_balance(data):
+            from agione_ops.tenant_directory import classification_version
+
+            snapshot = NativePublishedSnapshot.objects.get(version__run=row.run)
+            sample = {**snapshot.data, "finance": data}
+            validate_snapshot_data(sample, digest(sample))
+            with transaction.atomic():
+                ids = sorted({row.connection_id, row.operator_id}, key=str)
+                list(SourceConnection.objects.select_for_update().filter(
+                    pk__in=ids,
+                ).order_by("pk"))
+                current = NativeFinanceProjection.objects.select_for_update().get(
+                    pk=row_id,
+                )
+                if str(current.run_id) != str(run_id) or current.status != "running":
+                    return
+                active = get_connection_for(user, row.connection_id, "view_business")
+                authorize_native_run(row.run, active)
+                if (not _valid(current, active, user)
+                        or classification_version(active, user) !=
+                        data.get("classificationVersion")):
+                    raise ValueError("FINANCE_AUTHORITY_CHANGED")
+                current.data = data
+                current.content_digest = digest(data)
+                current.save(update_fields=["data", "content_digest", "updated_at"])
+
+        data = collect_native_finance(
+            connection, user,
+            reuse_cache=row.run.idempotency_key.startswith("agione-auto-"),
+            on_balance=publish_balance,
+            checkpoint_scope=checkpoint_scope,
+        )
         snapshot = NativePublishedSnapshot.objects.get(version__run=row.run)
         sample = {**snapshot.data, "finance": data}
         validate_snapshot_data(sample, digest(sample))
@@ -177,6 +223,14 @@ def execute_finance(row_id, run_id):
             authorize_native_run(row.run, connection)
             if not _valid(current, connection, user):
                 raise ValueError("FINANCE_AUTHORITY_CHANGED")
+            from agione_ops.tenant_directory import classification_version
+
+            current_version = classification_version(connection, user)
+            data_version = data.get("classificationVersion")
+            if data_version != current_version and (
+                data_version or current_version != digest([{}, None])
+            ):
+                raise ValueError("CLASSIFICATION_CHANGED")
             current.data = data
             current.status = "ready"
             current.error_code = ""
@@ -184,9 +238,26 @@ def execute_finance(row_id, run_id):
             current.save(update_fields=[
                 "data", "content_digest", "status", "error_code", "updated_at",
             ])
-    except Exception:
+    except Exception as error:
         logger.exception("Native finance refresh failed")
-        NativeFinanceProjection.objects.filter(
+        code = getattr(error, "code", "")
+        transient = code in {
+            "SOURCE_TIMEOUT", "SOURCE_UNREACHABLE", "SOURCE_UNAVAILABLE",
+            "SOURCE_RATE_LIMITED",
+        }
+        retrying = transient and can_retry
+        updates = {"status": "retrying" if retrying else "failed",
+                   "error_code": code if transient else "FINANCE_REFRESH_FAILED",
+                   "updated_at": timezone.now()}
+        if previous_data and previous_digest:
+            updates.update(data=previous_data, content_digest=previous_digest)
+        changed = NativeFinanceProjection.objects.filter(
             pk=row_id, run_id=run_id, status="running",
-        ).update(status="failed", error_code="FINANCE_REFRESH_FAILED",
-                 updated_at=timezone.now())
+        ).update(**updates)
+        if retrying and changed:
+            return code
+    finally:
+        logger.info(
+            "AGIOne finance timing run=%s queue_ms=%s total_ms=%s",
+            run_id, queue_ms, round((time.perf_counter() - started) * 1000),
+        )

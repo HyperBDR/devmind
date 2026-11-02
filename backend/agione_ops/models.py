@@ -328,6 +328,104 @@ class ConnectionGrant(models.Model):
         )
 
 
+class NotificationRules(models.Model):
+    """Configuration owned by a viewer and an authorized source."""
+
+    connection = models.ForeignKey(SourceConnection, on_delete=models.CASCADE)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    config = models.JSONField(default=dict)
+    last_analysis = models.JSONField(null=True, blank=True)
+    last_scheduled_at = models.DateTimeField(null=True, blank=True)
+    last_report_date = models.DateField(null=True, blank=True)
+    last_report_status = models.CharField(max_length=24, default="idle")
+    last_report_attempts = models.PositiveSmallIntegerField(default=0)
+    last_report_updated_at = models.DateTimeField(null=True, blank=True)
+    last_auto_started_at = models.DateTimeField(null=True, blank=True)
+    last_auto_success_at = models.DateTimeField(null=True, blank=True)
+    next_auto_refresh_at = models.DateTimeField(null=True, blank=True)
+    last_inspection_at = models.DateTimeField(null=True, blank=True)
+    last_auto_status = models.CharField(max_length=24, default="idle")
+    last_auto_error_code = models.CharField(max_length=64, blank=True, default="")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "devmind_agione_notification_rules"
+        constraints = [models.UniqueConstraint(
+            fields=["connection", "user"], name="dm_agione_rules_user_uq",
+        )]
+
+
+class NotificationDelivery(models.Model):
+    """Durable, deduplicated delivery state for one analysis event."""
+
+    rules = models.ForeignKey(
+        NotificationRules,
+        on_delete=models.CASCADE,
+        related_name="deliveries",
+    )
+    event_key = models.CharField(max_length=64, unique=True)
+    issue_signature = models.CharField(max_length=64, db_index=True)
+    kind = models.CharField(
+        max_length=32,
+        choices=[
+            ("alert", "Alert"),
+            ("recovery", "Recovery"),
+            ("recovered_history", "Recovered history"),
+        ],
+    )
+    payload = models.JSONField(default=dict)
+    status = models.CharField(
+        max_length=16,
+        default="pending",
+        db_index=True,
+        choices=[
+            ("pending", "Pending"),
+            ("sending", "Sending"),
+            ("retrying", "Retrying"),
+            ("sent", "Sent"),
+            ("failed", "Failed"),
+            ("silenced", "Silenced"),
+        ],
+    )
+    attempts = models.PositiveSmallIntegerField(default=0)
+    error_message = models.TextField(blank=True, default="")
+    response = models.JSONField(null=True, blank=True)
+    next_retry_at = models.DateTimeField(null=True, blank=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "devmind_agione_notification_delivery"
+        ordering = ["-created_at", "-pk"]
+
+
+class NotificationIssue(models.Model):
+    """Current state of one tenant issue used for deduplication."""
+
+    rules = models.ForeignKey(
+        NotificationRules,
+        on_delete=models.CASCADE,
+        related_name="issues",
+    )
+    customer_id = models.CharField(max_length=160)
+    reason = models.CharField(max_length=32)
+    active = models.BooleanField(default=True, db_index=True)
+    finding = models.JSONField(default=dict)
+    first_seen_at = models.DateTimeField()
+    last_seen_at = models.DateTimeField()
+    last_alerted_at = models.DateTimeField(null=True, blank=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "devmind_agione_notification_issue"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["rules", "customer_id", "reason"],
+                name="dm_agione_issue_reason_uq",
+            )
+        ]
+
+
 class SyncRun(models.Model):
     """Domain authority for authorization, progress and version publication."""
 
@@ -643,4 +741,6 @@ from agione_ops.native_sync_models import (
     NativeStagedRecord,
     NativeSyncShard,
     NativeSyncState,
+    TenantClassification,
+    TenantClassificationChange,
 )

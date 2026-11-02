@@ -7,6 +7,36 @@ import { dashboardFinance } from '../src/components/agione-demo/dashboard-financ
 import { tokenAxis, trendPlot } from '../src/components/agione-demo/core.mjs'
 import { profileTrendView } from '../src/components/agione-demo/profile-charts.mjs'
 
+test('finance distinguishes a pending retry from a final timeout', () => {
+  const base = { available: true, balances: [{ unit: 'Credit', value: '1' }],
+    balanceDistributions: [], periodSummaries: [], trend: [],
+    refreshError: 'SOURCE_TIMEOUT' }
+  assert.match(dashboardFinance({ ...base, refreshState: 'retrying' }),
+    /正在等待重试/)
+  assert.match(dashboardFinance({ ...base, refreshState: 'failed' }),
+    /财务接口超时 · 保留上次数据/)
+})
+
+test('balance-only refresh shows the source time and pending details', () => {
+  const html = dashboardFinance({
+    available: true, partial: true, balanceSnapshotOnly: true,
+    refreshState: 'running',
+    scopeLabel: '余额为上游快照，账期明细仍在采集',
+    oldestReadAt: '2026-11-01T08:00:00Z',
+    latestReadAt: '2026-11-01T08:00:00Z',
+    totalCustomers: 1, balanceCustomers: 1,
+    balances: [{ unit: 'Credit', value: '12' }],
+    balanceDistributions: [{ unit: 'Credit', threshold: '40',
+      healthyCustomers: 0, normalCustomers: 0, lowCustomers: 1,
+      zeroCustomers: 0, negativeCustomers: 0, belowThresholdCustomers: 1,
+      negativeTotal: '0' }],
+    periodSummaries: [], trend: [],
+  })
+  assert.match(html, /余额快照 · 账期更新中/)
+  assert.match(html, /11\/01 16:00/)
+  assert.match(html, /账期摘要待采集/)
+})
+
 test('profile trend uses readable ticks and retains every day and exact values', () => {
   const plot = trendPlot([{ value: 83281000 }, { value: 10 }, { value: null }], [], 'value', true)
   assert.deepEqual(plot.ticks, [0, 25000000, 50000000, 75000000, 100000000])
@@ -114,4 +144,24 @@ test('drawer uses verified caller and customer names for multidimensional groups
   const english = renderOriginalWorkspace(input, 'groupHeader', {locale:'en', drawer:true, body:{window:state.window,groupKey:{userId:'123:456'}}, callerName:'客户', customerName:'模型'})
   assert.match(english, /<h3>客户<\/h3>/)
   assert.match(english, /<strong>模型<\/strong>/)
+})
+
+
+test('focus defaults to hourly distribution and preserves trend switching', () => {
+  const hourlyDistribution = { dayCount: 2, points: Array.from({ length: 24 }, (_, hour) => ({ hour, requestCount: hour === 10 ? 4 : 0, activeCustomers: hour === 10 ? 2 : 0 })) }
+  const dashboard = { summary, customers: [], comparison: { state: 'UNAVAILABLE' }, models: [], hourlyDistribution }
+  const base = originalWorkspaceState({ ...state, dashboard })
+  const html = renderOriginalWorkspace(base, 'focus')
+  assert.match(html, /data-chart-view="hourly" aria-pressed="true"/)
+  assert.match(html, /10:00—11:00：4 次调用/)
+  assert.match(html, /已采集数据 · 非实时/)
+  const avg = renderOriginalWorkspace({ ...base, hourMode: 'average' }, 'focus')
+  assert.match(avg, /10:00—11:00：2 次调用/)
+  const customers = renderOriginalWorkspace({ ...base, hourMetric: 'customers' }, 'focus')
+  assert.match(customers, /10:00—11:00：2 位客户/)
+  const trend = renderOriginalWorkspace({ ...base, chartView: 'trend' }, 'focus')
+  assert.match(trend, /data-chart-view="trend" aria-pressed="true"/)
+  assert.doesNotMatch(trend, /class="hour-plot"/)
+  assert.match(html, /class="hour-yaxis"/)
+  assert.doesNotMatch(trend, /末尾24小时|data-trend-grain/)
 })

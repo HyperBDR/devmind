@@ -7,8 +7,10 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
+from django.utils import timezone
 from djangorestframework_camel_case.parser import CamelCaseJSONParser
 from djangorestframework_camel_case.util import camelize
 from rest_framework.exceptions import APIException, ValidationError
@@ -35,6 +37,7 @@ from agione_ops.serializers import (
     DashboardQuerySerializer,
     EmptySerializer,
     GrantSerializer,
+    SelfServiceConnectionSerializer,
     SyncRequestSerializer,
 )
 from core.settings.renders import CustomJSONRenderer
@@ -143,6 +146,169 @@ class LocalAPIView(APIView):
         return super().finalize_response(request, response, *args, **kwargs)
 
 
+class NotificationRulesAPIView(LocalAPIView):
+    """Read and validate notification settings for the authorized viewer."""
+
+    def get(self, request, connection_id):
+        from agentcore_notifier.adapters.django.models import (
+            NotificationChannel,
+        )
+        from agione_ops.models import NotificationRules
+        from agione_ops.notification_rules import NotificationRulesSerializer
+        from agione_ops.native_sync_models import (
+            NativeAccountScope,
+            NativeFinanceProjection,
+        )
+
+        connection = get_connection_for(request.user, connection_id)
+        row = NotificationRules.objects.filter(
+            connection=connection, user=request.user,
+        ).first()
+        serializer = NotificationRulesSerializer(
+            data=row.config if row else {},
+        )
+        serializer.is_valid(raise_exception=True)
+        channels = NotificationChannel.objects.filter(
+            is_active=True, channel_type=NotificationChannel.TYPE_WEBHOOK,
+        ).filter(Q(user__isnull=True) | Q(user=request.user))
+        latest_delivery = row.deliveries.first() if row else None
+        from zoneinfo import ZoneInfo
+
+        today = timezone.now().astimezone(ZoneInfo("Asia/Shanghai")).date()
+        report_delivery = row.deliveries.filter(
+            payload__trigger="scheduled", payload__scheduled_date=str(today),
+            kind="alert",
+        ).first() if row else None
+        report_status = "not_run"
+        if row and row.config.get("enabled"):
+            report_status = (row.last_report_status
+                             if row.last_report_date == today else "not_run")
+        if report_delivery:
+            report_status = report_delivery.status
+        finance = NativeFinanceProjection.objects.filter(
+            connection=connection,
+            user=request.user,
+        ).first()
+        tenants = NativeAccountScope.objects.filter(
+            connection=connection,
+            user=request.user,
+        ).first()
+        return Response({
+            **serializer.validated_data,
+            "configured": row is not None,
+            "last_analysis": row.last_analysis if row else None,
+            "delivery_status": {
+                "status": latest_delivery.status,
+                "kind": latest_delivery.kind,
+                "attempts": latest_delivery.attempts,
+                "created_at": latest_delivery.created_at,
+                "sent_at": latest_delivery.sent_at,
+            } if latest_delivery else None,
+            "daily_report": {
+                "date": today.isoformat(), "status": report_status,
+                "attempts": row.last_report_attempts if row and row.last_report_date == today else 0,
+                "updated_at": (
+                    report_delivery.sent_at or report_delivery.created_at
+                    if report_delivery else
+                    row.last_report_updated_at if row and row.last_report_date == today
+                    else None
+                ),
+            },
+            "refresh_status": {
+                "calls": {
+                    "status": row.last_auto_status if row else "idle",
+                    "last_started_at": (
+                        row.last_auto_started_at if row else None
+                    ),
+                    "last_success_at": (
+                        row.last_auto_success_at if row else None
+                    ),
+                    "next_at": row.next_auto_refresh_at if row else None,
+                    "error_code": (
+                        row.last_auto_error_code if row else ""
+                    ),
+                },
+                "finance": {
+                    "status": finance.status if finance else "not_run",
+                    "updated_at": finance.updated_at if finance else None,
+                    "error_code": finance.error_code if finance else "",
+                },
+                "tenants": {
+                    "status": tenants.status if tenants else "not_run",
+                    "updated_at": tenants.updated_at if tenants else None,
+                    "error_code": tenants.error_code if tenants else "",
+                },
+                "inspection": {
+                    "status": (
+                        (row.last_analysis or {}).get("status", "not_run")
+                        if row else "not_run"
+                    ),
+                    "updated_at": row.last_inspection_at if row else None,
+                },
+            },
+            "channels": [{"id": str(item.uuid), "name": item.name}
+                         for item in channels.order_by("name")],
+        })
+
+    def put(self, request, connection_id):
+        from agentcore_notifier.adapters.django.models import (
+            NotificationChannel,
+        )
+        from agione_ops.models import NotificationRules
+        from agione_ops.notification_rules import NotificationRulesSerializer
+        from django.utils import timezone
+
+        connection = get_connection_for(
+            request.user, connection_id, "run_sync",
+        )
+        serializer = NotificationRulesSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        config = serializer.validated_data
+        if config.get("channel_id"):
+            channel = NotificationChannel.objects.filter(
+                uuid=config["channel_id"], is_active=True,
+                channel_type=NotificationChannel.TYPE_WEBHOOK,
+            ).filter(Q(user__isnull=True) | Q(user=request.user)).first()
+            if not channel:
+                raise ValidationError("通知渠道不可用或未授权。")
+        row = NotificationRules.objects.filter(
+            connection=connection,
+            user=request.user,
+        ).first()
+        defaults = {"config": config}
+        if row and (
+            row.config.get("schedule_time", "01:20")
+            != config["schedule_time"]
+            or not row.config.get("enabled") and config.get("enabled")
+        ):
+            defaults["last_scheduled_at"] = None
+        auto_changed = (
+            row is None
+            or row.config.get("auto_refresh_enabled", False)
+            != config["auto_refresh_enabled"]
+            or int(row.config.get("auto_refresh_hours", 3))
+            != int(config["auto_refresh_hours"])
+        )
+        if not config["auto_refresh_enabled"]:
+            defaults.update({
+                "next_auto_refresh_at": None,
+                "last_auto_status": "disabled",
+                "last_auto_error_code": "",
+            })
+        elif auto_changed:
+            defaults.update({
+                "next_auto_refresh_at": timezone.now(),
+                "last_auto_status": "scheduled",
+                "last_auto_error_code": "",
+            })
+        NotificationRules.objects.update_or_create(
+            connection=connection,
+            user=request.user,
+            defaults=defaults,
+        )
+        return Response(config)
+
+
 class ConnectionListCreateAPIView(LocalAPIView):
     """List authorized connection metadata or explicitly configure a source."""
 
@@ -150,27 +316,28 @@ class ConnectionListCreateAPIView(LocalAPIView):
         if has_action(request.user, "manage_connections"):
             queryset = connections_for(request.user, "manage_connections")
         else:
-            ids = set()
-            for action in ("view_business", "run_sync"):
-                if has_action(request.user, action):
-                    ids.update(
-                        connections_for(request.user, action).values_list(
-                            "id", flat=True
-                        )
-                    )
-            if not any(
-                has_action(request.user, action)
-                for action in ("view_business", "run_sync")
-            ):
+            can_view = has_action(request.user, "view_business")
+            can_sync = has_action(request.user, "run_sync")
+            if not (can_view or can_sync):
                 require_action(request.user, "view_business")
-            queryset = SourceConnection.objects.filter(pk__in=ids)
+            grants = ConnectionGrant.objects.filter(user=request.user)
+            scope = Q()
+            if can_view:
+                scope |= Q(can_view=True)
+            if can_sync:
+                scope |= Q(can_sync=True)
+            queryset = SourceConnection.objects.filter(
+                pk__in=grants.filter(scope).values("connection_id")
+            )
         paginator = LimitOffsetPagination()
         paginator.default_limit = 50
         paginator.max_limit = 100
         rows = paginator.paginate_queryset(queryset, request, view=self)
         return Response(
             {
-                "results": ConnectionSerializer(rows, many=True).data,
+                "results": ConnectionSerializer(
+                    rows, many=True, context={"request": request}
+                ).data,
                 "count": paginator.count,
                 "next": paginator.get_next_link(),
                 "previous": paginator.get_previous_link(),
@@ -181,6 +348,11 @@ class ConnectionListCreateAPIView(LocalAPIView):
                     "nativeEnabled": getattr(
                         settings, "AGIONE_OPS_NATIVE_ENABLED", False
                     ),
+                    "canSelfManageConnections": (
+                        getattr(settings, "AGIONE_OPS_NATIVE_ENABLED", False)
+                        and has_action(request.user, "view_business")
+                        and has_action(request.user, "run_sync")
+                    ),
                 },
             }
         )
@@ -190,7 +362,158 @@ class ConnectionListCreateAPIView(LocalAPIView):
         serializer = ConnectionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         connection = serializer.save(created_by=request.user)
-        return Response(ConnectionSerializer(connection).data, status=201)
+        return Response(
+            ConnectionSerializer(
+                connection, context={"request": request}
+            ).data,
+            status=201,
+        )
+
+
+def _probe_personal_connection(user, platform, access_key, secret_key):
+    """Verify write-only credentials before creating a personal connection."""
+    from agione_ops.native_client import NativeClient
+
+    endpoint = getattr(
+        settings, "AGIONE_OPS_SELF_SERVICE_ENDPOINTS", {}
+    ).get(platform)
+    if not endpoint:
+        raise AgioneOpsError("SELF_SERVICE_ENDPOINT_UNAVAILABLE", status_code=503)
+    candidate = SourceConnection(
+        name="AGIOne personal connection",
+        platform=platform,
+        principal_kind="provider",
+        source_kind="native",
+        endpoint=endpoint,
+        expected_tenant_id="pending",
+        enabled=True,
+        created_by=user,
+    )
+    candidate.set_credentials({
+        "auth_mode": "aksk",
+        "api_prefix": "/hyperone",
+        "access_key": access_key,
+        "secret_key": secret_key,
+    })
+    with NativeClient(candidate) as client:
+        return endpoint, candidate.get_credentials(), client.discover_identity()
+
+
+class SelfServiceConnectionListCreateAPIView(LocalAPIView):
+    """Create a verified connection owned and usable by the current user."""
+
+    def post(self, request):
+        require_action(request.user, "view_business")
+        require_action(request.user, "run_sync")
+        serializer = SelfServiceConnectionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        endpoint, credentials, identity = _probe_personal_connection(
+            request.user,
+            values["platform"],
+            values["access_key"],
+            values["secret_key"],
+        )
+        with transaction.atomic():
+            if SourceConnection.objects.filter(
+                created_by=request.user,
+                source_kind="native",
+                platform=values["platform"],
+                principal_kind=identity["principal_kind"],
+                expected_tenant_id=identity["tenant_id"],
+            ).exists():
+                raise AgioneOpsError(
+                    "SELF_SERVICE_CONNECTION_EXISTS", status_code=409
+                )
+            label = "Pro" if values["platform"] == "pro" else "CC"
+            role = identity["principal_kind"].title()
+            connection = SourceConnection(
+                name=f"AGIOne {label} · {role}",
+                platform=values["platform"],
+                principal_kind=identity["principal_kind"],
+                source_kind="native",
+                endpoint=endpoint,
+                expected_tenant_id=identity["tenant_id"],
+                verified_tenant_id=identity["tenant_id"],
+                verified_at=timezone.now(),
+                enabled=True,
+                created_by=request.user,
+            )
+            connection.set_credentials(credentials)
+            connection.save()
+            ConnectionGrant.objects.create(
+                connection=connection,
+                user=request.user,
+                can_view=True,
+                can_sync=True,
+            )
+        connection.refresh_from_db()
+        from agione_ops.tasks import start_initial_native_sync
+
+        start_initial_native_sync(connection, request.user)
+        return Response(
+            ConnectionSerializer(
+                connection, context={"request": request}
+            ).data,
+            status=201,
+        )
+
+
+class SelfServiceConnectionDetailAPIView(LocalAPIView):
+    """Rotate or disable credentials on a user-owned personal connection."""
+
+    def _owned(self, request, connection_id):
+        require_action(request.user, "view_business")
+        require_action(request.user, "run_sync")
+        return get_object_or_404(
+            SourceConnection,
+            pk=connection_id,
+            created_by=request.user,
+            source_kind="native",
+        )
+
+    def patch(self, request, connection_id):
+        connection = self._owned(request, connection_id)
+        serializer = SelfServiceConnectionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        if values["platform"] != connection.platform:
+            raise ValidationError("连接平台不能修改。")
+        _endpoint, credentials, identity = _probe_personal_connection(
+            request.user,
+            connection.platform,
+            values["access_key"],
+            values["secret_key"],
+        )
+        if (
+            identity["tenant_id"] != connection.expected_tenant_id
+            or identity["principal_kind"] != connection.principal_kind
+        ):
+            raise AgioneOpsError("SOURCE_IDENTITY_MISMATCH", status_code=403)
+        with transaction.atomic():
+            connection = SourceConnection.objects.select_for_update().get(
+                pk=connection.pk
+            )
+            connection.set_credentials(credentials)
+            connection.save(update_fields=["credential_ciphertext", "key_id"])
+            connection.verified_tenant_id = identity["tenant_id"]
+            connection.verified_at = timezone.now()
+            connection.enabled = True
+            connection.save(update_fields=[
+                "verified_tenant_id", "verified_at", "enabled"
+            ])
+        connection.refresh_from_db()
+        return Response(
+            ConnectionSerializer(
+                connection, context={"request": request}
+            ).data
+        )
+
+    def delete(self, request, connection_id):
+        connection = self._owned(request, connection_id)
+        connection.enabled = False
+        connection.save(update_fields=["enabled"])
+        return Response(status=204)
 
 
 class ConnectionDetailAPIView(LocalAPIView):
@@ -244,6 +567,146 @@ class ConnectionGrantAPIView(LocalAPIView):
         )
 
 
+class TenantClassificationListAPIView(LocalAPIView):
+    """List classifications from the authorized Operator directory."""
+
+    def get(self, request, connection_id):
+        from agione_ops.native_account_scope import tenant_classification
+        from agione_ops.tenant_directory import (
+            classification_version, tenant_directory,
+        )
+
+        connection = get_connection_for(request.user, connection_id)
+        search = request.query_params.get("search", "").strip().casefold()
+        classification_filter = request.query_params.get("classification", "")
+        source_filter = request.query_params.get("source", "")
+        if classification_filter not in {"", "internal", "external", "unknown"}:
+            raise ValidationError({"classification": "Invalid classification."})
+        if source_filter not in {"", "automatic", "manual"}:
+            raise ValidationError({"source": "Invalid source."})
+        try:
+            limit = int(request.query_params.get("limit", 50))
+            offset = int(request.query_params.get("offset", 0))
+        except (TypeError, ValueError):
+            raise ValidationError({"pagination": "Invalid limit or offset."})
+        if not 1 <= limit <= 100 or offset < 0:
+            raise ValidationError({"pagination": "Invalid limit or offset."})
+        version = classification_version(connection, request.user)
+        refresh = request.query_params.get("refresh", "0")
+        if refresh not in {"0", "1"}:
+            raise ValidationError({"refresh": "Invalid refresh value."})
+        _, rows, types, overrides = tenant_directory(
+            connection, request.user, use_cache=True, refresh=refresh == "1",
+        )
+        if version != classification_version(connection, request.user):
+            raise AgioneOpsError("CLASSIFICATION_CHANGED", status_code=409)
+        result = []
+        for row in rows:
+            tenant_id = str(row["tenantId"])
+            classification, source = tenant_classification(
+                tenant_id, types, overrides,
+            )
+            name = row["customerName"]
+            if search and search not in tenant_id.casefold() and (
+                search not in name.casefold()
+            ):
+                continue
+            if classification_filter and classification != classification_filter:
+                continue
+            if source_filter and source != source_filter:
+                continue
+            result.append({
+                "tenant_id": tenant_id,
+                "name": name,
+                "classification": classification,
+                "source": source,
+                "included": classification != "internal",
+            })
+        result.sort(key=lambda row: (row["name"].casefold(), row["tenant_id"]))
+        return Response({
+            "results": result[offset:offset + limit], "count": len(result),
+            "limit": limit, "offset": offset,
+            "version": version,
+        })
+
+    def post(self, request, connection_id):
+        from agione_ops.models import (
+            TenantClassification, TenantClassificationChange,
+        )
+        from agione_ops.native_finance_refresh import _operator
+        from agione_ops.native_sync_models import NativeFinanceProjection
+        from agione_ops.native_account_scope import tenant_classification
+        from agione_ops.tenant_directory import (
+            classification_version, operator_overrides, tenant_directory,
+        )
+
+        require_action(request.user, "manage_connections")
+        connection = get_connection_for(request.user, connection_id)
+        tenant_id = request.data.get("tenant_id")
+        choice = request.data.get("classification")
+        expected = request.data.get("version")
+        if not isinstance(tenant_id, str) or not re.fullmatch(r"[0-9]{1,40}", tenant_id):
+            raise ValidationError({"tenant_id": "Invalid tenant ID."})
+        if choice not in {"internal", "external", "automatic"}:
+            raise ValidationError({"classification": "Invalid classification."})
+        if not isinstance(expected, str) or not re.fullmatch(r"[0-9a-f]{64}", expected):
+            raise ValidationError({"version": "Invalid version."})
+        operator, rows, types, _ = tenant_directory(
+            connection, request.user, use_cache=True, refresh=False,
+        )
+        if tenant_id not in {str(row["tenantId"]) for row in rows}:
+            from rest_framework.exceptions import NotFound
+
+            raise NotFound("Tenant not found.")
+        with transaction.atomic():
+            locked = SourceConnection.objects.select_for_update().get(pk=operator.pk)
+            require_action(request.user, "manage_connections")
+            connection = get_connection_for(request.user, connection_id)
+            current_operator = _operator(connection, request.user)
+            if (not current_operator or current_operator.pk != operator.pk
+                    or locked.config_version != operator.config_version
+                    or locked.credential_version != operator.credential_version):
+                raise AgioneOpsError("CONNECTION_CHANGED", status_code=409)
+            if classification_version(connection, request.user) != expected:
+                raise AgioneOpsError("CLASSIFICATION_CHANGED", status_code=409)
+            if choice == "automatic":
+                TenantClassification.objects.filter(
+                    operator=operator, tenant_id=tenant_id,
+                ).delete()
+            else:
+                TenantClassification.objects.update_or_create(
+                    operator=operator, tenant_id=tenant_id,
+                    defaults={"classification": choice, "updated_by": request.user},
+                )
+            TenantClassificationChange.objects.create(
+                operator=operator, tenant_id=tenant_id,
+                classification=choice, actor=request.user,
+            )
+            version = classification_version(connection, request.user)
+            projections = NativeFinanceProjection.objects.filter(
+                operator=operator,
+            )
+            projections.update(status="stale", error_code="CLASSIFICATION_CHANGED")
+            from agione_ops.tasks import refresh_classification_finance
+
+            transaction.on_commit(
+                lambda: refresh_classification_finance.delay(operator.pk)
+            )
+        classification, source = tenant_classification(
+            tenant_id,
+            types,
+            operator_overrides(operator),
+        )
+        return Response({
+            "version": version,
+            "tenant_id": tenant_id,
+            "classification": classification,
+            "source": source,
+            "included": classification != "internal",
+            "finance_state": "queued",
+        })
+
+
 class LiveOperationAPIView(LocalAPIView):
     """Read a published local native snapshot without implicit acquisition."""
 
@@ -284,7 +747,7 @@ class FinanceRefreshAPIView(LocalAPIView):
             raise AgioneOpsError("NATIVE_FINANCE_NOT_COLLECTED", status_code=409)
         schedule_finance(row.run_id)
         finance, _ = finance_for(connection, request.user)
-        if finance.get("refreshState") not in {"queued", "running"}:
+        if finance.get("refreshState") not in {"queued", "running", "retrying"}:
             raise AgioneOpsError("FINANCE_REFRESH_FAILED", status_code=409)
         return Response({"state": finance["refreshState"]}, status=202)
 
@@ -330,6 +793,8 @@ class SyncRunCreateAPIView(LocalAPIView):
     """Accept an idempotent request; only a run UUID enters the task queue."""
 
     def post(self, request, connection_id):
+        from agione_ops.models import NotificationRules
+        from agione_ops.notification_rules import extend_manual_window
         from agione_ops.sync import submit_sync
 
         connection = get_connection_for(
@@ -343,6 +808,18 @@ class SyncRunCreateAPIView(LocalAPIView):
                 "A valid Idempotency-Key header is required."
             )
         window = serializer.validated_data["window"]
+        rules = NotificationRules.objects.filter(
+            connection=connection,
+            user=request.user,
+        ).first()
+        if (
+            connection.source_kind == "native"
+            and rules
+            and rules.config.get("enabled")
+        ):
+            from django.utils import timezone
+
+            window = extend_manual_window(window, timezone.now())
         try:
             run, created = submit_sync(
                 connection,

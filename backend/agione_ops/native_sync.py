@@ -6,9 +6,11 @@ import logging
 import math
 import re
 import time
+from bisect import bisect_left
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import timedelta
 from threading import Lock
+from time import perf_counter
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
@@ -52,7 +54,8 @@ FINANCE_FIELDS = frozenset({
     "trend", "trendTotal", "trendCustomers", "trendReason", "oldestReadAt",
     "latestReadAt", "fetchedAt", "partial", "nextOffset",
     "processedCustomers", "offset", "latestObservations", "coverageBasis",
-    "reason", "customerFinance",
+    "reason", "customerFinance", "classificationVersion",
+    "balanceSnapshotOnly",
 })
 
 
@@ -89,6 +92,11 @@ def validate_snapshot_data(data, content_digest):
     parse_time(metadata["collectedAt"])
     if "finance" in data:
         finance = data["finance"]
+        version = finance.get("classificationVersion") if isinstance(finance, dict) else None
+        if version is not None and (
+            not isinstance(version, str) or not re.fullmatch(r"[0-9a-f]{64}", version)
+        ):
+            invalid()
         if (
             not isinstance(finance, dict)
             or not set(finance).issubset(FINANCE_FIELDS)
@@ -100,6 +108,11 @@ def validate_snapshot_data(data, content_digest):
             or not isinstance(finance["trend"], list)
             or len(finance["trend"]) > 62
             or len(json.dumps(finance, ensure_ascii=True)) > 262144
+        ):
+            invalid()
+        if "balanceSnapshotOnly" in finance and (
+            finance["balanceSnapshotOnly"] is not True
+            or finance.get("partial") is not True
         ):
             invalid()
         for row in finance["trend"]:
@@ -228,7 +241,10 @@ def validate_snapshot_data(data, content_digest):
         }:
             invalid()
         for label in value.values():
-            if label is not None and business_text(label) != label:
+            if (
+                label is not None
+                and business_text(label, allow_email=True) != label
+            ):
                 invalid()
     if not isinstance(data["models"], dict):
         invalid()
@@ -360,7 +376,7 @@ def _prepare(run, connection, client, checkpoint):
                     raise AgioneOpsError("SOURCE_DUPLICATE_PAGE")
                 seen.add(cid)
                 directory[cid] = {
-                    "name": tenant_display_name(row, cid),
+                    "name": tenant_display_name(row, cid, allow_email=True),
                     "organizationName": business_text(
                         row.get("organizationName"),
                     ),
@@ -422,7 +438,8 @@ def _seed_timed_out(run, state, checkpoint):
         initiated_by_id=run.initiated_by_id,
         grant_revision=run.grant_revision,
         created_at__gte=timezone.now() - timedelta(days=1),
-        status="failed", error_code="NATIVE_SYNC_DEADLINE",
+        status="failed",
+        error_code__in=("NATIVE_SYNC_DEADLINE", "SYNC_FAILED"),
         native_state__directory_complete=True,
     ).exclude(pk=run.pk).select_related("native_state").order_by("-created_at")
     for old in previous:
@@ -461,31 +478,62 @@ def _seed_incremental(run, state, checkpoint):
         version__window_start__lt=run.window_end,
         version__window_end__gt=run.window_start,
         version__run__status="succeeded",
-    ).select_related("version").order_by("-version__published_at")
+    ).select_related("version").only(
+        "version_id", "content_digest", "version__coverage",
+        "version__window_start", "version__window_end",
+        "version__published_at",
+    ).order_by("-version__published_at")
     overlap = _setting(
-        "AGIONE_OPS_NATIVE_OVERLAP_SECONDS", 86400, 3600, 2678400,
+        "AGIONE_OPS_NATIVE_OVERLAP_SECONDS", 3600, 3600, 2678400,
     )
-    checked = set()
+    if run.idempotency_key.startswith("agione-scheduled-"):
+        overlap = max(overlap, 86400)
+    cutoff = run.window_end - timedelta(seconds=overlap)
+    crossing = run.native_shards.filter(
+        status="pending", window_start__lt=cutoff, window_end__gt=cutoff,
+    ).first()
+    if crossing is not None:
+        with transaction.atomic():
+            NativeSyncShard.objects.get_or_create(
+                run=run,
+                window_start=crossing.window_start,
+                window_end=cutoff,
+            )
+            NativeSyncShard.objects.get_or_create(
+                run=run,
+                window_start=cutoff,
+                window_end=crossing.window_end,
+            )
+            NativeSyncShard.objects.filter(pk=crossing.pk).update(
+                status="split", error_code="INCREMENTAL_CUTOFF",
+            )
+    checked = {}
     for shard in run.native_shards.filter(status="pending"):
         previous = next((item for item in snapshots if (
             item.version.coverage.get("pagingComplete")
             and not item.version.coverage.get("partial")
-            and isinstance(item.data, dict)
-            and set(item.data.get("customers", {})) == set(state.directory)
             and item.version.window_start <= shard.window_start
             and shard.window_end <= item.version.window_end
-            and shard.window_end <= run.window_end - timedelta(seconds=overlap)
+            and shard.window_end <= cutoff
+            and isinstance(item.data, dict)
+            and set(item.data.get("customers", {})) == set(state.directory)
         )), None)
         if previous is None:
             continue
         if previous.pk not in checked:
             validate_snapshot_data(previous.data, previous.content_digest)
-            checked.add(previous.pk)
+            indexed = sorted(
+                ((parse_time(row["occurred_at"]), row)
+                 for row in previous.data["rows"]),
+                key=lambda item: item[0],
+            )
+            checked[previous.pk] = ([item[0] for item in indexed], indexed)
         checkpoint("incremental")
-        rows = [row for row in previous.data["rows"] if (
-            shard.window_start <= parse_time(row["occurred_at"])
-            < shard.window_end and row["customer_id"] in state.directory
-        )]
+        times, indexed = checked[previous.pk]
+        first = bisect_left(times, shard.window_start)
+        last = bisect_left(times, shard.window_end)
+        rows = [row for _, row in indexed[first:last]
+                if row["customer_id"] in state.directory]
         _stage(run, shard, rows, 0, 0, checkpoint)
 
 
@@ -574,15 +622,24 @@ def _stage(run, shard, rows, pages, excluded, checkpoint):
         current = SyncRun.objects.select_for_update().get(pk=run.pk)
         _assert_lease(locked, current, run._token, run._epoch)
         authorize_native_run(current, locked)
-        for row in rows:
-            NativeStagedRecord.objects.update_or_create(
-                run=run, record_id=row["record_id"],
-                defaults={
-                    "shard": shard,
-                    "occurred_at": parse_time(row["occurred_at"]),
-                    "content_digest": digest(row), "data": row,
-                },
+        records = [
+            NativeStagedRecord(
+                run=run,
+                shard=shard,
+                record_id=row["record_id"],
+                occurred_at=parse_time(row["occurred_at"]),
+                content_digest=digest(row),
+                data=row,
             )
+            for row in rows
+        ]
+        NativeStagedRecord.objects.bulk_create(
+            records,
+            batch_size=500,
+            update_conflicts=True,
+            update_fields=["shard", "occurred_at", "content_digest", "data"],
+            unique_fields=["run", "record_id"],
+        )
         NativeSyncShard.objects.filter(pk=shard.pk).update(
             status="succeeded", pages_read=pages, record_count=len(rows),
             excluded_count=excluded, error_code="",
@@ -652,6 +709,15 @@ def _publish(run, connection, state, finance, checkpoint):
         shards = list(run.native_shards.exclude(status="split"))
         coverage = {
             "sourceKind": "native", "mode": "snapshot",
+            "trigger": (
+                "daily"
+                if run.idempotency_key.startswith(
+                    ("agione-scheduled-", "agione-prefetch-")
+                )
+                else "automatic"
+                if run.idempotency_key.startswith("agione-auto-")
+                else "manual"
+            ),
             "pagingComplete": True, "partial": False,
             "directoryTotal": state.directory_count,
             "confirmedDirectoryCount": state.directory_count,
@@ -680,18 +746,65 @@ def _publish(run, connection, state, finance, checkpoint):
             finished_at=timezone.now(), heartbeat_at=timezone.now(),
         )
         _release(connection)
-        try:
-            from agione_ops.native_account_refresh import schedule_account_scope
+        automatic = run.idempotency_key.startswith("agione-auto-")
+        rule_config = {}
+        if automatic:
+            from agione_ops.models import NotificationRules
 
-            schedule_account_scope(run.pk)
+            rule = NotificationRules.objects.filter(
+                connection=connection,
+                user=run.initiated_by,
+            ).first()
+            rule_config = rule.config if rule else {}
+        try:
+            from agione_ops.native_account_refresh import (
+                schedule_account_scope,
+                schedule_cached_scope_analysis,
+            )
+            from agione_ops.native_sync_models import NativeAccountScope
+
+            scope = NativeAccountScope.objects.filter(
+                connection=connection,
+                user=run.initiated_by,
+            ).first()
+            tenant_hours = int(rule_config.get("tenant_refresh_hours", 12))
+            tenant_due = (
+                not automatic
+                or scope is None
+                or scope.status != "ready"
+                or scope.updated_at
+                <= timezone.now() - timedelta(hours=tenant_hours)
+            )
+            if tenant_due:
+                schedule_account_scope(run.pk)
+            else:
+                schedule_cached_scope_analysis(run.pk)
         except Exception:
             logger.exception("Native account classification scheduling failed")
         if not getattr(settings, "AGIONE_OPS_FINANCE_REFRESH_ON_SYNC", True):
             try:
                 from agione_ops.native_finance_refresh import schedule_finance
+                from agione_ops.native_sync_models import (
+                    NativeFinanceProjection,
+                )
 
-                with transaction.atomic():
-                    schedule_finance(run.pk)
+                finance = NativeFinanceProjection.objects.filter(
+                    connection=connection,
+                    user=run.initiated_by,
+                ).first()
+                finance_hours = int(
+                    rule_config.get("finance_refresh_hours", 12)
+                )
+                finance_due = (
+                    not automatic
+                    or finance is None
+                    or finance.status != "ready"
+                    or finance.updated_at
+                    <= timezone.now() - timedelta(hours=finance_hours)
+                )
+                if finance_due:
+                    with transaction.atomic():
+                        schedule_finance(run.pk)
             except Exception:
                 logger.exception("Native finance scheduling failed")
     _project(run.pk)
@@ -712,7 +825,7 @@ def execute_native_sync(run_id, *, client_factory=None):
     run, connection, lease_token, epoch = claimed
     run._token, run._epoch = lease_token, epoch
 
-    duration = _setting("AGIONE_OPS_NATIVE_MAX_SECONDS", 120, 30, 1800)
+    duration = _setting("AGIONE_OPS_NATIVE_MAX_SECONDS", 600, 30, 1800)
     elapsed = max(0, (timezone.now() - run.created_at).total_seconds())
     deadline = time.monotonic() + max(0, duration - elapsed)
 
@@ -725,6 +838,8 @@ def execute_native_sync(run_id, *, client_factory=None):
         )
 
     client = None
+    timings = {}
+    started = perf_counter()
     try:
         workers = _setting("AGIONE_OPS_NATIVE_CONCURRENCY", 3, 1, 8)
         client = (client_factory or NativeClient)(connection)
@@ -732,12 +847,16 @@ def execute_native_sync(run_id, *, client_factory=None):
         identity = _identity(client, connection)
         checkpoint("identity")
         state = _prepare(run, connection, client, checkpoint)
+        timings["prepare_ms"] = round((perf_counter() - started) * 1000)
         state.role_state = identity.get("role_state", "not_verified")
         if state.role_state not in {"verified", "not_verified"}:
             state.role_state = "not_verified"
         state.save(update_fields=["role_state"])
         _seed_timed_out(run, state, checkpoint)
         _seed_incremental(run, state, checkpoint)
+        timings["reuse_ms"] = (
+            round((perf_counter() - started) * 1000) - timings["prepare_ms"]
+        )
         shard_workers = _setting(
             "AGIONE_OPS_NATIVE_SHARD_CONCURRENCY", 2, 1, 3,
         )
@@ -813,6 +932,9 @@ def execute_native_sync(run_id, *, client_factory=None):
                             )
                             raise
         checkpoint("identity")
+        timings["fetch_ms"] = (
+            round((perf_counter() - started) * 1000) - sum(timings.values())
+        )
         _identity(client, connection)
         checkpoint("identity")
         state.refresh_from_db()
@@ -863,10 +985,18 @@ def execute_native_sync(run_id, *, client_factory=None):
             run, connection, lease_token, epoch, error,
         )
     except Exception:
+        logger.exception(
+            "Unexpected native sync failure run_id=%s",
+            run.pk,
+        )
         return _finish_failure(
             run, connection, lease_token, epoch,
             AgioneOpsError("SYNC_FAILED", status_code=500),
         )
     finally:
+        logger.info(
+            "AGIOne sync timing run=%s stages=%s total_ms=%s",
+            run.pk, timings, round((perf_counter() - started) * 1000),
+        )
         if client is not None:
             client.close()

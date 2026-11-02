@@ -22,7 +22,7 @@ from agione_ops.permissions import get_connection_for
 
 _flights = {}
 _flights_lock = threading.Lock()
-_CACHE_SCHEMA = 7
+_CACHE_SCHEMA = 9
 
 
 def _json_value(value):
@@ -90,8 +90,12 @@ def _authorize(connection, user, operation):
         identity["source_id"] = "native:" + str(current.pk)
         if current.source_kind == "native":
             from agione_ops.native_account_refresh import scope_for
+            from agione_ops.tenant_directory import classification_version
 
             _, identity["account_scope_version"] = scope_for(current, actor)
+            identity["tenant_classification_version"] = classification_version(
+                current, actor
+            )
         if operation == "dashboard" and current.source_kind == "native":
             from agione_ops.native_sync_models import NativePublishedSnapshot
 
@@ -123,9 +127,7 @@ def _authorize(connection, user, operation):
                 ]
                 dependencies.append(dependency)
             identity["finance_acl"] = dependencies
-            if current.source_kind == "native" and not getattr(
-                settings, "AGIONE_OPS_FINANCE_REFRESH_ON_SYNC", True,
-            ):
+            if current.source_kind == "native":
                 from agione_ops.native_finance_refresh import finance_for
 
                 _, identity["finance_version"] = finance_for(current, actor)

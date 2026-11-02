@@ -204,6 +204,7 @@ class NativeAccountScope(models.Model):
     operator_config_version = models.PositiveBigIntegerField()
     operator_credential_version = models.PositiveBigIntegerField()
     status = models.CharField(max_length=16, default="queued")
+    error_code = models.CharField(max_length=80, default="", blank=True)
     data = models.JSONField(default=dict)
     names = models.JSONField(default=dict)
     content_digest = models.CharField(max_length=64, default="", blank=True)
@@ -214,3 +215,41 @@ class NativeAccountScope(models.Model):
         constraints = [models.UniqueConstraint(
             fields=["connection", "user"], name="dm_agione_account_scope_uq",
         )]
+
+
+class TenantClassification(models.Model):
+    """Manual tenant classification scoped to the authorized Operator."""
+
+    operator = models.ForeignKey(
+        "agione_ops.SourceConnection", on_delete=models.PROTECT,
+        related_name="tenant_classifications",
+    )
+    tenant_id = models.CharField(max_length=40)
+    classification = models.CharField(
+        max_length=8, choices=[("internal", "Internal"), ("external", "External")],
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "devmind_agione_tenant_classification"
+        constraints = [models.UniqueConstraint(
+            fields=["operator", "tenant_id"], name="dm_agione_tenant_class_uq",
+        )]
+
+
+class TenantClassificationChange(models.Model):
+    """Append-only record of a manual classification change."""
+
+    operator = models.ForeignKey(
+        "agione_ops.SourceConnection", on_delete=models.PROTECT,
+    )
+    tenant_id = models.CharField(max_length=40)
+    classification = models.CharField(max_length=9)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "devmind_agione_tenant_classification_change"

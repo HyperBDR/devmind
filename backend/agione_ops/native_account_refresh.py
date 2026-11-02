@@ -57,6 +57,7 @@ def schedule_account_scope(run_id):
         scope, _ = NativeAccountScope.objects.update_or_create(
             connection=connection, user=user,
             defaults={"operator": operator, "run": run, "status": "queued",
+                      "error_code": "",
                       "data": old_data, "content_digest": old_digest,
                       "config_version": connection.config_version,
                       "credential_version": connection.credential_version,
@@ -69,10 +70,37 @@ def schedule_account_scope(run_id):
             except Exception:
                 NativeAccountScope.objects.filter(
                     pk=scope.pk, run_id=run.pk, status="queued",
-                ).update(status="failed")
+                ).update(
+                    status="failed",
+                    error_code="ACCOUNT_REFRESH_DISPATCH_FAILED",
+                )
                 logger.exception("Native account classification dispatch failed")
 
         transaction.on_commit(dispatch)
+
+
+def schedule_cached_scope_analysis(run_id):
+    """Reuse a valid tenant directory while analyzing a newer call snapshot."""
+    from agione_ops.tasks import analyze_native_snapshot
+
+    run = SyncRun.objects.select_related("connection", "initiated_by").get(
+        pk=run_id,
+    )
+    connection, user = run.connection, run.initiated_by
+    with transaction.atomic():
+        scope = NativeAccountScope.objects.select_for_update().filter(
+            connection=connection,
+            user=user,
+            status="ready",
+        ).first()
+        if not scope or not scope_for(connection, user)[1]:
+            schedule_account_scope(run_id)
+            return
+        scope.run = run
+        scope.save(update_fields=["run"])
+        transaction.on_commit(
+            lambda: analyze_native_snapshot.delay(scope.pk, str(run.pk))
+        )
 
 
 def execute_account_scope(scope_id, run_id):
@@ -136,7 +164,23 @@ def execute_account_scope(scope_id, run_id):
             current.names = {**current.names, **names}
             current.content_digest = digest(merged)
             current.status = "ready"
-            current.save(update_fields=["data", "names", "content_digest", "status", "updated_at"])
+            current.error_code = ""
+            current.save(update_fields=["data", "names", "content_digest", "status", "error_code", "updated_at"])
+        from agione_ops.tenant_directory import cache_directory
+
+        cache_directory(scope.operator, directory)
+        from agione_ops.notification_rules import analyze_completed_snapshot
+
+        try:
+            analyze_completed_snapshot(scope_id, run_id)
+        except Exception:
+            from agione_ops.tasks import _mark_auto_inspection_failed
+
+            _mark_auto_inspection_failed(run_id)
+            logger.exception("AGIOne notification analysis failed")
     except Exception:
         logger.exception("AGIOne account classification failed")
-        NativeAccountScope.objects.filter(pk=scope_id, run_id=run_id).update(status="failed")
+        NativeAccountScope.objects.filter(pk=scope_id, run_id=run_id).update(
+            status="failed",
+            error_code="ACCOUNT_REFRESH_FAILED",
+        )
