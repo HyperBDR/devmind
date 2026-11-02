@@ -21,6 +21,7 @@ from agione_ops.notification_delivery import (
     enqueue_analysis_notifications,
 )
 from agione_ops.tasks import (
+    _webhook_payload,
     deliver_notification,
     retry_notification_deliveries,
 )
@@ -30,6 +31,72 @@ ZONE = ZoneInfo("Asia/Shanghai")
 
 class NotificationDeliveryUnitTests(TestCase):
     """Cover alert and recovery event derivation without transport calls."""
+
+    def test_feishu_card_keeps_detail_and_safe_dashboard_link(self):
+        message = (
+            "【AGIOne 实时异常提醒】发现 1 项需要关注\n\n"
+            "租户 test@example.com：最近 180 分钟失败 18 次，成功 0 次。\n"
+            "查看全部线索 → https://example.com/agione#focus\n"
+            "数据采集：11 月 2 日 16:01，北京时间"
+        )
+        payload = _webhook_payload("feishu", message)
+        self.assertEqual(payload["card"]["header"]["template"], "red")
+        elements = payload["card"]["elements"]
+        self.assertIn("失败 18 次，成功 0 次", elements[0]["text"]["content"])
+        self.assertEqual(
+            elements[-1]["actions"][0]["url"],
+            "https://example.com/agione#focus",
+        )
+        self.assertEqual(
+            _webhook_payload("wecom", message)["markdown"]["content"],
+            message,
+        )
+
+    def test_feishu_card_ignores_unsafe_link_and_marks_recovery(self):
+        payload = _webhook_payload(
+            "feishu", "【AGIOne 恢复提醒】\n查看全部线索 → javascript:alert(1)",
+        )
+        self.assertEqual(payload["card"]["header"]["template"], "green")
+        self.assertFalse(any(
+            element["tag"] == "action" for element in payload["card"]["elements"]
+        ))
+
+    def test_invalid_dashboard_urls_keep_alert_without_button(self):
+        invalid_urls = (
+            "http://[broken",
+            "https://example.com:notaport/path",
+            "https://example.com:99999/path",
+            "https://bad host/path",
+            "https://example.com\\evil/path",
+        )
+        for url in invalid_urls:
+            with self.subTest(url=url):
+                payload = _webhook_payload(
+                    "feishu", f"异常提醒\n失败 18 次\n查看全部线索 → {url}",
+                )
+                elements = payload["card"]["elements"]
+                self.assertIn("失败 18 次", elements[0]["text"]["content"])
+                self.assertFalse(any(e["tag"] == "action" for e in elements))
+
+    @patch(
+        "agentcore_notifier.adapters.django.services.webhook.feishu.requests.post"
+    )
+    def test_feishu_driver_sends_card_with_signature(self, post):
+        from agentcore_notifier.adapters.django.services.webhook.feishu import (
+            FeishuWebhookDriver,
+        )
+
+        post.return_value.json.return_value = {"code": 0}
+        payload = _webhook_payload("feishu", "【AGIOne 运营日报】\n测试内容")
+        result = FeishuWebhookDriver().send(
+            payload, {"url": "https://example.invalid", "sign_secret": "test"},
+        )
+        self.assertTrue(result["success"])
+        sent = post.call_args.kwargs["json"]
+        self.assertEqual(sent["msg_type"], "interactive")
+        self.assertEqual(sent["card"], payload["card"])
+        self.assertIn("timestamp", sent)
+        self.assertIn("sign", sent)
 
     def test_events_include_new_alert_and_resolved_recovery(self):
         previous = {
@@ -548,6 +615,9 @@ class NotificationDeliveryIntegrationTests(TestCase):
 
         delivery.refresh_from_db()
         self.assertEqual(result["status"], "sent")
+        card = send.call_args.kwargs["params"]["payload"]
+        self.assertEqual(card["msg_type"], "interactive")
+        self.assertIn("运营提醒", str(card["card"]))
         self.assertEqual(delivery.status, "sent")
         self.assertEqual(delivery.attempts, 1)
         self.assertIsNotNone(delivery.sent_at)
@@ -557,6 +627,27 @@ class NotificationDeliveryIntegrationTests(TestCase):
                 self.channel.uuid,
             ),
         )
+
+    @patch(
+        "agentcore_notifier.adapters.django.tasks.send."
+        "send_notification.run",
+        return_value={"success": True, "response": {"code": 0}},
+    )
+    def test_delivery_sends_alert_when_dashboard_url_is_malformed(self, send):
+        delivery = NotificationDelivery.objects.create(
+            rules=self.rules,
+            event_key="invalid-url-key",
+            issue_signature="invalid-url-signature",
+            kind="alert",
+            payload={"text": "异常提醒\n失败 18 次\n查看全部线索 → http://[broken"},
+        )
+
+        result = deliver_notification(delivery.pk)
+
+        self.assertEqual(result["status"], "sent")
+        card = send.call_args.kwargs["params"]["payload"]["card"]
+        self.assertIn("失败 18 次", card["elements"][0]["text"]["content"])
+        self.assertFalse(any(e["tag"] == "action" for e in card["elements"]))
 
     @patch(
         "agentcore_notifier.adapters.django.tasks.send."

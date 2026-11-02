@@ -33,7 +33,57 @@ def _retryable_schedule_run(run):
 def _webhook_payload(provider_type, text):
     """Render text for the notifier's supported webhook providers."""
     if provider_type == "feishu":
-        return {"msg_type": "text", "content": {"text": text}}
+        from urllib.parse import urlsplit
+
+        from django.core.exceptions import ValidationError
+        from django.core.validators import URLValidator
+
+        lines = text.splitlines()
+        title = lines.pop(0) if lines else "AGIOne 运营通知"
+        color = "green" if "已恢复" in title or "恢复提醒" in title else (
+            "orange" if "待确认" in title else (
+                "red" if "异常" in title else "blue"
+            )
+        )
+        body = []
+        url = ""
+        for line in lines:
+            if line.startswith("查看全部线索 → "):
+                candidate = line.removeprefix("查看全部线索 → ").strip()
+                try:
+                    URLValidator(schemes=["http", "https"])(candidate)
+                    parts = urlsplit(candidate)
+                    port = parts.port
+                    valid = (
+                        parts.hostname and not parts.username
+                        and not parts.password and "\\" not in candidate
+                        and (port is None or port > 0)
+                    )
+                except (ValidationError, ValueError):
+                    valid = False
+                if valid:
+                    url = candidate
+                    continue
+            body.append(line)
+        content = "\n".join(body).strip()
+        elements = [{"tag": "div", "text": {
+            "tag": "plain_text", "content": content or title,
+        }}]
+        if url:
+            elements.extend([
+                {"tag": "hr"},
+                {"tag": "action", "actions": [{
+                    "tag": "button", "text": {
+                        "tag": "plain_text", "content": "查看经营看板 →",
+                    }, "type": "primary", "url": url,
+                }]},
+            ])
+        return {"msg_type": "interactive", "card": {
+            "config": {"wide_screen_mode": True},
+            "header": {"title": {"tag": "plain_text", "content": title},
+                       "template": color},
+            "elements": elements,
+        }}
     if provider_type in {"wechat", "wecom"}:
         return {"msgtype": "markdown", "markdown": {"content": text}}
     return {"text": text}
