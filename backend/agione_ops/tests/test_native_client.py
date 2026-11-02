@@ -123,9 +123,17 @@ def test_discover_identity_uses_the_single_observed_upstream_role():
 @pytest.mark.parametrize("role", ["provider", "operator"])
 def test_discover_identity_accepts_explicit_role_for_opaque_upstream(role):
     candidate = connection(expected_tenant_id="pending")
-    transport = httpx.MockTransport(
-        lambda request: response({**INFO, "roles": ["opaque-role-id"]})
-    )
+    def handler(request):
+        if request.url.path.endswith("/admin/user/info"):
+            return response({**INFO, "roles": ["opaque-role-id"]})
+        expected = (
+            "provider-customers" if role == "provider" else "op-customers"
+        )
+        assert request.url.path.endswith(expected)
+        assert request.url.params["pageSize"] == "1"
+        return response({"data": [], "total": 0})
+
+    transport = httpx.MockTransport(handler)
     with NativeClient(candidate, transport=transport) as source:
         result = source.discover_identity(role)
     assert result["principal_kind"] == role
@@ -141,6 +149,20 @@ def test_discover_identity_rejects_conflicting_explicit_role():
         with pytest.raises(AgioneOpsError) as error:
             source.discover_identity("operator")
     assert error.value.code == "SOURCE_IDENTITY_MISMATCH"
+
+
+def test_opaque_role_rejects_forbidden_selected_customer_directory():
+    candidate = connection(expected_tenant_id="pending")
+
+    def handler(request):
+        if request.url.path.endswith("/admin/user/info"):
+            return response({**INFO, "roles": ["opaque-role-id"]})
+        return httpx.Response(403, json={"status": 403})
+
+    with NativeClient(candidate, transport=httpx.MockTransport(handler)) as source:
+        with pytest.raises(AgioneOpsError) as error:
+            source.discover_identity("operator")
+    assert error.value.code == "SOURCE_FORBIDDEN"
 
 
 @pytest.mark.parametrize("roles", [[], ["ROLE_PROVIDER", "ROLE_OPERATOR"]])

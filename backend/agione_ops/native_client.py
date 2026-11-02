@@ -462,6 +462,22 @@ class NativeClient:
             role = next(iter(observed), declared_role)
             if role not in {"provider", "operator"}:
                 raise _error("SOURCE_ROLE_NOT_VERIFIED", 409)
+            if not observed:
+                provider = role == "provider"
+                path = "/coperation/tenant/" + (
+                    "provider-customers" if provider else "op-customers"
+                )
+                params = {"pageIndex": 1, "pageSize": 1}
+                if not provider:
+                    params["identityCode"] = "EU"
+                result = self._result(path, params)
+                if (
+                    not isinstance(result, dict)
+                    or not isinstance(result.get("data"), list)
+                    or type(result.get("total")) is not int
+                    or result["total"] < 0
+                ):
+                    raise _error("SOURCE_SHAPE_CHANGED")
             return {
                 "tenant_id": tenant,
                 "platform": self.connection.platform,

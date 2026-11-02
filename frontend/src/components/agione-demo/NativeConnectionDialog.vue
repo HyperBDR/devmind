@@ -156,7 +156,7 @@ function safeError(exc) {
   return (
     {
       SOURCE_AUTH_FAILED: 'AK 或 SK 无效，请检查后重试。',
-      SOURCE_FORBIDDEN: '当前密钥没有读取 AGIOne 数据的权限。',
+      SOURCE_FORBIDDEN: '当前密钥无法访问所选身份的数据，请检查账号身份及权限。',
       SOURCE_ROLE_NOT_VERIFIED: '无法确认账号身份，请联系管理员检查账号角色。',
       SOURCE_IDENTITY_MISMATCH: '账号身份与上游返回的角色不一致。',
       SELF_SERVICE_CONNECTION_EXISTS: '该 AGIOne 账号已经连接。',
