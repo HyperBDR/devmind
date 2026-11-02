@@ -15,9 +15,9 @@
    <section class="notify-settings">
     <div class="notify-heading"><div><h3>自动刷新</h3><p>增量更新调用数据并巡检紧急异常</p></div><label class="switch"><input v-model="draft.autoRefreshEnabled" type="checkbox"><span>{{ draft.autoRefreshEnabled ? '已开启' : '已关闭' }}</span></label></div>
     <div class="refresh-periods">
-     <label>调用与巡检<select v-model.number="draft.autoRefreshHours" :disabled="!draft.autoRefreshEnabled"><option :value="2">每 2 小时</option><option :value="3">每 3 小时</option><option :value="4">每 4 小时</option></select></label>
-     <label>财务数据<select v-model.number="draft.financeRefreshHours"><option :value="6">每 6 小时</option><option :value="12">每 12 小时</option><option :value="24">每 24 小时</option></select></label>
-     <label>租户信息<select v-model.number="draft.tenantRefreshHours"><option :value="6">每 6 小时</option><option :value="12">每 12 小时</option><option :value="24">每 24 小时</option></select></label>
+     <div class="refresh-field"><span>调用与巡检</span><AgioneSelect v-model="draft.autoRefreshHours" label="调用与巡检" :options="callPeriods" :disabled="!draft.autoRefreshEnabled" /></div>
+     <div class="refresh-field"><span>财务数据</span><AgioneSelect v-model="draft.financeRefreshHours" label="财务数据" :options="dataPeriods" /></div>
+     <div class="refresh-field"><span>租户信息</span><AgioneSelect v-model="draft.tenantRefreshHours" label="租户信息" :options="dataPeriods" /></div>
     </div>
     <p>自动刷新只发送紧急事件；运营日报仍只在下方设置的时间发送。</p>
     <div v-if="autoStatus" class="notify-status"><span>{{ autoStatus }}</span></div>
@@ -30,7 +30,7 @@
      <label><input v-model="draft.decline" type="checkbox"> 客户使用下降（每日汇总）</label>
      <label><input v-model="draft.inactive" type="checkbox"> 客户长期无调用（每日汇总）</label>
     </div>
-    <label class="notify-label">通知渠道<select v-model="draft.channelId" :required="draft.enabled"><option :value="null">请选择通知渠道</option><option v-for="channel in channels" :key="channel.id" :value="channel.id">{{ channel.name }}</option></select></label>
+    <div class="notify-label">通知渠道<AgioneSelect v-model="draft.channelId" label="通知渠道" placeholder="请选择通知渠道" :options="channelOptions" /></div>
     <label class="notify-label schedule-time">每日自动采集时间（北京时间）<input v-model="draft.scheduleTime" type="time" required></label>
     <p>启用通知后，每天到达该时间自动采集；分析完成后按上述规则发送消息。</p>
     <p>没有渠道？ <a href="/management/notifier/channels">前往通知渠道管理 ↗</a></p>
@@ -44,6 +44,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import DOMPurify from 'dompurify'
+import AgioneSelect from './AgioneSelect.vue'
 import { useI18n } from 'vue-i18n'
 import { originalWorkspaceState, readonlyWorkspaceMarkup } from '@/utils/agioneOriginalWorkspace'
 import { renderOriginalWorkspace } from './original-workspace-renderers.mjs'
@@ -58,6 +59,9 @@ const defaults=notificationRuleDefaults
 const rulesDialog=ref(null),thresholds=ref({...defaults}),draft=ref({...defaults})
 const rulesError=ref(''),rulesLoading=ref(false),serverRules=ref(null)
 const channels=ref([])
+const callPeriods=[{value:2,label:'每 2 小时'},{value:3,label:'每 3 小时'},{value:4,label:'每 4 小时'}]
+const dataPeriods=[{value:6,label:'每 6 小时'},{value:12,label:'每 12 小时'},{value:24,label:'每 24 小时'}]
+const channelOptions=computed(()=>[{value:null,label:'请选择通知渠道'},...channels.value.map(channel=>({value:channel.id,label:channel.name}))])
 function displayTime(value){if(!value)return '尚未成功';const date=new Date(value);return Number.isNaN(date.getTime())?'尚未成功':date.toLocaleString('zh-CN',{hour12:false})}
 const autoStatus=computed(()=>{const value=serverRules.value?.refreshStatus?.calls;if(!value)return '';return `最近执行：${value.status || '未运行'}；下次预计：${displayTime(value.nextAt)}`})
 const dailyStatus=computed(()=>{const value=serverRules.value?.dailyReport;if(!value)return '';return `今日日报：${dailyReportLabel(value)}${value.updatedAt ? ` · ${displayTime(value.updatedAt)}` : ''}`})
@@ -150,7 +154,7 @@ header button { border:0; background:none; color:#8190a4; font-size:24px; cursor
 label { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 0; border-bottom:1px solid #edf1f6; font-size:13px; } label:last-child { border:0; }
 input { width:80px; border:1px solid #dce3ee; border-radius:6px; padding:8px; }
 .notify-settings { margin-top:24px; padding-top:22px; border-top:1px solid #e9eef5; } .notify-settings a { display:inline-block; margin-top:10px; color:#2864ed; font-size:13px; }
-.refresh-periods { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-top:12px; } .refresh-periods label { display:grid; gap:7px; border:0; padding:0; color:#526883; } .refresh-periods select { min-width:0; padding:9px; border:1px solid #dce3ee; border-radius:6px; background:#fff; color:#1b304d; }
+.refresh-periods { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-top:12px; } .refresh-periods .refresh-field { display:grid; gap:7px; border:0; padding:0; color:#526883; } .refresh-periods select { min-width:0; padding:9px; border:1px solid #dce3ee; border-radius:6px; background:#fff; color:#1b304d; }
 .notify-heading { display:flex; justify-content:space-between; align-items:center; gap:12px; } .switch { border:0; padding:0; justify-content:flex-end; color:#2864ed; white-space:nowrap; } .switch input,.recovery input { width:auto; }
 .notify-preview { display:grid; grid-template-columns:1fr 1fr; gap:4px 12px; margin-top:14px; } .notify-preview label { justify-content:flex-start; border:0; padding:6px 0; } .notify-preview input { width:auto; }
 @media(max-width:560px) { .notify-preview,.refresh-periods { grid-template-columns:1fr; } }
