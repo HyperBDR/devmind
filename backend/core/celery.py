@@ -45,6 +45,7 @@ app.conf.update(
         "data_ops.tasks",
         "hyperbdr_dashboard.tasks",
         "llm_ops.tasks",
+        "agione_ops.tasks",
         "quotation.tasks",
         "sals.tasks",
         # Each entry must be a fully-qualified module that exposes its

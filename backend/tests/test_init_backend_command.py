@@ -1,6 +1,8 @@
 from unittest.mock import call
 from unittest.mock import patch
 
+import pytest
+
 from core.management.commands.init_backend import Command
 
 
@@ -54,6 +56,33 @@ def test_init_backend_schema_phase_only_runs_migrations():
     ]
     discover_and_register.assert_not_called()
     dispatch_sync.assert_not_called()
+
+
+@pytest.mark.django_db
+def test_schema_phase_creates_shared_agione_key(tmp_path, monkeypatch, settings):
+    from django.contrib.auth import get_user_model
+
+    from agione_ops.encryption import decrypt_credentials, encrypt_credentials
+    from agione_ops.models import SourceConnection
+
+    path = tmp_path / "agione" / "credentials.key"
+    monkeypatch.setenv("AGIONE_OPS_AUTO_KEY_PATH", str(path))
+    monkeypatch.delenv("AGIONE_OPS_ENCRYPTION_KEY", raising=False)
+    monkeypatch.delenv("AGIONE_OPS_ACTIVE_KEY_ID", raising=False)
+    with patch("core.management.commands.init_backend.call_command"):
+        _run_command(phase="schema")
+        encrypted, key_id = encrypt_credentials({"access_key": "test"})
+        user = get_user_model().objects.create_user(username="key-owner")
+        connection = SourceConnection(
+            name="Key test", platform="pro", principal_kind="operator",
+            source_kind="native", created_by=user,
+        )
+        connection.set_credentials({"access_key": "test"})
+        connection.save()
+        first = path.read_bytes()
+        _run_command(phase="schema")
+    assert path.read_bytes() == first
+    assert decrypt_credentials(encrypted, key_id) == {"access_key": "test"}
 
 
 def test_init_backend_runtime_phase_skips_migrations():

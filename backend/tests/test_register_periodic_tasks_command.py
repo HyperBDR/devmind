@@ -1,6 +1,7 @@
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -16,7 +17,11 @@ import django
 
 django.setup()
 
-from core.management.commands.register_periodic_tasks import Command
+from core.management.commands import register_periodic_tasks as command_module
+from core.management.commands.register_periodic_tasks import (
+    Command,
+    discover_and_register,
+)
 
 
 def test_register_periodic_tasks_command_defaults_to_non_force():
@@ -41,3 +46,25 @@ def test_register_periodic_tasks_command_passes_force_option():
         command.handle(force=True)
 
     discover_and_register.assert_called_once_with(force=True)
+
+
+def test_discovery_uses_app_config_name_instead_of_installed_app_entry():
+    periodic_module = SimpleNamespace(register_periodic_tasks=lambda: None)
+
+    with (
+        patch.object(
+            command_module.apps,
+            "get_app_configs",
+            return_value=[SimpleNamespace(name="sample_app")],
+        ),
+        patch.object(
+            command_module.importlib,
+            "import_module",
+            return_value=periodic_module,
+        ) as import_module,
+        patch.object(command_module, "apply_registry") as apply_registry,
+    ):
+        discover_and_register()
+
+    import_module.assert_called_once_with("sample_app.periodic_tasks")
+    apply_registry.assert_called_once_with(force=False)

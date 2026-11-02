@@ -4,10 +4,13 @@ x-backend-service-common: &backend-service-common
   image: registry.cn-beijing.aliyuncs.com/hypermotion_dockers/devmind-backend:${APP_VERSION:?APP_VERSION is required}
   env_file:
     - ./.env
+  environment:
+    AGIONE_OPS_AUTO_KEY_PATH: /opt/agione-keys/credentials.key
   volumes:
     - ./data/django/staticfiles:/opt/backend/core/staticfiles
     - ./data/logs/api:/var/log/gunicorn
     - ./data/storage:/opt/storage
+    - ./data/agione-keys:/opt/agione-keys
     - ./cache:/opt/cache
     - ./docker/nginx/certs:/opt/backend/docker/nginx/certs
   networks:
@@ -124,6 +127,7 @@ services:
     volumes:
       - ./data/logs/worker:/var/log/celery
       - ./data/storage:/opt/storage
+      - ./data/agione-keys:/opt/agione-keys
       - ./cache:/opt/cache
     networks:
       - backend_network
@@ -169,6 +173,7 @@ services:
       - ./.env
     volumes:
       - ./data/logs/scheduler:/var/log/celery
+      - ./data/agione-keys:/opt/agione-keys
     networks:
       - backend_network
     depends_on:

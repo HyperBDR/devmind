@@ -144,6 +144,7 @@ class AccessProfileTests(TestCase):
                 'operations_console',
                 'hyperbdr_dashboard',
                 'llm_ops',
+                'agione_ops',
                 'data_ops',
                 'admin_console',
                 'sales_work_orders',

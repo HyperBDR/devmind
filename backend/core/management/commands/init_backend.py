@@ -11,7 +11,7 @@ import time
 from contextlib import contextmanager
 
 from django.core.management import call_command
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 
 from core.management.commands.register_periodic_tasks import (
     discover_and_register,
@@ -83,9 +83,49 @@ class Command(BaseCommand):
         if phase in {"all", "schema"}:
             with self._timed_step("Running Django migrations"):
                 call_command("migrate", interactive=False, verbosity=verbosity)
+            key_path = os.getenv("AGIONE_OPS_AUTO_KEY_PATH")
+            if key_path and not os.getenv("AGIONE_OPS_ENCRYPTION_KEY", "").strip():
+                from django.conf import settings
+                from agione_ops.deployment_key import ensure_deployment_key
+                from agione_ops.models import SourceConnection
+
+                key = ensure_deployment_key(
+                    key_path,
+                    has_credentials=SourceConnection.objects.filter(
+                        source_kind="native",
+                    ).exclude(credential_ciphertext="").exists(),
+                ).decode("ascii")
+                key_id = os.getenv("AGIONE_OPS_ACTIVE_KEY_ID", "agione-v1").strip()
+                if not key_id:
+                    raise CommandError("AGIOne key identifier is empty.")
+                settings.AGIONE_OPS_ACTIVE_KEY_ID = key_id
+                settings.AGIONE_OPS_ENCRYPTION_KEYS = {key_id: key}
+                from agione_ops.encryption import (
+                    CredentialConfigurationError, CredentialDecryptionError,
+                    decrypt_credentials,
+                )
+
+                credentials = SourceConnection.objects.filter(
+                    source_kind="native",
+                ).exclude(credential_ciphertext="").values_list(
+                    "credential_ciphertext", "key_id",
+                )
+                try:
+                    for ciphertext, stored_key_id in credentials.iterator():
+                        decrypt_credentials(ciphertext, stored_key_id)
+                except (CredentialConfigurationError, CredentialDecryptionError):
+                    raise CommandError(
+                        "AGIOne deployment key cannot decrypt existing credentials."
+                    ) from None
 
         if phase == "schema":
             return
+
+        if os.environ.get("AGIONE_OPS_BOOTSTRAP_CREDENTIALS"):
+            from agione_ops.native_auto_setup import initialize_native_connections
+
+            with self._timed_step("Initializing AGIOne connections"):
+                initialize_native_connections()
 
         with self._timed_step("Registering periodic tasks"):
             discover_and_register()

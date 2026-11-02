@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useUserStore } from '@/store/user'
 import { adminRoutes } from '@/admin/routes'
+import { redirectLegacyLlmOps } from '@/utils/agioneRoutes'
 import {
   getLandingPath,
   hasFeature,
@@ -251,14 +252,21 @@ const routes = [
     }
   },
   {
-    path: '/llm-ops',
-    name: 'LLMOps',
-    component: () => import('@/pages/LLMOps.vue'),
+    path: '/agione',
+    name: 'Agione',
+    component: () => import('@/pages/AgioneOps.vue'),
     meta: {
       requiresAuth: true,
-      requiredFeature: 'llm_ops',
-      appKey: 'llm_ops'
+      requiredFeature: 'agione_ops'
     }
+  },
+  {
+    path: '/llm-ops',
+    redirect: redirectLegacyLlmOps
+  },
+  {
+    path: '/llm-ops/archive',
+    redirect: redirectLegacyLlmOps
   },
   {
     path: '/data-ops',

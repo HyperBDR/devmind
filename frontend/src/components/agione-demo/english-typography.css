@@ -1,0 +1,50 @@
+/* Keep English UI readable without changing the original Chinese layout. */
+.agione-demo[data-ui-language^="en"] .sidebar nav button {
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.agione-demo[data-ui-language^="en"] .sidebar .nav-num {
+  font-size: 11px;
+}
+
+.agione-demo[data-ui-language^="en"] .main {
+  font-size: 14px;
+}
+
+.agione-demo[data-ui-language^="en"] .workspace-table,
+.agione-demo[data-ui-language^="en"] .workspace-table td,
+.agione-demo[data-ui-language^="en"] .workspace-table button,
+.agione-demo[data-ui-language^="en"] .workspace-tools select,
+.agione-demo[data-ui-language^="en"] .workspace-tools button {
+  font-size: 14px;
+}
+
+.agione-demo[data-ui-language^="en"] .workspace-table th,
+.agione-demo[data-ui-language^="en"] .workspace-table td small,
+.agione-demo[data-ui-language^="en"] .workspace-table-footer,
+.agione-demo[data-ui-language^="en"] .workspace-local,
+.agione-demo[data-ui-language^="en"] .workspace-section-head small,
+.agione-demo[data-ui-language^="en"] .workspace-bottom-note,
+.agione-demo[data-ui-language^="en"] .profile-identity-eyebrow,
+.agione-demo[data-ui-language^="en"] .profile-member-row small {
+  font-size: 13px;
+}
+
+.agione-demo[data-ui-language^="en"] .scope-option,
+.agione-demo[data-ui-language^="en"] .scope-modal-content,
+.agione-demo[data-ui-language^="en"] .scope-modal-footer,
+.agione-demo[data-ui-language^="en"] .request-table,
+.agione-demo[data-ui-language^="en"] .request-footer,
+.agione-demo[data-ui-language^="en"] .request-meta {
+  font-size: 14px;
+}
+
+.agione-demo[data-ui-language^="en"] .panel-head p,
+.agione-demo[data-ui-language^="en"] .panel-title p,
+.agione-demo[data-ui-language^="en"] .df-head p,
+.agione-demo[data-ui-language^="en"] .df-section-head p,
+.agione-demo[data-ui-language^="en"] .df-footer,
+.agione-demo[data-ui-language^="en"] .profile-quiet-note {
+  font-size: 13px;
+}
