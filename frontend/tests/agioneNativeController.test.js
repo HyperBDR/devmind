@@ -69,6 +69,25 @@ function harness(rows = [native]) {
   }
   return { api, calls }
 }
+
+test('connection menu keeps management access for enabled and disabled rows', async () => {
+  const rows = [
+    { ...native, id: 'view-only', selfManaged: false },
+    { ...native, id: 'disabled-partial', enabled: false, selfManaged: false },
+    { ...native, id: 'disabled-owner', enabled: false, selfManaged: true }
+  ]
+  const h = harness(rows)
+  const c = createAgioneController(h.api, () => {}, { now })
+  c.reset('user:1')
+  await c.load()
+  const items = c.snapshot().configurableConnections
+  assert.deepEqual(items.map(({ id, enabled, selfManaged }) =>
+    ({ id, enabled, selfManaged })), rows.map(({ id, enabled, selfManaged }) =>
+    ({ id, enabled, selfManaged })))
+  const page = readFileSync(new URL('../src/pages/AgioneOps.vue', import.meta.url), 'utf8')
+  assert.match(page, /:disabled="!item\.enabled && !item\.selfManaged"/)
+  assert.match(page, /v-if="connection\?\.selfManaged"/)
+})
 test('native-only default never falls back to old snapshots or synthetic sources', async () => {
   const h = harness([
     { ...native, sourceKind: 'demo_snapshot' },

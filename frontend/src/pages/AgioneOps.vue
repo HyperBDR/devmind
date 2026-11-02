@@ -117,6 +117,10 @@
                 role="menuitem"
                 @click="openNewConnection"
               >＋ 添加连接</button>
+              <p
+                v-if="!state.listLoading && !state.canSelfManageConnections && !connection?.selfManaged"
+                class="connection-menu-unavailable"
+              >当前无法添加连接，请检查功能开关和账号权限。</p>
             </div>
           </div>
         </div>

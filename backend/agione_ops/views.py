@@ -313,11 +313,12 @@ class ConnectionListCreateAPIView(LocalAPIView):
     """List authorized connection metadata or explicitly configure a source."""
 
     def get(self, request):
-        if has_action(request.user, "manage_connections"):
+        can_manage = has_action(request.user, "manage_connections")
+        can_view = has_action(request.user, "view_business")
+        can_sync = has_action(request.user, "run_sync")
+        if can_manage:
             queryset = connections_for(request.user, "manage_connections")
         else:
-            can_view = has_action(request.user, "view_business")
-            can_sync = has_action(request.user, "run_sync")
             if not (can_view or can_sync):
                 require_action(request.user, "view_business")
             grants = ConnectionGrant.objects.filter(user=request.user)
@@ -333,25 +334,30 @@ class ConnectionListCreateAPIView(LocalAPIView):
         paginator.default_limit = 50
         paginator.max_limit = 100
         rows = paginator.paginate_queryset(queryset, request, view=self)
+        manage_ids = set(ConnectionGrant.objects.filter(
+            user=request.user, can_view=True, can_sync=True,
+            connection_id__in=[row.pk for row in rows],
+        ).values_list("connection_id", flat=True))
         return Response(
             {
                 "results": ConnectionSerializer(
-                    rows, many=True, context={"request": request}
+                    rows, many=True, context={
+                        "request": request,
+                        "self_manage_actions": can_view and can_sync,
+                        "self_manage_grant_ids": manage_ids,
+                    }
                 ).data,
                 "count": paginator.count,
                 "next": paginator.get_next_link(),
                 "previous": paginator.get_previous_link(),
                 "capabilities": {
-                    "canManageConnections": has_action(
-                        request.user, "manage_connections"
-                    ),
+                    "canManageConnections": can_manage,
                     "nativeEnabled": getattr(
                         settings, "AGIONE_OPS_NATIVE_ENABLED", False
                     ),
                     "canSelfManageConnections": (
                         getattr(settings, "AGIONE_OPS_NATIVE_ENABLED", False)
-                        and has_action(request.user, "view_business")
-                        and has_action(request.user, "run_sync")
+                        and can_view and can_sync
                     ),
                 },
             }
@@ -462,11 +468,23 @@ class SelfServiceConnectionListCreateAPIView(LocalAPIView):
 class SelfServiceConnectionDetailAPIView(LocalAPIView):
     """Rotate or disable credentials on a user-owned personal connection."""
 
-    def _owned(self, request, connection_id):
+    def _owned(self, request, connection_id, *, lock=False):
         require_action(request.user, "view_business")
         require_action(request.user, "run_sync")
+        grants = ConnectionGrant.objects.filter(
+            user=request.user, can_view=True, can_sync=True,
+        ).values("connection_id")
+        if lock:
+            connection = get_object_or_404(
+                SourceConnection.objects.select_for_update(),
+                pk=connection_id, created_by=request.user,
+                source_kind="native",
+            )
+            get_object_or_404(grants, connection_id=connection.pk)
+            return connection
+        queryset = SourceConnection.objects.filter(pk__in=grants)
         return get_object_or_404(
-            SourceConnection,
+            queryset,
             pk=connection_id,
             created_by=request.user,
             source_kind="native",
@@ -491,9 +509,7 @@ class SelfServiceConnectionDetailAPIView(LocalAPIView):
         ):
             raise AgioneOpsError("SOURCE_IDENTITY_MISMATCH", status_code=403)
         with transaction.atomic():
-            connection = SourceConnection.objects.select_for_update().get(
-                pk=connection.pk
-            )
+            connection = self._owned(request, connection_id, lock=True)
             connection.set_credentials(credentials)
             connection.save(update_fields=["credential_ciphertext", "key_id"])
             connection.verified_tenant_id = identity["tenant_id"]
@@ -510,9 +526,10 @@ class SelfServiceConnectionDetailAPIView(LocalAPIView):
         )
 
     def delete(self, request, connection_id):
-        connection = self._owned(request, connection_id)
-        connection.enabled = False
-        connection.save(update_fields=["enabled"])
+        with transaction.atomic():
+            connection = self._owned(request, connection_id, lock=True)
+            connection.enabled = False
+            connection.save(update_fields=["enabled"])
         return Response(status=204)
 
 
