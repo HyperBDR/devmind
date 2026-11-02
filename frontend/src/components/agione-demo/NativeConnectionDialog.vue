@@ -165,6 +165,7 @@ function safeError(exc) {
       SOURCE_ROLE_NOT_VERIFIED: '无法确认账号身份，请联系管理员检查账号角色。',
       SOURCE_IDENTITY_MISMATCH: '账号身份与上游返回的角色不一致。',
       SELF_SERVICE_CONNECTION_EXISTS: '该 AGIOne 账号已经连接。',
+      SELF_SERVICE_CONNECTION_DISABLED: '该账号已有已断开的连接。请关闭此窗口，在连接菜单中选择已断开的对应账号，输入密钥后保存以重新启用；如无法操作，请联系管理员。',
       credential_unavailable: '服务端尚未配置凭据加密密钥。'
     }[code] || '连接未完成，请检查密钥或稍后重试。'
   )

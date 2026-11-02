@@ -66,6 +66,22 @@ def test_personal_connection_can_be_recreated_with_corrected_role():
         assert second.status_code == 201
         assert second.data["data"]["principalKind"] == "operator"
         assert not SourceConnection.objects.get(pk=old_id).enabled
+        operator_id = second.data["data"]["id"]
+        assert client.delete(
+            f"{BASE}self-service/{operator_id}/"
+        ).status_code == 204
+        body["principalKind"] = "provider"
+        duplicate = client.post(f"{BASE}self-service/", body, format="json")
+        assert duplicate.status_code == 409
+        assert duplicate.data["data"]["errorCode"] == (
+            "SELF_SERVICE_CONNECTION_DISABLED"
+        )
+        reopened = client.patch(
+            f"{BASE}self-service/{old_id}/", body, format="json"
+        )
+        assert reopened.status_code == 200
+        assert reopened.data["data"]["id"] == old_id
+        assert SourceConnection.objects.get(pk=old_id).enabled
 
 
 @override_settings(AGIONE_OPS_NATIVE_ENABLED=True)

@@ -427,15 +427,20 @@ class SelfServiceConnectionListCreateAPIView(LocalAPIView):
             values.get("principal_kind"),
         )
         with transaction.atomic():
-            if SourceConnection.objects.filter(
+            existing = SourceConnection.objects.filter(
                 created_by=request.user,
                 source_kind="native",
                 platform=values["platform"],
                 principal_kind=identity["principal_kind"],
                 expected_tenant_id=identity["tenant_id"],
-            ).exists():
+            )
+            if existing.filter(enabled=True).exists():
                 raise AgioneOpsError(
                     "SELF_SERVICE_CONNECTION_EXISTS", status_code=409
+                )
+            if existing.exists():
+                raise AgioneOpsError(
+                    "SELF_SERVICE_CONNECTION_DISABLED", status_code=409
                 )
             label = "Pro" if values["platform"] == "pro" else "CC"
             role = identity["principal_kind"].title()
