@@ -123,9 +123,10 @@ def _finding_text(kind, item, rules, recovery, trigger, historical=False):
             if "balance_failure" in item.get("reasons", [])
             else "原因待确认"
         )
+        outcome = "当前已恢复" if recovery else "恢复状态待确认"
         return (
             f"{identity}：失败 {failed:,} 次，成功 {succeeded:,} 次，"
-            f"失败率 {rate:g}%；原因：{reason}；当前已恢复。"
+            f"失败率 {rate:g}%；原因：{reason}；{outcome}。"
         )
     if kind == "continuous_failure":
         failed = int(item.get("failure_count") or 0)
@@ -214,9 +215,12 @@ def _notification_text(rules, event, current, trigger):
     groups = _notification_groups(findings)
     issue_count = sum(len(items) for _, _, items in groups)
     recovery = event["kind"] in {"recovery", "recovered_history"}
+    historical_unconfirmed = event.get("historical_unconfirmed", False)
     state = "已恢复" if recovery else "需要关注"
     if event["kind"] == "recovered_history":
         title = "已恢复的历史异常"
+    elif historical_unconfirmed:
+        title = "历史异常，恢复待确认"
     elif recovery:
         title = "恢复提醒"
     elif trigger in {"manual", "automatic"}:
@@ -233,7 +237,8 @@ def _notification_text(rules, event, current, trigger):
                 rules,
                 recovery,
                 trigger,
-                historical=event["kind"] == "recovered_history",
+                historical=(event["kind"] == "recovered_history"
+                            or historical_unconfirmed),
             )
             for item in items[:3]
         )
@@ -242,7 +247,7 @@ def _notification_text(rules, event, current, trigger):
     public_url = getattr(settings, "AGIONE_OPS_PUBLIC_URL", "")
     if public_url:
         lines.extend(["", f"查看全部线索 → {public_url}"])
-    if event["kind"] == "recovered_history":
+    if event["kind"] == "recovered_history" or historical_unconfirmed:
         starts = [_parse_time(item.get("event_start")) for item in findings]
         ends = [_parse_time(item.get("event_end")) for item in findings]
         starts = [value for value in starts if value]
@@ -253,7 +258,7 @@ def _notification_text(rules, event, current, trigger):
                 "异常发生："
                 f"{min(starts).strftime('%m-%d %H:%M')}—"
                 f"{max(ends).strftime('%m-%d %H:%M')}，北京时间；"
-                "巡检时已恢复"
+                + ("巡检时已恢复" if recovery else "恢复状态待确认")
             )
     elif trigger in {"manual", "automatic"}:
         range_line = "事件观察：" + _display_event_range(current)
@@ -303,7 +308,10 @@ def _create_delivery(rules, event, current, trigger, scheduled_date):
         )
         for item in event["findings"]
     )
-    signature = _digest({"kind": event["kind"], "findings": normalized})
+    signature_parts = {"kind": event["kind"], "findings": normalized}
+    if event.get("historical_unconfirmed"):
+        signature_parts["historical_unconfirmed"] = True
+    signature = _digest(signature_parts)
     if trigger == "scheduled" and scheduled_date:
         event_identity = {
             "rules": rules.pk,
@@ -433,6 +441,15 @@ def enqueue_analysis_notifications(
         for key, issue in existing.items():
             if not issue.active or key in current_issues:
                 continue
+            if issue.reason in urgent:
+                evidence = current.get("recovery_evidence", {}).get(
+                    issue.customer_id, {},
+                )
+                success = _parse_time(evidence.get("success"))
+                failure = _parse_time(evidence.get("failure"))
+                if (not success or success <= issue.first_seen_at
+                        or (failure and success <= failure)):
+                    continue
             issue.active = False
             issue.resolved_at = now
             issue.save(update_fields=["active", "resolved_at"])
@@ -456,14 +473,22 @@ def enqueue_analysis_notifications(
                 "findings": _merged_findings(recovery_items),
             })
         historical = current.get("historical_alerts", [])
+        recovered_history = [item for item in historical if item.get("recovered")]
+        unconfirmed_history = [item for item in historical if not item.get("recovered")]
         if (
             trigger == "automatic"
             and config.get("send_recovered_history", True)
-            and historical
+            and recovered_history
         ):
             events.append({
                 "kind": "recovered_history",
-                "findings": historical,
+                "findings": recovered_history,
+            })
+        if trigger == "automatic" and unconfirmed_history:
+            events.append({
+                "kind": "alert",
+                "historical_unconfirmed": True,
+                "findings": unconfirmed_history,
             })
         created = [
             delivery

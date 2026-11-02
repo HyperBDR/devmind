@@ -266,6 +266,36 @@ class NotificationRuleUnitTests(SimpleTestCase):
             )
         self.assertEqual(events, [])
 
+    def test_interval_without_later_success_is_not_recovered(self):
+        start = datetime(2026, 10, 29, 8, 0, tzinfo=ZONE)
+        rows = [{
+            "customer_id": "200",
+            "occurred_at": (start + timedelta(minutes=i)).isoformat(),
+            "result": "FAILURE", "failureKey": "source:3",
+        } for i in range(6)]
+        events = collect_interval_failure_events(
+            rows, {"event_window_minutes": 30},
+            start, start + timedelta(hours=2),
+        )
+        self.assertEqual(len(events), 1)
+        self.assertFalse(events[0]["recovered"])
+
+        rows.append({"customer_id": "200", "result": "SUCCESS",
+                     "occurred_at": (start + timedelta(minutes=50)).isoformat()})
+        events = collect_interval_failure_events(
+            rows, {"event_window_minutes": 30},
+            start, start + timedelta(hours=2),
+        )
+        self.assertTrue(events[0]["recovered"])
+
+        rows.append({"customer_id": "200", "result": "FAILURE",
+                     "occurred_at": (start + timedelta(minutes=100)).isoformat()})
+        events = collect_interval_failure_events(
+            rows, {"event_window_minutes": 30},
+            start, start + timedelta(hours=2),
+        )
+        self.assertFalse(events[0]["recovered"])
+
     def test_interval_window_boundaries_and_duplicate_timestamps(self):
         start = datetime(2026, 10, 29, 8, 0, tzinfo=ZONE)
         end = start + timedelta(minutes=60)
@@ -513,6 +543,10 @@ class NotificationRuleApiTests(TestCase):
             "result": "FAILURE",
             "failureKey": "source:3",
         } for i in range(6)]
+        rows.append({
+            "customer_id": "200", "result": "SUCCESS",
+            "occurred_at": (start + timedelta(minutes=50)).isoformat(),
+        })
         snapshot = SimpleNamespace(
             data={"rows": rows, "customers": {"200": {"name": "Tenant"}},
                   "metadata": {}},

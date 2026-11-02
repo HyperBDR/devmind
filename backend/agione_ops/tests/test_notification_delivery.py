@@ -360,6 +360,31 @@ class NotificationDeliveryIntegrationTests(TestCase):
         delay.assert_called_once_with(created[0].pk)
 
     @patch("agione_ops.tasks.deliver_notification.delay")
+    def test_unconfirmed_historical_anomaly_does_not_claim_recovery(self, delay):
+        current = {
+            **self.analysis,
+            "alerts": [],
+            "historical_alerts": [{
+                "customer_id": "200", "customer_name": "Tenant owner",
+                "reasons": ["continuous_failure", "balance_failure"],
+                "failure_count": 6, "event_request_count": 6,
+                "failure_rate_percent": 100,
+                "event_start": "2026-10-29T09:05:00+08:00",
+                "event_end": "2026-10-29T09:30:00+08:00",
+                "recovered": False,
+            }],
+        }
+        created = enqueue_analysis_notifications(
+            self.rules, {}, current, trigger="automatic",
+        )
+        self.assertEqual(len(created), 1)
+        self.assertEqual(created[0].kind, "alert")
+        text = created[0].payload["text"]
+        self.assertIn("恢复状态待确认", text)
+        self.assertNotIn("已恢复", text)
+        delay.assert_called_once()
+
+    @patch("agione_ops.tasks.deliver_notification.delay")
     def test_manual_complete_window_sends_recovery_once(self, delay):
         enqueue_analysis_notifications(
             self.rules,
@@ -367,6 +392,24 @@ class NotificationDeliveryIntegrationTests(TestCase):
             self.analysis,
             trigger="manual",
         )
+        NotificationIssue.objects.update(
+            first_seen_at=datetime(2026, 10, 29, 9, 0, tzinfo=ZONE),
+        )
+        no_evidence = enqueue_analysis_notifications(
+            self.rules, self.analysis,
+            {**self.analysis, "alerts": []}, trigger="manual",
+        )
+        self.assertEqual(no_evidence, [])
+        self.assertTrue(NotificationIssue.objects.filter(active=True).exists())
+        failed_again = enqueue_analysis_notifications(
+            self.rules, self.analysis,
+            {**self.analysis, "alerts": [], "recovery_evidence": {
+                "200": {"success": "2026-10-29T10:35:00+08:00",
+                        "failure": "2026-10-29T10:40:00+08:00"},
+            }}, trigger="manual",
+        )
+        self.assertEqual(failed_again, [])
+        self.assertTrue(NotificationIssue.objects.filter(active=True).exists())
         recovered = enqueue_analysis_notifications(
             self.rules,
             self.analysis,
@@ -381,6 +424,9 @@ class NotificationDeliveryIntegrationTests(TestCase):
                     tzinfo=ZONE,
                 ).isoformat(),
                 "alerts": [],
+                "recovery_evidence": {
+                    "200": {"success": "2026-10-29T10:40:00+08:00"},
+                },
             },
             trigger="manual",
         )

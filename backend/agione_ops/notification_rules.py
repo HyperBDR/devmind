@@ -210,6 +210,14 @@ def collect_interval_failure_events(
         if not customer_id:
             continue
         items.sort(key=lambda item: item[0])
+        last_success = max(
+            (when for when, row in items if row.get("result") == "SUCCESS"),
+            default=None,
+        )
+        last_failure = max(
+            (when for when, row in items if row.get("result") == "FAILURE"),
+            default=None,
+        )
         anchors = sorted(
             {
                 occurred_at
@@ -293,7 +301,13 @@ def collect_interval_failure_events(
                 ],
                 "event_start": segment["start"].isoformat(),
                 "event_end": segment["end"].isoformat(),
-                "recovered": segment["end"] < inspection_end,
+                "recovered": bool(
+                    segment["end"] < inspection_end
+                    and last_success is not None
+                    and last_failure is not None
+                    and last_success > last_failure
+                    and last_success >= segment["end"]
+                ),
             })
     return events
 
@@ -413,6 +427,7 @@ def analyze_completed_snapshot(scope_id, run_id):
         external_rows,
         tenant_classification,
     )
+    from agione_ops.native_analytics import parse_time
     from agione_ops.native_sync import authorize_native_run, validate_snapshot_data
     from agione_ops.native_sync_models import NativeAccountScope
     from agione_ops.tenant_directory import overrides_for
@@ -514,6 +529,22 @@ def analyze_completed_snapshot(scope_id, run_id):
                 "collectedAt"
             ),
         }
+        evidence = {}
+        for row in rows:
+            occurred = parse_time(row["occurred_at"])
+            if not start <= occurred < end:
+                continue
+            customer = str(row.get("customer_id") or "")
+            if not customer or row.get("result") not in {"SUCCESS", "FAILURE"}:
+                continue
+            value = evidence.setdefault(customer, {})
+            key = row["result"].lower()
+            if key not in value or occurred > value[key]:
+                value[key] = occurred
+        result["recovery_evidence"] = {
+            customer: {key: value.isoformat() for key, value in times.items()}
+            for customer, times in evidence.items()
+        }
         if trigger == "automatic":
             interval_events = collect_interval_failure_events(
                 rows,
@@ -525,7 +556,8 @@ def analyze_completed_snapshot(scope_id, run_id):
             result["inspection_start"] = inspection_start.isoformat()
             result["inspection_end"] = end.isoformat()
             result["historical_alerts"] = [
-                item for item in interval_events if item["recovered"]
+                item for item in interval_events
+                if parse_time(item["event_end"]) < end
             ]
     from agione_ops.notification_delivery import (
         dispatch_analysis_notifications,
