@@ -251,8 +251,8 @@ def _notification_text(rules, event, current, trigger):
         if starts and ends:
             range_line = (
                 "异常发生："
-                f"{min(starts).strftime('%m-%d %H:%')}—"
-                f"{max(ends).strftime('%m-%d %H:%')}，北京时间；"
+                f"{min(starts).strftime('%m-%d %H:%M')}—"
+                f"{max(ends).strftime('%m-%d %H:%M')}，北京时间；"
                 "巡检时已恢复"
             )
     elif trigger in {"manual", "automatic"}:

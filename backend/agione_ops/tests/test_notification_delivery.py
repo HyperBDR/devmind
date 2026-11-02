@@ -334,7 +334,7 @@ class NotificationDeliveryIntegrationTests(TestCase):
                 "failure_count": 6,
                 "event_request_count": 8,
                 "failure_rate_percent": 75,
-                "event_start": "2026-10-29T09:00:00+08:00",
+                "event_start": "2026-10-29T09:05:00+08:00",
                 "event_end": "2026-10-29T09:30:00+08:00",
                 "recovered": True,
             }],
@@ -353,6 +353,7 @@ class NotificationDeliveryIntegrationTests(TestCase):
         self.assertEqual(created[0].kind, "recovered_history")
         text = created[0].payload["text"]
         self.assertIn("已恢复的历史异常", text)
+        self.assertIn("10-29 09:05—10-29 09:30", text)
         self.assertIn("失败 6 次，成功 2 次", text)
         self.assertIn("巡检时已恢复", text)
         self.assertFalse(NotificationIssue.objects.exists())
