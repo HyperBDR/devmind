@@ -383,6 +383,38 @@ class NotificationDeliveryIntegrationTests(TestCase):
         self.assertIn("恢复状态待确认", text)
         self.assertNotIn("已恢复", text)
         delay.assert_called_once()
+        self.assertEqual(
+            NotificationIssue.objects.filter(active=True).count(), 2,
+        )
+
+        no_calls = {
+            **self.analysis, "alerts": [], "historical_alerts": [],
+            "window_end": "2026-10-29T12:00:00+08:00",
+        }
+        self.assertEqual(enqueue_analysis_notifications(
+            self.rules, current, no_calls, trigger="automatic",
+        ), [])
+        self.assertEqual(
+            NotificationIssue.objects.filter(active=True).count(), 2,
+        )
+
+        with_success = {
+            **no_calls,
+            "window_end": "2026-10-29T13:00:00+08:00",
+            "recovery_evidence": {
+                "200": {"success": "2026-10-29T12:30:00+08:00"},
+            },
+        }
+        recovered = enqueue_analysis_notifications(
+            self.rules, no_calls, with_success, trigger="automatic",
+        )
+        self.assertEqual(len(recovered), 1)
+        self.assertEqual(recovered[0].kind, "recovery")
+        self.assertFalse(NotificationIssue.objects.filter(active=True).exists())
+        self.assertEqual(enqueue_analysis_notifications(
+            self.rules, with_success, with_success, trigger="automatic",
+        ), [])
+        self.assertEqual(delay.call_count, 2)
 
     @patch("agione_ops.tasks.deliver_notification.delay")
     def test_manual_complete_window_sends_recovery_once(self, delay):

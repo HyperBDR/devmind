@@ -447,7 +447,11 @@ def enqueue_analysis_notifications(
                 )
                 success = _parse_time(evidence.get("success"))
                 failure = _parse_time(evidence.get("failure"))
-                if (not success or success <= issue.first_seen_at
+                observed = (
+                    _parse_time(issue.finding.get("event_end"))
+                    or issue.first_seen_at
+                )
+                if (not success or success <= observed
                         or (failure and success <= failure)):
                     continue
             issue.active = False
@@ -485,6 +489,27 @@ def enqueue_analysis_notifications(
                 "findings": recovered_history,
             })
         if trigger == "automatic" and unconfirmed_history:
+            for key, finding in _issue_map(
+                unconfirmed_history, urgent,
+            ).items():
+                issue = existing.get(key)
+                if issue and issue.active:
+                    continue
+                if issue is None:
+                    issue, _ = NotificationIssue.objects.get_or_create(
+                        rules=rules, customer_id=key[0], reason=key[1],
+                        defaults={"first_seen_at": now, "last_seen_at": now},
+                    )
+                issue.active = True
+                issue.finding = finding
+                issue.first_seen_at = now
+                issue.last_seen_at = now
+                issue.last_alerted_at = now
+                issue.resolved_at = None
+                issue.save(update_fields=[
+                    "active", "finding", "first_seen_at", "last_seen_at",
+                    "last_alerted_at", "resolved_at",
+                ])
             events.append({
                 "kind": "alert",
                 "historical_unconfirmed": True,

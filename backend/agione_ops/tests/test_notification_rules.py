@@ -611,6 +611,91 @@ class NotificationRuleApiTests(TestCase):
             self.assertEqual(delivery.kind, "recovered_history")
             self.assertIn("Tenant", delivery.payload["text"])
 
+    def test_unconfirmed_history_recovers_on_later_inspection(self):
+        from agione_ops.models import NotificationIssue
+        from agione_ops.notification_rules import analyze_completed_snapshot
+
+        start = datetime(2026, 10, 29, 8, 0, tzinfo=ZONE)
+        end = start + timedelta(hours=2)
+        rows = [{
+            "customer_id": "200", "result": "FAILURE",
+            "failureKey": "source:3",
+            "occurred_at": (start + timedelta(minutes=i)).isoformat(),
+        } for i in range(6)]
+        snapshot = SimpleNamespace(
+            data={"rows": rows, "customers": {"200": {"name": "Tenant"}},
+                  "metadata": {}}, content_digest="test",
+        )
+        run = SimpleNamespace(
+            pk="run", idempotency_key="agione-auto-20261029T030000Z-7",
+            window_start=start - timedelta(hours=1), window_end=end,
+            published_version=SimpleNamespace(native_snapshot=snapshot),
+        )
+        scope = SimpleNamespace(
+            run_id="run", run=run, connection=self.connection,
+            connection_id=self.connection.pk, user=self.user,
+        )
+        rules = NotificationRules.objects.create(
+            connection=self.connection, user=self.user,
+            last_inspection_at=start,
+            config={**notification_rule_config(), "enabled": True,
+                    "channel_id": str(self.own_channel.uuid),
+                    "event_window_minutes": 30},
+        )
+        with ExitStack() as stack:
+            select = stack.enter_context(patch(
+                "agione_ops.native_sync_models.NativeAccountScope.objects."
+                "select_related"
+            ))
+            select.return_value.get.return_value = scope
+            stack.enter_context(patch(
+                "agione_ops.native_sync.authorize_native_run"
+            ))
+            stack.enter_context(patch(
+                "agione_ops.native_sync.validate_snapshot_data"
+            ))
+            stack.enter_context(patch(
+                "agione_ops.native_account_refresh.scope_for",
+                return_value=({}, "valid"),
+            ))
+            stack.enter_context(patch(
+                "agione_ops.native_account_scope.external_rows",
+                side_effect=lambda snapshot_rows, *_: snapshot_rows,
+            ))
+            stack.enter_context(patch(
+                "agione_ops.tenant_directory.overrides_for", return_value={},
+            ))
+            send = stack.enter_context(patch(
+                "agione_ops.tasks.deliver_notification.delay"
+            ))
+            with self.captureOnCommitCallbacks(execute=True):
+                analyze_completed_snapshot(1, "run")
+            rules.refresh_from_db()
+            self.assertEqual(rules.last_inspection_at, end)
+            self.assertEqual(
+                NotificationIssue.objects.filter(active=True).count(), 2,
+            )
+            self.assertIn(
+                "恢复状态待确认", NotificationDelivery.objects.get().payload["text"],
+            )
+
+            rows.append({
+                "customer_id": "200", "result": "SUCCESS",
+                "occurred_at": (end + timedelta(minutes=10)).isoformat(),
+            })
+            run.window_end = end + timedelta(hours=1)
+            with self.captureOnCommitCallbacks(execute=True):
+                analyze_completed_snapshot(1, "run")
+            rules.refresh_from_db()
+            self.assertEqual(rules.last_inspection_at, run.window_end)
+            self.assertFalse(
+                NotificationIssue.objects.filter(active=True).exists(),
+            )
+            self.assertEqual(
+                NotificationDelivery.objects.filter(kind="recovery").count(), 1,
+            )
+            self.assertEqual(send.call_count, 2)
+
     def test_get_defaults_then_save_and_read_server_configuration(self):
         response = self.client.get(self.url)
         self.assertEqual(response.status_code, 200)
