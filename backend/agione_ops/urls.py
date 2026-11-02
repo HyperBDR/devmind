@@ -16,6 +16,11 @@ urlpatterns = [
         name="agione-ops-self-service-connection-detail",
     ),
     path(
+        "connections/self-service/<uuid:connection_id>/remove/",
+        views.SelfServiceConnectionRemoveAPIView.as_view(),
+        name="agione-ops-self-service-connection-remove",
+    ),
+    path(
         "connections/<uuid:connection_id>/notification-rules/",
         views.NotificationRulesAPIView.as_view(),
         name="agione-ops-notification-rules",

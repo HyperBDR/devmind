@@ -151,6 +151,11 @@ test('focus defaults to hourly distribution and preserves trend switching', () =
   const hourlyDistribution = { dayCount: 2, points: Array.from({ length: 24 }, (_, hour) => ({ hour, requestCount: hour === 10 ? 4 : 0, activeCustomers: hour === 10 ? 2 : 0 })) }
   const dashboard = { summary, customers: [], comparison: { state: 'UNAVAILABLE' }, models: [], hourlyDistribution }
   const base = originalWorkspaceState({ ...state, dashboard })
+  const hourly = renderOriginalWorkspace(base, 'focus', { locale: 'en' })
+  assert.match(hourly, /Usage analysis/)
+  assert.match(hourly, /Requests by hour, Shanghai time/)
+  assert.match(hourly, /Requests: 4/)
+  assert.match(hourly, /10:00—11:00: 4 requests/)
   const html = renderOriginalWorkspace(base, 'focus')
   assert.match(html, /data-chart-view="hourly" aria-pressed="true"/)
   assert.match(html, /10:00—11:00：4 次调用/)
@@ -164,4 +169,20 @@ test('focus defaults to hourly distribution and preserves trend switching', () =
   assert.doesNotMatch(trend, /class="hour-plot"/)
   assert.match(html, /class="hour-yaxis"/)
   assert.doesNotMatch(trend, /末尾24小时|data-trend-grain/)
+})
+
+test('English usage charts translate every control and accessible label', () => {
+  const points = Array.from({ length: 24 }, (_, hour) => ({
+    hour, requestCount: hour === 10 || hour === 11 ? 4 : 0,
+    activeCustomers: hour === 10 ? 2 : 0
+  }))
+  const trend = [{ seriesKey: 'ALL', label: '全部', points: [{ bucketStart: '2026-10-20T00:00:00+08:00', bucketEndExclusive: '2026-10-21T00:00:00+08:00', requestCount: 4 }] }]
+  const dashboard = { summary, customers: [], comparison: { state: 'UNAVAILABLE' }, models: [], trend, hourlyDistribution: { dayCount: 2, points } }
+  const base = originalWorkspaceState({ ...state, dashboard })
+  for (const options of [{}, { hourMode: 'average' }, { hourMetric: 'customers' }, { chartView: 'trend' }, { dashboard: { ...dashboard, hourlyDistribution: null } }, { dashboard: { ...dashboard, hourlyDistribution: { dayCount: 2, points: points.map(p => ({ ...p, requestCount: 0 })) } } }]) {
+    const html = renderOriginalWorkspace({ ...base, ...options }, 'focus', { locale: 'en' })
+    const panel = html.match(/<section class="panel dashboard-trend"[\s\S]*?<\/section>/)?.[0]
+    assert.ok(panel)
+    assert.doesNotMatch(panel, /[\u3400-\u9fff]/, JSON.stringify(options))
+  }
 })

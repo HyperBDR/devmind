@@ -209,7 +209,7 @@ def test_full_migration_from_initial_history(private_schema_connection, legacy):
         make_legacy_marker(connection)
     executor = MigrationExecutor(connection)
     target = executor.loader.graph.leaf_nodes("agione_ops")
-    assert target == [("agione_ops", "0019_scheduled_report_state")]
+    assert target == [("agione_ops", "0020_sourceconnection_removed_at")]
     executor.migrate(target)
     executor = MigrationExecutor(connection)
     assert all(node in executor.loader.applied_migrations for node in target)
@@ -231,7 +231,7 @@ def test_full_migration_from_empty_database(django_db_blocker):
             assert not executor.loader.applied_migrations
             target = executor.loader.graph.leaf_nodes("agione_ops")
             executor.migrate(target)
-            assert target == [("agione_ops", "0019_scheduled_report_state")]
+            assert target == [("agione_ops", "0020_sourceconnection_removed_at")]
             assert TABLES <= tables(connection)
             assert all(node in MigrationExecutor(connection).loader.applied_migrations
                        for node in target)

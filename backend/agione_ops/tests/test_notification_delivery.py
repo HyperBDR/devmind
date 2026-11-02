@@ -628,6 +628,20 @@ class NotificationDeliveryIntegrationTests(TestCase):
             ),
         )
 
+    @patch("agentcore_notifier.adapters.django.tasks.send.send_notification.run")
+    def test_removed_connection_never_sends_pending_notice(self, send):
+        from django.utils import timezone
+
+        delivery = NotificationDelivery.objects.create(
+            rules=self.rules, event_key="removed-connection",
+            issue_signature="removed-connection", kind="alert",
+            payload={"text": "运营提醒"},
+        )
+        self.connection.removed_at = timezone.now()
+        self.connection.save(update_fields=["removed_at"])
+        self.assertEqual(deliver_notification(delivery.pk)["status"], "silenced")
+        send.assert_not_called()
+
     @patch(
         "agentcore_notifier.adapters.django.tasks.send."
         "send_notification.run",

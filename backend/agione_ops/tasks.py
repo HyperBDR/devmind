@@ -126,7 +126,8 @@ def deliver_notification(delivery_id):
         ).filter(
             Q(user__isnull=True) | Q(user=delivery.rules.user),
         ).first()
-        if not config.get("enabled") or channel is None:
+        if (delivery.rules.connection.removed_at is not None
+                or not config.get("enabled") or channel is None):
             delivery.status = "silenced"
             delivery.error_message = "通知规则已停用或渠道不可用。"
             delivery.save(update_fields=["status", "error_message"])

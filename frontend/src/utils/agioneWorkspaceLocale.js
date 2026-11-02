@@ -4,6 +4,34 @@ import { escapeHTML } from '../components/agione-demo/core.mjs'
 export const isEnglishLocale = value => /^en(?:[-_]|$)/i.test(String(value || ''))
 
 const phrases = `
+调用分析|Usage analysis
+调用变化已完成比较|Usage comparison complete
+调用量下降|Declining usage
+位客户调用量下降| customers with declining usage
+天无调用| days without requests
+按小时查看已采集调用的使用分布|Hourly distribution of collected requests
+图表类型|Chart type
+使用时段分布|Usage by hour
+调用次数|Requests
+活跃客户数|Active customers
+期间总量|Period total
+日均调用量|Daily average requests
+进入自由组合分析 →|Open Usage Analytics →
+高峰时段|Peak hour
+存在并列高峰|Multiple peak hours
+所选范围暂无调用记录|No requests in the selected period
+使用时段数据暂不可用，请刷新数据后重试。|Hourly usage data is unavailable. Refresh and try again.
+调用次数按北京时间小时分布|Requests by hour, Shanghai time (UTC+8)
+活跃客户数按北京时间小时分布|Active customers by hour, Shanghai time (UTC+8)
+日均调用量按北京时间小时分布|Daily average requests by hour, Shanghai time (UTC+8)
+按北京时间小时分布|by hour, Shanghai time (UTC+8)
+各时段去重客户数|Unique customers in each hour
+各时段调用总量|Total requests per hour
+所选期间各小时调用总量|Total requests per hour in the selected period
+已采集数据 · 非实时|Collected data · not real time
+按所选范围涉及的自然日数计算；不完整日期也计入天数。|Calculated using calendar days in the selected period, including partial days.
+个自然日|calendar days
+次调用| requests
 搜索客户名称或ID|Search customers by name or ID
 选择画像客户|Choose a customer profile
 前期尚未读取|Previous period not loaded
@@ -551,9 +579,11 @@ const units = [
 
 export function workspaceText(value, locale = 'zh-CN') {
   if (!isEnglishLocale(locale) || typeof value !== 'string') return value
-  let result = value.replace(/第\s*([0-9,]+)\s*\/\s*([0-9,]+)\s*页\s*·\s*每页\s*([0-9,]+)\s*位/g, 'Page $1 of $2 · $3 customers per page')
+  let result = value.replace(/连续\s*(?=\d|$)/g, 'For ')
+    .replace(/(调用次数|日均调用量|活跃客户数)\s+([\d,.]+)\s*(?:次|位客户)/g, (_, label, count) => `${{ 调用次数: 'Requests', 日均调用量: 'Daily average requests', 活跃客户数: 'Active customers' }[label]}: ${count}`)
+    .replace(/第\s*([0-9,]+)\s*\/\s*([0-9,]+)\s*页\s*·\s*每页\s*([0-9,]+)\s*位/g, 'Page $1 of $2 · $3 customers per page')
   for (const [from, to] of [...translations, ...units].sort((a,b)=>b[0].length-a[0].length)) result = result.split(from).join(to)
-  return result.replace(/(\d)\s{2,}(requests|customers|models)/g,'$1 $2').replace(/(\d+)\s*\/\s*(\d+)\s+(reported samples|requests|customers)/g,'$1 / $2 $3').replace(/(Collected|Retrieved)\s+Timestamp unavailable/g,'Last fetched: unavailable').replace(/ModelRequest share/g,'Model request share').replace(/(Total tokens|Input tokens|Output tokens)(Daily|Hourly|Weekly) trend/g,(_,metric,grain)=>`${grain} ${metric.toLowerCase()} trend`).replace(/DailyTotals/g,'Daily totals').replace(/(\uE101)([A-Za-z])/g, '$1 $2').replace(/\b1 customers\b/g,'1 customer').replace(/\b1 requests\b/g,'1 request').replace(/\b1 models\b/g,'1 model').replace(/（/g, ' (').replace(/）/g, ')')
+  return result.replace(/(\d)\s{2,}(requests|customers|models|days without requests)/g,'$1 $2').replace(/(\d+)\s*\/\s*(\d+)\s+(reported samples|requests|customers)/g,'$1 / $2 $3').replace(/(Collected|Retrieved)\s+Timestamp unavailable/g,'Last fetched: unavailable').replace(/ModelRequest share/g,'Model request share').replace(/(Total tokens|Input tokens|Output tokens)(Daily|Hourly|Weekly) trend/g,(_,metric,grain)=>`${grain} ${metric.toLowerCase()} trend`).replace(/DailyTotals/g,'Daily totals').replace(/(\uE101)([A-Za-z])/g, '$1 $2').replace(/\b1 customers\b/g,'1 customer').replace(/\b1 requests\b/g,'1 request').replace(/\b1 models\b/g,'1 model').replace(/（/g, ' (').replace(/）/g, ')')
     .replace(/，/g, ', ').replace(/。/g, '.').replace(/；/g, '; ')
     .replace(/：/g, ': ').replace(/、/g, ', ')
 }

@@ -807,3 +807,66 @@ def test_new_feature_is_not_a_legacy_alias_or_default():
     assert "agione_ops" in FEATURE_KEYS
     assert "agione_ops" not in LEGACY_DEFAULT_FEATURES
     assert "agione_ops" not in FEATURE_ALIASES.values()
+
+@override_settings(
+    AGIONE_OPS_NATIVE_ENABLED=True,
+    AGIONE_OPS_ALLOWED_ENDPOINT_HOSTS=("agione.pro",),
+    AGIONE_OPS_SELF_SERVICE_ENDPOINTS={"pro": "https://agione.pro"},
+)
+def test_remove_personal_connection_preserves_history_and_allows_reconnect(actors):
+    from agione_ops.models import NotificationDelivery, NotificationRules
+
+    manager, owner, other = actors
+    connection = SourceConnection.objects.create(
+        name="Personal", platform="pro", principal_kind="provider",
+        source_kind="native", endpoint="https://agione.pro",
+        expected_tenant_id="tenant-42", enabled=True, created_by=owner,
+    )
+    connection.set_credentials({"access_key": "old", "secret_key": "old"})
+    connection.save()
+    ConnectionGrant.objects.create(
+        connection=connection, user=owner, can_view=True, can_sync=True,
+    )
+    rules = NotificationRules.objects.create(
+        connection=connection, user=owner, config={"enabled": False},
+    )
+    pending = NotificationDelivery.objects.create(
+        rules=rules, event_key="remove-test", issue_signature="remove-test",
+        kind="alert", payload={"text": "test"},
+    )
+    path = f"{BASE}self-service/{connection.pk}/remove/"
+    assert client_for(other).post(path, {}, format="json").status_code == 404
+    assert client_for(owner).post(path, {}, format="json").status_code == 204
+    connection.refresh_from_db()
+    assert not connection.enabled
+    assert not connection.credential_ciphertext
+    assert not connection.key_id
+    pending.refresh_from_db()
+    assert pending.status == "silenced"
+    assert NotificationRules.objects.filter(pk=rules.pk).exists()
+    assert pending.payload == {"text": "test"}
+    assert client_for(owner).get(BASE).data["data"]["count"] == 0
+    assert client_for(manager).get(BASE).data["data"]["count"] == 0
+    assert client_for(owner).delete(
+        f"{BASE}self-service/{connection.pk}/",
+    ).status_code == 404
+    with (
+        patch("agione_ops.views._probe_personal_connection", return_value=(
+            "https://agione.pro", {"access_key": "new", "secret_key": "new"},
+            {"tenant_id": "tenant-42", "principal_kind": "provider"},
+        )),
+        patch("agione_ops.tasks.start_initial_native_sync"),
+    ):
+        response = client_for(owner).post(
+            f"{BASE}self-service/", {"platform": "pro", "principalKind": "provider",
+                                    "accessKey": "new", "secretKey": "new"},
+            format="json",
+        )
+    assert response.status_code == 201, response.data
+    assert response.data["data"]["id"] == str(connection.pk)
+    connection.refresh_from_db()
+    assert connection.enabled
+    assert connection.get_credentials()["secret_key"] == "new"
+    assert connection.verified_tenant_id == "tenant-42"
+    assert connection.verified_at is not None
+    assert NotificationRules.objects.filter(pk=rules.pk).exists()
