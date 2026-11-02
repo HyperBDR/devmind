@@ -61,6 +61,23 @@ class NotificationDeliveryUnitTests(TestCase):
             element["tag"] == "action" for element in payload["card"]["elements"]
         ))
 
+    def test_invalid_dashboard_urls_keep_alert_without_button(self):
+        invalid_urls = (
+            "http://[broken",
+            "https://example.com:notaport/path",
+            "https://example.com:99999/path",
+            "https://bad host/path",
+            "https://example.com\\evil/path",
+        )
+        for url in invalid_urls:
+            with self.subTest(url=url):
+                payload = _webhook_payload(
+                    "feishu", f"异常提醒\n失败 18 次\n查看全部线索 → {url}",
+                )
+                elements = payload["card"]["elements"]
+                self.assertIn("失败 18 次", elements[0]["text"]["content"])
+                self.assertFalse(any(e["tag"] == "action" for e in elements))
+
     @patch(
         "agentcore_notifier.adapters.django.services.webhook.feishu.requests.post"
     )
@@ -610,6 +627,27 @@ class NotificationDeliveryIntegrationTests(TestCase):
                 self.channel.uuid,
             ),
         )
+
+    @patch(
+        "agentcore_notifier.adapters.django.tasks.send."
+        "send_notification.run",
+        return_value={"success": True, "response": {"code": 0}},
+    )
+    def test_delivery_sends_alert_when_dashboard_url_is_malformed(self, send):
+        delivery = NotificationDelivery.objects.create(
+            rules=self.rules,
+            event_key="invalid-url-key",
+            issue_signature="invalid-url-signature",
+            kind="alert",
+            payload={"text": "异常提醒\n失败 18 次\n查看全部线索 → http://[broken"},
+        )
+
+        result = deliver_notification(delivery.pk)
+
+        self.assertEqual(result["status"], "sent")
+        card = send.call_args.kwargs["params"]["payload"]["card"]
+        self.assertIn("失败 18 次", card["elements"][0]["text"]["content"])
+        self.assertFalse(any(e["tag"] == "action" for e in card["elements"]))
 
     @patch(
         "agentcore_notifier.adapters.django.tasks.send."

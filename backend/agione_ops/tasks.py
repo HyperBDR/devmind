@@ -35,6 +35,9 @@ def _webhook_payload(provider_type, text):
     if provider_type == "feishu":
         from urllib.parse import urlsplit
 
+        from django.core.exceptions import ValidationError
+        from django.core.validators import URLValidator
+
         lines = text.splitlines()
         title = lines.pop(0) if lines else "AGIOne 运营通知"
         color = "green" if "已恢复" in title or "恢复提醒" in title else (
@@ -47,8 +50,18 @@ def _webhook_payload(provider_type, text):
         for line in lines:
             if line.startswith("查看全部线索 → "):
                 candidate = line.removeprefix("查看全部线索 → ").strip()
-                parts = urlsplit(candidate)
-                if parts.scheme in {"http", "https"} and parts.hostname:
+                try:
+                    URLValidator(schemes=["http", "https"])(candidate)
+                    parts = urlsplit(candidate)
+                    port = parts.port
+                    valid = (
+                        parts.hostname and not parts.username
+                        and not parts.password and "\\" not in candidate
+                        and (port is None or port > 0)
+                    )
+                except (ValidationError, ValueError):
+                    valid = False
+                if valid:
                     url = candidate
                     continue
             body.append(line)
