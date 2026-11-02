@@ -56,6 +56,16 @@
           <option value="cc">AGIOne CC</option>
         </select>
       </label>
+      <label v-if="!editing">账号身份
+        <select v-model="draft.principalKind" :disabled="busy" required>
+          <option value="" disabled>请选择账号身份</option>
+          <option value="provider">Provider</option>
+          <option value="operator">Operator</option>
+        </select>
+      </label>
+      <p v-if="!editing" class="native-security">
+        请按 AGIOne 账号实际身份选择；上游未提供可识别角色时将使用此选择。
+      </p>
       <div v-if="editing" class="native-section-title">更新密钥</div>
       <label
         >Access Key
@@ -112,12 +122,12 @@ const dialog = ref(null),
   editing = ref(null)
 const error = ref(''),
   status = ref('')
-const draft = reactive({ platform: 'pro', accessKey: '', secretKey: '' })
+const draft = reactive({ platform: 'pro', principalKind: '', accessKey: '', secretKey: '' })
 const canSave = computed(() =>
   editing.value
     ? (!draft.accessKey && !draft.secretKey) ||
       (!!draft.accessKey && !!draft.secretKey)
-    : !!draft.accessKey && !!draft.secretKey
+    : !!draft.principalKind && !!draft.accessKey && !!draft.secretKey
 )
 
 function clearSecrets() {
@@ -148,6 +158,7 @@ function safeError(exc) {
       SOURCE_AUTH_FAILED: 'AK 或 SK 无效，请检查后重试。',
       SOURCE_FORBIDDEN: '当前密钥没有读取 AGIOne 数据的权限。',
       SOURCE_ROLE_NOT_VERIFIED: '无法确认账号身份，请联系管理员检查账号角色。',
+      SOURCE_IDENTITY_MISMATCH: '账号身份与上游返回的角色不一致。',
       SELF_SERVICE_CONNECTION_EXISTS: '该 AGIOne 账号已经连接。',
       credential_unavailable: '服务端尚未配置凭据加密密钥。'
     }[code] || '连接未完成，请检查密钥或稍后重试。'
@@ -156,6 +167,7 @@ function safeError(exc) {
 function open(item = null) {
   editing.value = item
   draft.platform = item?.platform || 'pro'
+  draft.principalKind = ''
   clearSecrets()
   error.value = ''
   status.value = ''
@@ -179,6 +191,7 @@ async function save() {
       accessKey: draft.accessKey,
       secretKey: draft.secretKey
     }
+    if (!editing.value) body.principalKind = draft.principalKind
     const response = editing.value
       ? await agioneOpsApi.updatePersonalConnection(editing.value.id, body)
       : await agioneOpsApi.createPersonalConnection(body)

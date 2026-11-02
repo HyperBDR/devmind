@@ -77,12 +77,13 @@ def test_platform_user_can_create_only_owned_personal_connection():
                 "https://agione.pro", credentials,
                 {"tenant_id": "tenant-42", "principal_kind": "provider"},
             ),
-        ),
+        ) as probe,
         patch("agione_ops.tasks.start_initial_native_sync") as initial_sync,
     ):
         response = client_for(user).post(
             f"{BASE}self-service/",
-            {"platform": "pro", "accessKey": "test-ak", "secretKey": "test-sk"},
+            {"platform": "pro", "principalKind": "provider",
+             "accessKey": "test-ak", "secretKey": "test-sk"},
             format="json",
         )
         assert response.status_code == 201, response.data
@@ -92,6 +93,9 @@ def test_platform_user_can_create_only_owned_personal_connection():
             connection=connection, user=user, can_view=True, can_sync=True,
         ).exists()
         assert client_for(user).get(BASE).data["data"]["count"] == 1
+        probe.assert_called_once_with(
+            user, "pro", "test-ak", "test-sk", "provider",
+        )
         initial_sync.assert_called_once_with(connection, user)
 
 

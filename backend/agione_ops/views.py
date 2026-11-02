@@ -376,7 +376,9 @@ class ConnectionListCreateAPIView(LocalAPIView):
         )
 
 
-def _probe_personal_connection(user, platform, access_key, secret_key):
+def _probe_personal_connection(
+    user, platform, access_key, secret_key, principal_kind=None,
+):
     """Verify write-only credentials before creating a personal connection."""
     from agione_ops.native_client import NativeClient
 
@@ -402,7 +404,10 @@ def _probe_personal_connection(user, platform, access_key, secret_key):
         "secret_key": secret_key,
     })
     with NativeClient(candidate) as client:
-        return endpoint, candidate.get_credentials(), client.discover_identity()
+        return (
+            endpoint, candidate.get_credentials(),
+            client.discover_identity(principal_kind),
+        )
 
 
 class SelfServiceConnectionListCreateAPIView(LocalAPIView):
@@ -419,6 +424,7 @@ class SelfServiceConnectionListCreateAPIView(LocalAPIView):
             values["platform"],
             values["access_key"],
             values["secret_key"],
+            values.get("principal_kind"),
         )
         with transaction.atomic():
             if SourceConnection.objects.filter(
@@ -502,6 +508,7 @@ class SelfServiceConnectionDetailAPIView(LocalAPIView):
             connection.platform,
             values["access_key"],
             values["secret_key"],
+            connection.principal_kind,
         )
         if (
             identity["tenant_id"] != connection.expected_tenant_id
