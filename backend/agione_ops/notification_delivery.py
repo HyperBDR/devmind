@@ -351,6 +351,7 @@ def enqueue_analysis_notifications(
     trigger="scheduled",
     scheduled_date=None,
     preserve_issue_state=False,
+    dispatch=True,
 ):
     """Persist new events and dispatch each event at most once."""
     config = rules.config
@@ -377,15 +378,10 @@ def enqueue_analysis_notifications(
                 rules, {"kind": "alert", "findings": current.get("alerts", [])},
                 current, trigger, scheduled_date,
             )
-        if delivery is not None:
-            from agione_ops.tasks import deliver_notification
-
-            try:
-                deliver_notification.delay(delivery.pk)
-            except Exception:
-                logger.exception("AGIOne notification dispatch failed delivery_id=%s",
-                                 delivery.pk)
-        return [delivery] if delivery is not None else []
+        created = [delivery] if delivery is not None else []
+        if dispatch:
+            dispatch_analysis_notifications(created)
+        return created
     now = timezone.now()
     repeat_since = now - timedelta(hours=config.get("repeat_hours", 4))
     alert_items = []
@@ -483,7 +479,14 @@ def enqueue_analysis_notifications(
             )
         ]
 
-    for delivery in created:
+    if dispatch:
+        dispatch_analysis_notifications(created)
+    return created
+
+
+def dispatch_analysis_notifications(deliveries):
+    """Enqueue notification records after their transaction commits."""
+    for delivery in deliveries:
         from agione_ops.tasks import deliver_notification
 
         try:
@@ -493,4 +496,3 @@ def enqueue_analysis_notifications(
                 "AGIOne notification dispatch failed delivery_id=%s",
                 delivery.pk,
             )
-    return created

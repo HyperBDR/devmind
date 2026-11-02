@@ -219,18 +219,42 @@ def collect_interval_failure_events(
             | {inspection_end}
         )
         matches = []
+        left = right = failure_count = balance_count = 0
         for anchor in anchors:
-            observed = [
-                row
-                for occurred_at, row in items
-                if anchor - window < occurred_at <= anchor
-            ]
-            alert = next(
-                iter(collect_failure_alerts(observed, config)),
-                None,
+            while right < len(items) and items[right][0] <= anchor:
+                row = items[right][1]
+                if row.get("result") == "FAILURE":
+                    failure_count += 1
+                    balance_count += row.get("failureKey") == "source:3"
+                right += 1
+            while left < right and items[left][0] <= anchor - window:
+                row = items[left][1]
+                if row.get("result") == "FAILURE":
+                    failure_count -= 1
+                    balance_count -= row.get("failureKey") == "source:3"
+                left += 1
+            count = right - left
+            if not count:
+                continue
+            rate = failure_count / count * 100
+            blocked = (
+                config.get("continuous_failure", True)
+                and failure_count >= config.get("min_failure_count", 6)
+                and rate >= config.get("failure_rate_percent", 80)
             )
-            if alert:
-                matches.append((anchor, alert))
+            low_balance = (
+                config.get("balance_failure", True)
+                and balance_count >= config.get("min_balance_failure_count", 1)
+            )
+            if blocked or low_balance:
+                matches.append((anchor, {
+                    "failure_count": failure_count,
+                    "request_count": count,
+                    "failure_rate_percent": round(rate, 2),
+                    "balance_failure_count": balance_count,
+                    "blocked": blocked,
+                    "balance_failure": low_balance,
+                }))
         if not matches:
             continue
         segments = []
@@ -503,6 +527,11 @@ def analyze_completed_snapshot(scope_id, run_id):
             result["historical_alerts"] = [
                 item for item in interval_events if item["recovered"]
             ]
+    from agione_ops.notification_delivery import (
+        dispatch_analysis_notifications,
+        enqueue_analysis_notifications,
+    )
+
     with transaction.atomic():
         locked = NotificationRules.objects.select_for_update().get(
             pk=config.pk,
@@ -526,20 +555,20 @@ def analyze_completed_snapshot(scope_id, run_id):
                     "last_auto_error_code",
                 ])
             locked.save(update_fields=update_fields)
-    from agione_ops.notification_delivery import (
-        enqueue_analysis_notifications,
-    )
-
-    created = enqueue_analysis_notifications(
-        config,
-        prior,
-        result,
-        trigger=trigger,
-        scheduled_date=scheduled_date_from_key(
-            run.idempotency_key,
-        ),
-        preserve_issue_state=older and trigger == "scheduled",
-    )
+        created = enqueue_analysis_notifications(
+            locked,
+            prior,
+            result,
+            trigger=trigger,
+            scheduled_date=scheduled_date_from_key(
+                run.idempotency_key,
+            ),
+            preserve_issue_state=older and trigger == "scheduled",
+            dispatch=False,
+        )
+        transaction.on_commit(
+            lambda: dispatch_analysis_notifications(created)
+        )
     if trigger == "scheduled":
         report_date = scheduled_date_from_key(run.idempotency_key)
         delivered_or_queued = bool(created) or config.deliveries.filter(

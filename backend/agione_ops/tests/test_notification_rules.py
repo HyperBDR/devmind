@@ -1,6 +1,8 @@
 """Validate persisted notification rules and completed-window analysis."""
 
+from contextlib import ExitStack
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
@@ -243,6 +245,55 @@ class NotificationRuleUnitTests(SimpleTestCase):
         )
         self.assertEqual(alerts, [])
 
+    def test_interval_scan_handles_large_successful_tenant(self):
+        start = datetime(2026, 10, 29, 8, 0, tzinfo=ZONE)
+        rows = [
+            {
+                "customer_id": "200",
+                "occurred_at": (
+                    start + timedelta(milliseconds=i * 500)
+                ).isoformat(),
+                "result": "SUCCESS",
+            }
+            for i in range(20000)
+        ]
+        with patch(
+            "agione_ops.notification_rules.collect_failure_alerts",
+            side_effect=AssertionError("Window was rescanned"),
+        ):
+            events = collect_interval_failure_events(
+                rows, {}, start, start + timedelta(hours=3),
+            )
+        self.assertEqual(events, [])
+
+    def test_interval_window_boundaries_and_duplicate_timestamps(self):
+        start = datetime(2026, 10, 29, 8, 0, tzinfo=ZONE)
+        end = start + timedelta(minutes=60)
+        rows = [{
+            "customer_id": "200",
+            "occurred_at": (start + timedelta(minutes=minute)).isoformat(),
+            "result": result,
+            "failureKey": key,
+        } for minute, result, key in [
+            (-30, "FAILURE", "source:3"),
+            (0, "FAILURE", "source:3"),
+            (0, "FAILURE", "source:3"),
+            (29, "UNKNOWN", ""),
+            (30, "SUCCESS", ""),
+            (60, "FAILURE", "source:3"),
+        ]]
+        events = collect_interval_failure_events(
+            rows,
+            {"event_window_minutes": 30, "min_failure_count": 2,
+             "failure_rate_percent": 100, "balance_failure": False},
+            start, end,
+        )
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["failure_count"], 2)
+        self.assertEqual(events[0]["event_request_count"], 2)
+        self.assertEqual(events[0]["event_end"], start.isoformat())
+        self.assertTrue(events[0]["recovered"])
+
     def test_analysis_covers_all_four_rule_types(self):
         end = datetime(2026, 10, 29, tzinfo=ZONE)
         rows = []
@@ -450,6 +501,81 @@ class NotificationRuleApiTests(TestCase):
             "/api/v1/agione-ops/connections/"
             f"{self.connection.pk}/notification-rules/"
         )
+
+    def test_failed_notification_write_preserves_inspection_for_retry(self):
+        from agione_ops.notification_rules import analyze_completed_snapshot
+
+        start = datetime(2026, 10, 29, 8, 0, tzinfo=ZONE)
+        end = start + timedelta(hours=3)
+        rows = [{
+            "customer_id": "200",
+            "occurred_at": (start + timedelta(minutes=10 + i)).isoformat(),
+            "result": "FAILURE",
+            "failureKey": "source:3",
+        } for i in range(6)]
+        snapshot = SimpleNamespace(
+            data={"rows": rows, "customers": {"200": {"name": "Tenant"}},
+                  "metadata": {}},
+            content_digest="test",
+        )
+        run = SimpleNamespace(
+            pk="run", idempotency_key="agione-auto-20261029T030000Z-7",
+            window_start=start - timedelta(hours=1), window_end=end,
+            published_version=SimpleNamespace(native_snapshot=snapshot),
+        )
+        scope = SimpleNamespace(
+            run_id="run", run=run, connection=self.connection,
+            connection_id=self.connection.pk, user=self.user,
+        )
+        rules = NotificationRules.objects.create(
+            connection=self.connection, user=self.user,
+            last_inspection_at=start,
+            config={**notification_rule_config(), "enabled": True,
+                    "channel_id": str(self.own_channel.uuid),
+                    "event_window_minutes": 30},
+        )
+        with ExitStack() as stack:
+            select = stack.enter_context(patch(
+                "agione_ops.native_sync_models.NativeAccountScope.objects."
+                "select_related"
+            ))
+            select.return_value.get.return_value = scope
+            stack.enter_context(patch(
+                "agione_ops.native_sync.authorize_native_run"
+            ))
+            stack.enter_context(patch(
+                "agione_ops.native_sync.validate_snapshot_data"
+            ))
+            stack.enter_context(patch(
+                "agione_ops.native_account_refresh.scope_for",
+                return_value=({}, "valid"),
+            ))
+            stack.enter_context(patch(
+                "agione_ops.native_account_scope.external_rows",
+                return_value=rows,
+            ))
+            stack.enter_context(patch(
+                "agione_ops.tenant_directory.overrides_for", return_value={},
+            ))
+            with patch(
+                "agione_ops.notification_delivery._create_delivery",
+                side_effect=RuntimeError("write failed"),
+            ), self.assertRaisesRegex(RuntimeError, "write failed"):
+                analyze_completed_snapshot(1, "run")
+            rules.refresh_from_db()
+            self.assertEqual(rules.last_inspection_at, start)
+            self.assertFalse(rules.last_analysis)
+            self.assertFalse(NotificationDelivery.objects.exists())
+
+            with patch("agione_ops.tasks.deliver_notification.delay") as send:
+                with self.captureOnCommitCallbacks(execute=True):
+                    analyze_completed_snapshot(1, "run")
+                send.assert_called_once()
+            rules.refresh_from_db()
+            self.assertEqual(rules.last_inspection_at, end)
+            delivery = NotificationDelivery.objects.get()
+            self.assertEqual(delivery.kind, "recovered_history")
+            self.assertIn("Tenant", delivery.payload["text"])
 
     def test_get_defaults_then_save_and_read_server_configuration(self):
         response = self.client.get(self.url)
@@ -1066,7 +1192,7 @@ class NotificationRuleApiTests(TestCase):
 
         with patch(
             "agione_ops.tasks.deliver_notification.delay",
-        ) as deliver:
+        ) as deliver, self.captureOnCommitCallbacks(execute=True):
             result = analyze_completed_snapshot(scope.pk, str(run.pk))
             analyze_completed_snapshot(scope.pk, str(run.pk))
 
