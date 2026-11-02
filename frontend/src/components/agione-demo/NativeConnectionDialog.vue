@@ -53,20 +53,14 @@
         连接验证不代表上游已确认账号身份。若身份选错，请先断开此连接，
         再使用正确身份添加新连接；原连接及历史数据会保留。
       </p>
-      <label v-if="!editing"
-        >平台
-        <select v-model="draft.platform" :disabled="busy">
-          <option value="pro">AGIOne Pro</option>
-          <option value="cc">AGIOne CC</option>
-        </select>
-      </label>
-      <label v-if="!editing">账号身份
-        <select v-model="draft.principalKind" :disabled="busy" required>
-          <option value="" disabled>请选择账号身份</option>
-          <option value="provider">Provider</option>
-          <option value="operator">Operator</option>
-        </select>
-      </label>
+      <div v-if="!editing" class="native-select-field">
+        <span>平台</span>
+        <AgioneSelect v-model="draft.platform" label="平台" :options="platformOptions" :disabled="busy" />
+      </div>
+      <div v-if="!editing" class="native-select-field">
+        <span>账号身份</span>
+        <AgioneSelect v-model="draft.principalKind" label="账号身份" placeholder="请选择账号身份" :options="principalOptions" :disabled="busy" />
+      </div>
       <p v-if="!editing" class="native-security">
         接口可访问不代表身份已确认。上游角色无法识别时，系统无法验证
         您的选择；选错可能导致数据范围不正确。请先核实账号身份。
@@ -120,6 +114,10 @@
 <script setup>
 import { computed, onBeforeUnmount, reactive, ref } from 'vue'
 import { agioneOpsApi } from '@/api/agioneOps'
+import AgioneSelect from './AgioneSelect.vue'
+
+const platformOptions = [{ value: 'pro', label: 'AGIOne Pro' }, { value: 'cc', label: 'AGIOne CC' }]
+const principalOptions = [{ value: 'provider', label: 'Provider' }, { value: 'operator', label: 'Operator' }]
 
 const emit = defineEmits(['changed', 'disconnected'])
 const dialog = ref(null),
@@ -127,6 +125,7 @@ const dialog = ref(null),
   editing = ref(null)
 const error = ref(''),
   status = ref('')
+let closeTimer
 const draft = reactive({ platform: 'pro', principalKind: '', accessKey: '', secretKey: '' })
 const canSave = computed(() =>
   editing.value
@@ -171,6 +170,7 @@ function safeError(exc) {
   )
 }
 function open(item = null) {
+  clearTimeout(closeTimer)
   editing.value = item
   draft.platform = item?.platform || 'pro'
   draft.principalKind = ''
@@ -203,15 +203,12 @@ async function save() {
       : await agioneOpsApi.createPersonalConnection(body)
     const connection = response?.data?.data
     if (!connection?.id) throw new Error('invalidResponse')
-    const unverified = !editing.value && connection.roleVerified !== true
     status.value = editing.value
       ? '密钥已更新，连接验证通过。'
-      : unverified
-        ? '连接已创建，但账号身份未由上游确认。若选错，请在连接设置中断开后重新添加。'
-        : '连接成功，正在自动采集数据。'
+      : '连接成功，正在获取数据…'
     clearSecrets()
     emit('changed', connection.id)
-    if (!unverified) setTimeout(() => close(), 500)
+    closeTimer = setTimeout(() => close(), 500)
   } catch (exc) {
     error.value = safeError(exc)
   } finally {
@@ -233,7 +230,10 @@ async function disconnect() {
     busy.value = false
   }
 }
-onBeforeUnmount(clearSecrets)
+onBeforeUnmount(() => {
+  clearTimeout(closeTimer)
+  clearSecrets()
+})
 defineExpose({ open, close })
 </script>
 
@@ -277,7 +277,8 @@ defineExpose({ open, close })
   font-size: 22px;
   padding: 0 4px;
 }
-label {
+label,
+.native-select-field {
   display: flex;
   flex-direction: column;
   gap: 7px;
