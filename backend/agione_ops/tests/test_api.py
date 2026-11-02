@@ -38,6 +38,37 @@ def client_for(user):
 
 
 @override_settings(AGIONE_OPS_NATIVE_ENABLED=True)
+def test_personal_connection_can_be_recreated_with_corrected_role():
+    owner = get_user_model().objects.create_user(username="correct-role")
+    allow(owner, "view_business", "run_sync")
+    credentials = {"access_key": "test-ak", "secret_key": "test-sk"}
+
+    def probe(_user, _platform, _access, _secret, role):
+        return "https://agione.pro", credentials, {
+            "tenant_id": "123", "principal_kind": role,
+        }
+
+    with (
+        override_settings(AGIONE_OPS_ALLOWED_ENDPOINT_HOSTS=("agione.pro",)),
+        patch("agione_ops.views._probe_personal_connection", side_effect=probe),
+        patch("agione_ops.tasks.start_initial_native_sync"),
+    ):
+        client = client_for(owner)
+        body = {"platform": "pro", "principalKind": "provider",
+                "accessKey": "test-ak", "secretKey": "test-sk"}
+        first = client.post(f"{BASE}self-service/", body, format="json")
+        assert first.status_code == 201
+        assert first.data["data"]["roleVerified"] is False
+        old_id = first.data["data"]["id"]
+        assert client.delete(f"{BASE}self-service/{old_id}/").status_code == 204
+        body["principalKind"] = "operator"
+        second = client.post(f"{BASE}self-service/", body, format="json")
+        assert second.status_code == 201
+        assert second.data["data"]["principalKind"] == "operator"
+        assert not SourceConnection.objects.get(pk=old_id).enabled
+
+
+@override_settings(AGIONE_OPS_NATIVE_ENABLED=True)
 def test_platform_feature_allows_empty_personal_connection_list():
     user = get_user_model().objects.create_user(username="new-platform-user")
     with (

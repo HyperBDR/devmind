@@ -44,11 +44,15 @@
             <dd>{{ accountLabel(editing.principalKind) }}</dd>
           </div>
           <div>
-            <dt>最近验证</dt>
+            <dt>最近连接验证</dt>
             <dd>{{ displayTime(editing.verifiedAt) }}</dd>
           </div>
         </dl>
       </div>
+      <p v-if="editing" class="native-security">
+        连接验证不代表上游已确认账号身份。若身份选错，请先断开此连接，
+        再使用正确身份添加新连接；原连接及历史数据会保留。
+      </p>
       <label v-if="!editing"
         >平台
         <select v-model="draft.platform" :disabled="busy">
@@ -64,7 +68,8 @@
         </select>
       </label>
       <p v-if="!editing" class="native-security">
-        请按 AGIOne 账号实际身份选择；上游未提供可识别角色时将使用此选择。
+        接口可访问不代表身份已确认。上游角色无法识别时，系统无法验证
+        您的选择；选错可能导致数据范围不正确。请先核实账号身份。
       </p>
       <div v-if="editing" class="native-section-title">更新密钥</div>
       <label
@@ -197,12 +202,15 @@ async function save() {
       : await agioneOpsApi.createPersonalConnection(body)
     const connection = response?.data?.data
     if (!connection?.id) throw new Error('invalidResponse')
+    const unverified = !editing.value && connection.roleVerified !== true
     status.value = editing.value
-      ? '密钥已更新并验证通过。'
-      : '连接成功，正在自动采集数据。'
+      ? '密钥已更新，连接验证通过。'
+      : unverified
+        ? '连接已创建，但账号身份未由上游确认。若选错，请在连接设置中断开后重新添加。'
+        : '连接成功，正在自动采集数据。'
     clearSecrets()
     emit('changed', connection.id)
-    setTimeout(() => close(), 500)
+    if (!unverified) setTimeout(() => close(), 500)
   } catch (exc) {
     error.value = safeError(exc)
   } finally {

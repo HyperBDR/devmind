@@ -463,12 +463,11 @@ class SelfServiceConnectionListCreateAPIView(LocalAPIView):
         from agione_ops.tasks import start_initial_native_sync
 
         start_initial_native_sync(connection, request.user)
-        return Response(
-            ConnectionSerializer(
-                connection, context={"request": request}
-            ).data,
-            status=201,
-        )
+        data = ConnectionSerializer(
+            connection, context={"request": request}
+        ).data
+        data["role_verified"] = identity.get("role_verified") is True
+        return Response(data, status=201)
 
 
 class SelfServiceConnectionDetailAPIView(LocalAPIView):
