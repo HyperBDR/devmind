@@ -40,6 +40,9 @@ class SelfServiceConnectionSerializer(StrictSerializer):
     """Accept only the credentials needed for a personal AGIOne connection."""
 
     platform = serializers.ChoiceField(choices=["pro", "cc"])
+    principal_kind = serializers.ChoiceField(
+        choices=["provider", "operator"], required=False,
+    )
     access_key = serializers.CharField(
         min_length=1, max_length=4096, trim_whitespace=False, write_only=True,
     )

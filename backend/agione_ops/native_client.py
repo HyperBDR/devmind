@@ -449,20 +449,41 @@ class NativeClient:
             "fetchedAt": self.fetched_at,
         }
 
-    def discover_identity(self):
-        """Discover one verified role during personal connection setup."""
+    def discover_identity(self, declared_role=None):
+        """Discover a role or retain an explicit unverified selection."""
         with self._lock:
             tenant, observed, _user = self._identity_facts(
                 self._result("/admin/user/info")
             )
-            if len(observed) != 1:
+            if len(observed) > 1:
                 raise _error("SOURCE_ROLE_NOT_VERIFIED", 409)
+            if observed and declared_role and declared_role not in observed:
+                raise _error("SOURCE_IDENTITY_MISMATCH", 403)
+            role = next(iter(observed), declared_role)
+            if role not in {"provider", "operator"}:
+                raise _error("SOURCE_ROLE_NOT_VERIFIED", 409)
+            if not observed:
+                provider = role == "provider"
+                path = "/coperation/tenant/" + (
+                    "provider-customers" if provider else "op-customers"
+                )
+                params = {"pageIndex": 1, "pageSize": 1}
+                if not provider:
+                    params["identityCode"] = "EU"
+                result = self._result(path, params)
+                if (
+                    not isinstance(result, dict)
+                    or not isinstance(result.get("data"), list)
+                    or type(result.get("total")) is not int
+                    or result["total"] < 0
+                ):
+                    raise _error("SOURCE_SHAPE_CHANGED")
             return {
                 "tenant_id": tenant,
                 "platform": self.connection.platform,
-                "principal_kind": next(iter(observed)),
-                "role_verified": True,
-                "role_state": "verified",
+                "principal_kind": role,
+                "role_verified": bool(observed),
+                "role_state": "verified" if observed else "not_verified",
                 "fetchedAt": self.fetched_at,
             }
 

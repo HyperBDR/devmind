@@ -376,7 +376,9 @@ class ConnectionListCreateAPIView(LocalAPIView):
         )
 
 
-def _probe_personal_connection(user, platform, access_key, secret_key):
+def _probe_personal_connection(
+    user, platform, access_key, secret_key, principal_kind=None,
+):
     """Verify write-only credentials before creating a personal connection."""
     from agione_ops.native_client import NativeClient
 
@@ -402,7 +404,10 @@ def _probe_personal_connection(user, platform, access_key, secret_key):
         "secret_key": secret_key,
     })
     with NativeClient(candidate) as client:
-        return endpoint, candidate.get_credentials(), client.discover_identity()
+        return (
+            endpoint, candidate.get_credentials(),
+            client.discover_identity(principal_kind),
+        )
 
 
 class SelfServiceConnectionListCreateAPIView(LocalAPIView):
@@ -419,17 +424,23 @@ class SelfServiceConnectionListCreateAPIView(LocalAPIView):
             values["platform"],
             values["access_key"],
             values["secret_key"],
+            values.get("principal_kind"),
         )
         with transaction.atomic():
-            if SourceConnection.objects.filter(
+            existing = SourceConnection.objects.filter(
                 created_by=request.user,
                 source_kind="native",
                 platform=values["platform"],
                 principal_kind=identity["principal_kind"],
                 expected_tenant_id=identity["tenant_id"],
-            ).exists():
+            )
+            if existing.filter(enabled=True).exists():
                 raise AgioneOpsError(
                     "SELF_SERVICE_CONNECTION_EXISTS", status_code=409
+                )
+            if existing.exists():
+                raise AgioneOpsError(
+                    "SELF_SERVICE_CONNECTION_DISABLED", status_code=409
                 )
             label = "Pro" if values["platform"] == "pro" else "CC"
             role = identity["principal_kind"].title()
@@ -457,12 +468,11 @@ class SelfServiceConnectionListCreateAPIView(LocalAPIView):
         from agione_ops.tasks import start_initial_native_sync
 
         start_initial_native_sync(connection, request.user)
-        return Response(
-            ConnectionSerializer(
-                connection, context={"request": request}
-            ).data,
-            status=201,
-        )
+        data = ConnectionSerializer(
+            connection, context={"request": request}
+        ).data
+        data["role_verified"] = identity.get("role_verified") is True
+        return Response(data, status=201)
 
 
 class SelfServiceConnectionDetailAPIView(LocalAPIView):
@@ -502,6 +512,7 @@ class SelfServiceConnectionDetailAPIView(LocalAPIView):
             connection.platform,
             values["access_key"],
             values["secret_key"],
+            connection.principal_kind,
         )
         if (
             identity["tenant_id"] != connection.expected_tenant_id

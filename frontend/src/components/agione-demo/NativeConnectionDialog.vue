@@ -44,11 +44,15 @@
             <dd>{{ accountLabel(editing.principalKind) }}</dd>
           </div>
           <div>
-            <dt>最近验证</dt>
+            <dt>最近连接验证</dt>
             <dd>{{ displayTime(editing.verifiedAt) }}</dd>
           </div>
         </dl>
       </div>
+      <p v-if="editing" class="native-security">
+        连接验证不代表上游已确认账号身份。若身份选错，请先断开此连接，
+        再使用正确身份添加新连接；原连接及历史数据会保留。
+      </p>
       <label v-if="!editing"
         >平台
         <select v-model="draft.platform" :disabled="busy">
@@ -56,6 +60,17 @@
           <option value="cc">AGIOne CC</option>
         </select>
       </label>
+      <label v-if="!editing">账号身份
+        <select v-model="draft.principalKind" :disabled="busy" required>
+          <option value="" disabled>请选择账号身份</option>
+          <option value="provider">Provider</option>
+          <option value="operator">Operator</option>
+        </select>
+      </label>
+      <p v-if="!editing" class="native-security">
+        接口可访问不代表身份已确认。上游角色无法识别时，系统无法验证
+        您的选择；选错可能导致数据范围不正确。请先核实账号身份。
+      </p>
       <div v-if="editing" class="native-section-title">更新密钥</div>
       <label
         >Access Key
@@ -112,12 +127,12 @@ const dialog = ref(null),
   editing = ref(null)
 const error = ref(''),
   status = ref('')
-const draft = reactive({ platform: 'pro', accessKey: '', secretKey: '' })
+const draft = reactive({ platform: 'pro', principalKind: '', accessKey: '', secretKey: '' })
 const canSave = computed(() =>
   editing.value
     ? (!draft.accessKey && !draft.secretKey) ||
       (!!draft.accessKey && !!draft.secretKey)
-    : !!draft.accessKey && !!draft.secretKey
+    : !!draft.principalKind && !!draft.accessKey && !!draft.secretKey
 )
 
 function clearSecrets() {
@@ -146,9 +161,11 @@ function safeError(exc) {
   return (
     {
       SOURCE_AUTH_FAILED: 'AK 或 SK 无效，请检查后重试。',
-      SOURCE_FORBIDDEN: '当前密钥没有读取 AGIOne 数据的权限。',
+      SOURCE_FORBIDDEN: '当前密钥无法访问所选身份的数据，请检查账号身份及权限。',
       SOURCE_ROLE_NOT_VERIFIED: '无法确认账号身份，请联系管理员检查账号角色。',
+      SOURCE_IDENTITY_MISMATCH: '账号身份与上游返回的角色不一致。',
       SELF_SERVICE_CONNECTION_EXISTS: '该 AGIOne 账号已经连接。',
+      SELF_SERVICE_CONNECTION_DISABLED: '该账号已有已断开的连接。请关闭此窗口，在连接菜单中选择已断开的对应账号，输入密钥后保存以重新启用；如无法操作，请联系管理员。',
       credential_unavailable: '服务端尚未配置凭据加密密钥。'
     }[code] || '连接未完成，请检查密钥或稍后重试。'
   )
@@ -156,6 +173,7 @@ function safeError(exc) {
 function open(item = null) {
   editing.value = item
   draft.platform = item?.platform || 'pro'
+  draft.principalKind = ''
   clearSecrets()
   error.value = ''
   status.value = ''
@@ -179,17 +197,21 @@ async function save() {
       accessKey: draft.accessKey,
       secretKey: draft.secretKey
     }
+    if (!editing.value) body.principalKind = draft.principalKind
     const response = editing.value
       ? await agioneOpsApi.updatePersonalConnection(editing.value.id, body)
       : await agioneOpsApi.createPersonalConnection(body)
     const connection = response?.data?.data
     if (!connection?.id) throw new Error('invalidResponse')
+    const unverified = !editing.value && connection.roleVerified !== true
     status.value = editing.value
-      ? '密钥已更新并验证通过。'
-      : '连接成功，正在自动采集数据。'
+      ? '密钥已更新，连接验证通过。'
+      : unverified
+        ? '连接已创建，但账号身份未由上游确认。若选错，请在连接设置中断开后重新添加。'
+        : '连接成功，正在自动采集数据。'
     clearSecrets()
     emit('changed', connection.id)
-    setTimeout(() => close(), 500)
+    if (!unverified) setTimeout(() => close(), 500)
   } catch (exc) {
     error.value = safeError(exc)
   } finally {
