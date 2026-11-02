@@ -7,7 +7,8 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework import serializers
 
-from agione_ops.models import SourceConnection
+from agione_ops.models import ConnectionGrant, SourceConnection
+from agione_ops.permissions import has_action
 
 
 class StrictSerializer(serializers.Serializer):
@@ -105,7 +106,21 @@ class ConnectionSerializer(StrictSerializer, serializers.ModelSerializer):
 
     def get_self_managed(self, obj):
         request = self.context.get("request")
-        return bool(request and obj.created_by_id == request.user.id)
+        if (not request or obj.source_kind != "native"
+                or obj.created_by_id != request.user.id):
+            return False
+        allowed = self.context.get("self_manage_actions")
+        if allowed is None:
+            allowed = (has_action(request.user, "view_business")
+                       and has_action(request.user, "run_sync"))
+        if not allowed:
+            return False
+        grant_ids = self.context.get("self_manage_grant_ids")
+        if grant_ids is not None:
+            return obj.pk in grant_ids
+        return ConnectionGrant.objects.filter(
+            connection=obj, user=request.user, can_view=True, can_sync=True,
+        ).exists()
 
     def validate_credentials(self, value):
         if len(json.dumps(value).encode("utf-8")) > 16384:

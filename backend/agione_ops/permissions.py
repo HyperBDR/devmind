@@ -1,5 +1,6 @@
-"""Explicit action grants and connection scope without staff shortcuts."""
+"""Action authorization and explicit connection-level access grants."""
 
+from django.apps import apps
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from rest_framework.exceptions import (
@@ -15,7 +16,7 @@ ACTIONS = frozenset({"manage_connections", "view_business", "run_sync"})
 
 
 def has_action(user, codename):
-    """Only direct/group Django permissions count, not superuser shortcuts."""
+    """Grant personal actions to users with the AGIOne platform feature."""
 
     if (
         codename not in ACTIONS
@@ -29,7 +30,7 @@ def has_action(user, codename):
         "content_type__model": "sourceconnection",
         "codename": codename,
     }
-    return (
+    explicitly_granted = (
         user.user_permissions.filter(**lookup).exists()
         or user.groups.filter(
             permissions__content_type__app_label="agione_ops",
@@ -37,6 +38,15 @@ def has_action(user, codename):
             permissions__codename=codename,
         ).exists()
     )
+    if explicitly_granted:
+        return True
+    if codename not in {"view_business", "run_sync"}:
+        return False
+    if not apps.is_installed("accounts"):
+        return False
+    from accounts.access import get_effective_feature_keys
+
+    return "agione_ops" in get_effective_feature_keys(user)
 
 
 def require_action(user, codename):

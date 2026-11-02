@@ -1,7 +1,7 @@
 """Explicit permissions and dedicated fail-closed credential security."""
 
 import base64
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -56,8 +56,9 @@ def authority():
 @pytest.mark.parametrize(
     "staff,superuser", [(False, False), (True, False), (True, True)]
 )
-def test_staff_and_superuser_have_no_implicit_action_or_connection(
-    authority, staff, superuser
+@patch("accounts.access.get_effective_feature_keys", return_value=[])
+def test_staff_without_platform_feature_has_no_implicit_action_or_connection(
+    _features, authority, staff, superuser
 ):
     user, connection = authority
     user.is_staff, user.is_superuser = staff, superuser
@@ -90,6 +91,54 @@ def test_group_permission_still_requires_correct_connection_grant(authority):
     )
     with pytest.raises(NotFound):
         get_connection_for(user, connection.pk)
+
+
+@override_settings(AGIONE_OPS_NATIVE_ONLY=False)
+def test_platform_feature_enables_personal_actions_but_not_other_connections(
+    authority,
+):
+    user, connection = authority
+    with (
+        patch("agione_ops.permissions.apps.is_installed", return_value=True),
+        patch(
+            "accounts.access.get_effective_feature_keys",
+            return_value=["agione_ops"],
+        ),
+    ):
+        assert has_action(user, "view_business")
+        assert has_action(user, "run_sync")
+        assert not has_action(user, "manage_connections")
+        with pytest.raises(NotFound):
+            get_connection_for(user, connection.pk)
+        ConnectionGrant.objects.create(
+            connection=connection, user=user, can_view=True, can_sync=True,
+        )
+        assert get_connection_for(user, connection.pk).pk == connection.pk
+
+
+def test_other_platform_feature_does_not_enable_personal_actions(authority):
+    user, _ = authority
+    with (
+        patch("agione_ops.permissions.apps.is_installed", return_value=True),
+        patch(
+            "accounts.access.get_effective_feature_keys",
+            return_value=["workspace"],
+        ),
+    ):
+        assert not has_action(user, "view_business")
+        assert not has_action(user, "run_sync")
+
+
+def test_staff_platform_access_still_requires_connection_grant(authority):
+    user, connection = authority
+    user.is_staff = True
+    user.save(update_fields=["is_staff"])
+    with patch("agione_ops.permissions.apps.is_installed", return_value=True):
+        assert has_action(user, "view_business")
+        assert has_action(user, "run_sync")
+        assert not has_action(user, "manage_connections")
+        with pytest.raises(NotFound):
+            get_connection_for(user, connection.pk)
 
 
 @pytest.mark.parametrize("via_group", [False, True])

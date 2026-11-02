@@ -37,6 +37,208 @@ def client_for(user):
     return client
 
 
+@override_settings(AGIONE_OPS_NATIVE_ENABLED=True)
+def test_platform_feature_allows_empty_personal_connection_list():
+    user = get_user_model().objects.create_user(username="new-platform-user")
+    with (
+        patch("agione_ops.permissions.apps.is_installed", return_value=True),
+        patch(
+            "accounts.access.get_effective_feature_keys",
+            return_value=["agione_ops"],
+        ),
+    ):
+        response = client_for(user).get(BASE)
+    assert response.status_code == 200
+    assert response.data["data"]["results"] == []
+    assert response.data["data"]["capabilities"]["canSelfManageConnections"]
+    assert not response.data["data"]["capabilities"]["canManageConnections"]
+
+
+@override_settings(
+    AGIONE_OPS_NATIVE_ENABLED=True,
+    AGIONE_OPS_ALLOWED_ENDPOINT_HOSTS=("agione.pro",),
+    AGIONE_OPS_SELF_SERVICE_ENDPOINTS={"pro": "https://agione.pro"},
+)
+def test_platform_user_can_create_only_owned_personal_connection():
+    user = get_user_model().objects.create_user(username="new-owner")
+    credentials = {
+        "auth_mode": "aksk", "api_prefix": "/hyperone",
+        "access_key": "test-ak", "secret_key": "test-sk",
+    }
+    with (
+        patch("agione_ops.permissions.apps.is_installed", return_value=True),
+        patch(
+            "accounts.access.get_effective_feature_keys",
+            return_value=["agione_ops"],
+        ),
+        patch(
+            "agione_ops.views._probe_personal_connection",
+            return_value=(
+                "https://agione.pro", credentials,
+                {"tenant_id": "tenant-42", "principal_kind": "provider"},
+            ),
+        ),
+        patch("agione_ops.tasks.start_initial_native_sync") as initial_sync,
+    ):
+        response = client_for(user).post(
+            f"{BASE}self-service/",
+            {"platform": "pro", "accessKey": "test-ak", "secretKey": "test-sk"},
+            format="json",
+        )
+        assert response.status_code == 201, response.data
+        connection = SourceConnection.objects.get(pk=response.data["data"]["id"])
+        assert connection.created_by == user
+        assert ConnectionGrant.objects.filter(
+            connection=connection, user=user, can_view=True, can_sync=True,
+        ).exists()
+        assert client_for(user).get(BASE).data["data"]["count"] == 1
+        initial_sync.assert_called_once_with(connection, user)
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+@pytest.mark.parametrize(
+    "can_view,can_sync,expected", [
+        (True, True, True),
+        (True, False, False),
+        (False, True, False),
+    ],
+)
+@override_settings(
+    AGIONE_OPS_ALLOWED_ENDPOINT_HOSTS=("agione.pro",),
+    ROOT_URLCONF="agione_ops.tests.urls",
+)
+def test_connection_list_self_management_matches_grant(
+    enabled, can_view, can_sync, expected,
+):
+    owner = get_user_model().objects.create_user(username="personal-owner")
+    allow(owner, "view_business", "run_sync")
+    connection = SourceConnection.objects.create(
+        name="Personal", platform="pro", principal_kind="provider",
+        source_kind="native", endpoint="https://agione.pro",
+        expected_tenant_id="tenant-42", enabled=enabled, created_by=owner,
+    )
+    ConnectionGrant.objects.create(
+        connection=connection, user=owner,
+        can_view=can_view, can_sync=can_sync,
+    )
+    response = client_for(owner).get(BASE)
+    assert response.status_code == 200
+    results = response.data["data"]["results"]
+    assert len(results) == 1
+    assert results[0]["enabled"] is enabled
+    assert results[0]["selfManaged"] is expected
+
+
+@pytest.mark.parametrize("action", ["view_business", "run_sync"])
+@override_settings(
+    AGIONE_OPS_ALLOWED_ENDPOINT_HOSTS=("agione.pro",),
+    ROOT_URLCONF="agione_ops.tests.urls",
+)
+def test_connection_list_self_management_requires_both_actions(action):
+    owner = get_user_model().objects.create_user(username="partial-actions")
+    allow(owner, action)
+    connection = SourceConnection.objects.create(
+        name="Personal", platform="pro", principal_kind="provider",
+        source_kind="native", endpoint="https://agione.pro",
+        expected_tenant_id="tenant-42", enabled=False, created_by=owner,
+    )
+    ConnectionGrant.objects.create(
+        connection=connection, user=owner, can_view=True, can_sync=True,
+    )
+    with patch("accounts.access.get_effective_feature_keys", return_value=[]):
+        response = client_for(owner).get(BASE)
+    assert response.status_code == 200
+    assert response.data["data"]["results"][0]["selfManaged"] is False
+
+
+@pytest.mark.parametrize("revoked", ["deleted", "view", "sync"])
+@override_settings(
+    AGIONE_OPS_ALLOWED_ENDPOINT_HOSTS=("agione.pro",),
+    ROOT_URLCONF="agione_ops.tests.urls",
+)
+def test_revoked_personal_grant_cannot_modify_or_disable(revoked):
+    users = get_user_model()
+    owner = users.objects.create_user(username="revoked-owner")
+    other = users.objects.create_user(username="other-grantee")
+    connection = SourceConnection.objects.create(
+        name="Personal", platform="pro", principal_kind="provider",
+        source_kind="native", endpoint="https://agione.pro",
+        expected_tenant_id="tenant-42", enabled=True, created_by=owner,
+    )
+    grant = ConnectionGrant.objects.create(
+        connection=connection, user=owner, can_view=True, can_sync=True,
+    )
+    ConnectionGrant.objects.create(
+        connection=connection, user=other, can_view=True, can_sync=True,
+    )
+    if revoked == "deleted":
+        grant.delete()
+    else:
+        setattr(grant, f"can_{revoked}", False)
+        grant.save()
+    path = f"{BASE}self-service/{connection.pk}/"
+    with (
+        patch("agione_ops.permissions.apps.is_installed", return_value=True),
+        patch(
+            "accounts.access.get_effective_feature_keys",
+            return_value=["agione_ops"],
+        ),
+        patch("agione_ops.views._probe_personal_connection") as probe,
+    ):
+        client = client_for(owner)
+        assert client.patch(path, {
+            "platform": "pro", "accessKey": "ak", "secretKey": "sk",
+        }, format="json").status_code == 404
+        assert client.delete(path).status_code == 404
+        probe.assert_not_called()
+    connection.refresh_from_db()
+    assert connection.enabled
+    assert ConnectionGrant.objects.filter(
+        connection=connection, user=other, can_view=True, can_sync=True,
+    ).exists()
+
+
+@override_settings(
+    AGIONE_OPS_ALLOWED_ENDPOINT_HOSTS=("agione.pro",),
+    ROOT_URLCONF="agione_ops.tests.urls",
+)
+def test_personal_grant_rechecked_after_credential_probe():
+    owner = get_user_model().objects.create_user(username="revoked-mid-probe")
+    connection = SourceConnection.objects.create(
+        name="Personal", platform="pro", principal_kind="provider",
+        source_kind="native", endpoint="https://agione.pro",
+        expected_tenant_id="tenant-42", enabled=True, created_by=owner,
+    )
+    grant = ConnectionGrant.objects.create(
+        connection=connection, user=owner, can_view=True, can_sync=True,
+    )
+
+    def probe(*_args):
+        grant.delete()
+        return (
+            "https://agione.pro", {"access_key": "new", "secret_key": "new"},
+            {"tenant_id": "tenant-42", "principal_kind": "provider"},
+        )
+
+    with (
+        patch("agione_ops.permissions.apps.is_installed", return_value=True),
+        patch(
+            "accounts.access.get_effective_feature_keys",
+            return_value=["agione_ops"],
+        ),
+        patch("agione_ops.views._probe_personal_connection", side_effect=probe),
+    ):
+        response = client_for(owner).patch(
+            f"{BASE}self-service/{connection.pk}/",
+            {"platform": "pro", "accessKey": "ak", "secretKey": "sk"},
+            format="json",
+        )
+    assert response.status_code == 404
+    connection.refresh_from_db()
+    assert connection.enabled
+    assert not connection.credential_ciphertext
+
+
 @pytest.fixture
 def actors():
     users = get_user_model()
@@ -259,7 +461,9 @@ def test_user_can_create_and_disconnect_an_encrypted_personal_connection(
 
 
 @pytest.mark.parametrize("staff,superuser", [(True, False), (True, True)])
-def test_staff_and_superuser_have_no_implicit_data_permission(
+@patch("accounts.access.get_effective_feature_keys", return_value=[])
+def test_staff_without_platform_feature_has_no_implicit_data_permission(
+    _features,
     connection,
     staff,
     superuser,

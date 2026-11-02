@@ -2469,6 +2469,7 @@
 .agione-demo .connection-menu-copy b{font-weight:600;color:var(--ink)}
 .agione-demo .connection-menu-copy small{font-size:10px;color:var(--muted)}
 .agione-demo .connection-menu-actions{margin-top:5px;padding-top:5px;border-top:1px solid var(--line)}
+.agione-demo .connection-menu-unavailable{padding:7px 9px;color:var(--muted);font-size:12px;line-height:1.5}
 .agione-demo .connection-menu-actions button{display:block;width:100%;min-height:34px;padding:7px 9px;border:0;border-radius:6px;background:transparent;color:var(--ink);text-align:left;font-size:12px}
 .agione-demo .connection-menu-actions button:hover{background:var(--bg);color:var(--blue)}
 @media(prefers-reduced-motion:reduce){.agione-demo .sidebar-connection-chevron{transition:none}}
