@@ -416,6 +416,33 @@ class ExpiredSyncTests(TestCase):
         self.assertFalse(created)
         submit.assert_not_called()
 
+    @override_settings(AGIONE_OPS_NATIVE_ENABLED=True)
+    def test_daily_report_marks_unclaimed_last_attempt_failed(self):
+        from agione_ops.tasks import dispatch_scheduled_rule_syncs
+
+        run = self.make_active(kind="scheduled")
+        end = self.now.astimezone(ZoneInfo("Asia/Shanghai")).replace(
+            hour=0, minute=0, second=0, microsecond=0,
+        )
+        SyncRun.objects.filter(pk=run.pk).update(
+            idempotency_key=f"agione-scheduled-{end.date().isoformat()}-7-retry-1",
+            status="interrupted", error_code="LEASE_EXPIRED", attempt=2,
+            heartbeat_at=None, finished_at=self.now - timedelta(minutes=30),
+        )
+        SourceConnection.objects.filter(pk=self.connection.pk).update(
+            active_run_id=None, lease_token=None, lease_expires_at=None,
+            verified_at=self.now,
+        )
+        rules = NotificationRules.objects.create(
+            connection=self.connection, user=self.user,
+            config={"enabled": True, "schedule_time": "00:00"},
+        )
+        with patch("django.utils.timezone.now", return_value=self.now):
+            dispatch_scheduled_rule_syncs()
+        rules.refresh_from_db()
+        self.assertEqual(rules.last_report_status, "failed")
+        self.assertEqual(SyncRun.objects.filter(connection=self.connection).count(), 1)
+
     def test_rules_expose_recent_owner_run_without_payload(self):
         run = self.make_active()
         client = APIClient()

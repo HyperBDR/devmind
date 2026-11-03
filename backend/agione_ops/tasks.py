@@ -20,6 +20,11 @@ _RETRYABLE_SCHEDULE_ERRORS = frozenset({
 _SCHEDULE_RETRY_DELAYS = {1: 5, 2: 15}
 
 
+def _consumed_attempts(run):
+    """Count a run that expired before its worker claimed it."""
+    return max(run.attempt, 1) + int(run.attempt > 0 and run.heartbeat_at is None)
+
+
 def _sync_hard_time_limit():
     """Bound a stuck worker even when an upstream call never returns."""
     seconds = getattr(settings, "AGIONE_OPS_NATIVE_MAX_SECONDS", 600)
@@ -433,10 +438,7 @@ def submit_recent_sync(connection, user, end, *, scheduled=False):
                 continue
     next_retry = max(retry_numbers, default=0) + 1
     if scheduled:
-        prior_attempts = max(
-            max(run.attempt, 1) + int(run.attempt > 0 and run.heartbeat_at is None)
-            for run in runs
-        )
+        prior_attempts = max(_consumed_attempts(run) for run in runs)
         if prior_attempts >= 3:
             return latest, False
         delay = _SCHEDULE_RETRY_DELAYS.get(next_retry)
@@ -676,7 +678,7 @@ def dispatch_scheduled_rule_syncs():
                     if status in {"failed", "interrupted", "dispatch_failed", "revoked"}:
                         key = getattr(_run, "idempotency_key", "")
                         final = (key.endswith("-retry-2")
-                                 or _run.attempt >= 3
+                                 or _consumed_attempts(_run) >= 3
                                  or not _retryable_schedule_run(_run))
                         rule.last_report_status = "failed" if final else "collection_retrying"
                         rule.save(update_fields=["last_report_status"])
@@ -768,10 +770,7 @@ def retry_abandoned_auto_sync(run_id):
             .order_by("-created_at", "-pk"))
         if not runs or runs[0].pk != candidate.pk:
             return False
-        prior_attempts = max(
-            max(run.attempt, 1) + int(run.attempt > 0 and run.heartbeat_at is None)
-            for run in runs
-        )
+        prior_attempts = max(_consumed_attempts(run) for run in runs)
         if prior_attempts >= 3:
             from agione_ops.notification_delivery import notify_collection_failure
 
