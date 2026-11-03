@@ -30,7 +30,7 @@ def _retryable_schedule_run(run):
     )
 
 
-def _fit_feishu_payload(payload, text):
+def _fit_feishu_payload(payload, text, card_details=None, entry_limit=None):
     """Keep the serialized request below the bot limit, including signing."""
     import json
 
@@ -40,6 +40,9 @@ def _fit_feishu_payload(payload, text):
 
     if size(payload) <= 20000:
         return payload
+    if card_details and (entry_limit is None or entry_limit > 0):
+        next_limit = 2 if entry_limit is None else entry_limit - 1
+        return _webhook_payload("feishu", text, card_details, next_limit)
     fallback = {
         "msg_type": "interactive",
         "card": {
@@ -66,7 +69,7 @@ def _fit_feishu_payload(payload, text):
     return fallback
 
 
-def _webhook_payload(provider_type, text, card_details=None):
+def _webhook_payload(provider_type, text, card_details=None, _entry_limit=None):
     """Render text for the notifier's supported webhook providers."""
     if provider_type == "feishu":
         from html import escape
@@ -77,6 +80,8 @@ def _webhook_payload(provider_type, text, card_details=None):
 
         lines = text.splitlines()
         title = lines.pop(0) if lines else "AGIOne 运营通知"
+        if _entry_limit == 0:
+            title = title[:160]
         color = "green" if "已恢复" in title or "恢复提醒" in title else (
             "orange" if "待确认" in title else (
                 "red" if "异常" in title else "blue"
@@ -98,7 +103,7 @@ def _webhook_payload(provider_type, text, card_details=None):
                     )
                 except (ValidationError, ValueError):
                     valid = False
-                if valid:
+                if valid and (_entry_limit != 0 or len(candidate) <= 1000):
                     url = candidate
                     continue
             body.append(line)
@@ -107,6 +112,17 @@ def _webhook_payload(provider_type, text, card_details=None):
             "tag": "plain_text", "content": content or title,
         }}]
         groups = card_details.get("groups") if isinstance(card_details, dict) else None
+        if groups and _entry_limit is not None:
+            card_details = {
+                **card_details,
+                "source": str(card_details.get("source", ""))[:200],
+                "window": str(card_details.get("window", ""))[:200],
+                "collected": str(card_details.get("collected", ""))[:200],
+            }
+            groups = [
+                {**group, "entries": group["entries"][:_entry_limit]}
+                for group in groups
+            ]
         if groups and card_details.get("window_label") == "统计范围":
             color = "blue"
             elements = []
@@ -172,6 +188,10 @@ def _webhook_payload(provider_type, text, card_details=None):
             color = "blue"
             elements = []
             for group in groups:
+                if not group["entries"]:
+                    elements.append({"tag": "markdown", "content": (
+                        f"**{group['label']} · {group['count']} 位租户**"
+                    )})
                 for item in group["entries"]:
                     if item.get("reason") == "余额不足":
                         elements.append({
@@ -258,7 +278,7 @@ def _webhook_payload(provider_type, text, card_details=None):
                            "template": color},
                 "body": {"elements": converted},
             }}
-            return _fit_feishu_payload(payload, text)
+            return _fit_feishu_payload(payload, text, card_details, _entry_limit)
         payload = {"msg_type": "interactive", "card": {
             "config": {"wide_screen_mode": True},
             "header": {"title": {"tag": "plain_text", "content": title},

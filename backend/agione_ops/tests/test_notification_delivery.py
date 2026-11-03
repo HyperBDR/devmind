@@ -72,9 +72,17 @@ class NotificationDeliveryUnitTests(TestCase):
         payload.update(timestamp=9999999999, sign="x" * 44)
         request = requests.Request("POST", "https://example.com", json=payload)
         self.assertLessEqual(len(request.prepare().body), 20000)
-        body = payload["card"]["elements"][0]["text"]["content"]
-        self.assertIn("运营日报", body)
-        self.assertIn("内容过长已精简", body)
+        card = payload["card"]
+        self.assertEqual(card["schema"], "2.0")
+        self.assertIn("运营日报", card["header"]["title"]["content"])
+        elements = card["body"]["elements"]
+        content = "\n".join(item.get("content", "") for item in elements)
+        for label in ("持续调用失败", "余额不足失败", "使用下降", "长期无调用"):
+            self.assertIn(label, content)
+        self.assertIn("另有", content)
+        panels = [item for item in elements if item["tag"] == "column_set"]
+        self.assertIn("blue", [item["background_style"] for item in panels])
+        self.assertIn("grey", [item["background_style"] for item in panels])
 
     def test_extremely_long_feishu_text_is_bounded(self):
         import requests
