@@ -212,6 +212,7 @@ def mark_dispatch_failed(run_id):
     run = SyncRun.objects.filter(pk=run_id).first()
     if run is None:
         return
+    changed = False
     with transaction.atomic():
         connection = SourceConnection.objects.select_for_update().get(
             pk=run.connection_id
@@ -222,7 +223,14 @@ def mark_dispatch_failed(run_id):
             and connection.active_run_id == run.pk
         ):
             _terminal(run, connection, "dispatch_failed", "DISPATCH_FAILED")
+            changed = True
     _project(run_id)
+    if changed:
+        from agione_ops.tasks import _record_auto_run_result
+
+        _record_auto_run_result(run_id, {
+            "status": "dispatch_failed", "errorCode": "DISPATCH_FAILED",
+        })
 
 
 def _dispatch(run_id):

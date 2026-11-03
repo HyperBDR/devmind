@@ -477,6 +477,8 @@ class SyncRun(models.Model):
     error_code = models.CharField(max_length=80, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     finished_at = models.DateTimeField(null=True, blank=True)
+    recovery_handled = models.BooleanField(default=False)
+    recovery_next_check_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "devmind_agione_sync_run"

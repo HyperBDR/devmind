@@ -495,7 +495,8 @@ def _record_auto_run_result(run_id, result):
         rules = rules.exclude(last_auto_status="succeeded")
     updated = rules.update(**values)
     if updated and status in {"failed", "revoked", "dispatch_failed"} and (
-        run.attempt >= 3 or run.error_code not in _RETRYABLE_SCHEDULE_ERRORS
+        status == "dispatch_failed" or run.attempt >= 3
+        or run.error_code not in _RETRYABLE_SCHEDULE_ERRORS
     ):
         from agione_ops.notification_delivery import notify_collection_failure
 
@@ -942,6 +943,7 @@ def dispatch_scheduled_rule_syncs():
 def retry_abandoned_auto_sync(run_id):
     """Retry the same automatic window at most three total attempts."""
     import re
+    from datetime import timedelta
 
     from django.db import transaction
     from django.db.models import Q
@@ -962,7 +964,14 @@ def retry_abandoned_auto_sync(run_id):
             connection_id=candidate.connection_id,
             user_id=candidate.initiated_by_id,
         ).first()
+        candidate = SyncRun.objects.filter(
+            pk=run_id, recovery_handled=False, status="interrupted",
+            error_code="LEASE_EXPIRED",
+        ).first()
+        if candidate is None:
+            return False
         if not rules or not rules.config.get("auto_refresh_enabled"):
+            SyncRun.objects.filter(pk=run_id).update(recovery_handled=True)
             return False
         connection = SourceConnection.objects.select_for_update().get(
             pk=candidate.connection_id,
@@ -972,12 +981,14 @@ def retry_abandoned_auto_sync(run_id):
         ).filter(Q(idempotency_key=base) | Q(idempotency_key__startswith=base + "-retry-"))
             .order_by("-created_at", "-pk"))
         if not runs or runs[0].pk != candidate.pk:
+            SyncRun.objects.filter(pk=run_id).update(recovery_handled=True)
             return False
         prior_attempts = max(_consumed_attempts(run) for run in runs)
         if prior_attempts >= 3:
             from agione_ops.notification_delivery import notify_collection_failure
 
             notify_collection_failure(rules, "calls", "LEASE_EXPIRED")
+            SyncRun.objects.filter(pk=run_id).update(recovery_handled=True)
             return False
         numbers = [int(match.group(1)) for run in runs
                    if (match := re.search(r"-retry-(\d+)$", run.idempotency_key))]
@@ -989,6 +1000,9 @@ def retry_abandoned_auto_sync(run_id):
                 candidate.window_end, candidate.timezone, key,
             )
         except APIException:
+            SyncRun.objects.filter(pk=run_id).update(
+                recovery_next_check_at=timezone.now() + timedelta(minutes=5),
+            )
             return False
         if created:
             SyncRun.objects.filter(pk=next_run.pk).update(attempt=prior_attempts)
@@ -996,6 +1010,7 @@ def retry_abandoned_auto_sync(run_id):
                 pk=rules.pk, last_auto_started_at__lte=candidate.created_at,
             ).update(last_auto_started_at=started, last_auto_status="queued",
                      last_auto_error_code="")
+        SyncRun.objects.filter(pk=run_id).update(recovery_handled=True)
         return created
 
 
@@ -1021,8 +1036,12 @@ def recover_abandoned_native_syncs():
         connection__source_kind="native", status="interrupted",
         error_code="LEASE_EXPIRED", idempotency_key__startswith="agione-auto-",
         finished_at__gte=timezone.now() - timedelta(days=1),
-    ).order_by("-finished_at").values_list("pk", flat=True)
-    for run_id in interrupted.iterator(chunk_size=200):
+        recovery_handled=False,
+    ).filter(
+        Q(recovery_next_check_at__isnull=True)
+        | Q(recovery_next_check_at__lte=timezone.now())
+    ).order_by("finished_at", "pk").values_list("pk", flat=True)[:200]
+    for run_id in list(interrupted):
         retry_abandoned_auto_sync(run_id)
     from agione_ops.native_finance_refresh import recover_expired_finance
 

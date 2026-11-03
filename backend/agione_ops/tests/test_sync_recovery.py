@@ -306,14 +306,79 @@ class ExpiredSyncTests(TestCase):
             for index in range(201)
         ]
         SyncRun.objects.bulk_create(runs)
-        with patch("agione_ops.tasks.retry_abandoned_auto_sync") as retry:
+        def handle(run_id):
+            SyncRun.objects.filter(pk=run_id).update(recovery_handled=True)
+
+        with patch("agione_ops.tasks.retry_abandoned_auto_sync",
+                   side_effect=handle) as retry:
+            recover_abandoned_native_syncs()
+            self.assertEqual(retry.call_count, 200)
             recover_abandoned_native_syncs()
             recover_abandoned_native_syncs()
-        self.assertEqual(retry.call_count, 402)
+        self.assertEqual(retry.call_count, 201)
         self.assertEqual(
             sum(call.args[0] == runs[-1].pk for call in retry.call_args_list),
-            2,
+            1,
         )
+
+    def test_exhausted_run_does_not_alert_again_after_midnight(self):
+        from agione_ops.tasks import recover_abandoned_native_syncs
+
+        run = self.make_active()
+        SyncRun.objects.filter(pk=run.pk).update(
+            status="interrupted", error_code="LEASE_EXPIRED", attempt=3,
+            finished_at=self.now,
+        )
+        NotificationRules.objects.create(
+            connection=self.connection, user=self.user,
+            config={"auto_refresh_enabled": True, "enabled": True,
+                    "channel_id": str(uuid4())},
+        )
+        midnight = self.now.astimezone(ZoneInfo("Asia/Shanghai")).replace(
+            hour=0, minute=0, second=0, microsecond=0,
+        ) + timedelta(days=1)
+        with patch("django.utils.timezone.now", return_value=midnight - timedelta(minutes=1)):
+            recover_abandoned_native_syncs()
+        with patch("django.utils.timezone.now", return_value=midnight + timedelta(minutes=1)):
+            recover_abandoned_native_syncs()
+        self.assertEqual(NotificationDelivery.objects.count(), 1)
+
+    def test_dispatch_failure_updates_auto_status_and_queues_alert(self):
+        from agione_ops.sync import _dispatch
+
+        run = self.make_active()
+        SyncRun.objects.filter(pk=run.pk).update(status="queued")
+        rules = NotificationRules.objects.create(
+            connection=self.connection, user=self.user,
+            config={"enabled": True, "channel_id": str(uuid4())},
+            last_auto_started_at=self.now - timedelta(minutes=8),
+            last_auto_status="queued",
+        )
+        with patch("agione_ops.tasks.run_sync.apply_async", side_effect=RuntimeError):
+            _dispatch(run.pk)
+        rules.refresh_from_db()
+        self.assertEqual(rules.last_auto_status, "dispatch_failed")
+        self.assertEqual(rules.last_auto_error_code, "DISPATCH_FAILED")
+        self.assertEqual(NotificationDelivery.objects.count(), 1)
+
+    def test_retry_dispatch_failure_updates_auto_status(self):
+        from agione_ops.tasks import run_sync
+
+        run = self.make_active()
+        SyncRun.objects.filter(pk=run.pk).update(status="retrying")
+        rules = NotificationRules.objects.create(
+            connection=self.connection, user=self.user,
+            config={"enabled": True, "channel_id": str(uuid4())},
+            last_auto_started_at=self.now - timedelta(minutes=8),
+            last_auto_status="running",
+        )
+        with patch("agione_ops.tasks.execute_sync", return_value={
+            "status": "retrying", "retryAfter": 2,
+        }), patch.object(run_sync, "retry", side_effect=RuntimeError):
+            run_sync.run(run.pk)
+        rules.refresh_from_db()
+        self.assertEqual(rules.last_auto_status, "dispatch_failed")
+        self.assertEqual(NotificationDelivery.objects.count(), 1)
 
     def test_abandoned_auto_run_retries_without_waiting_for_next_period(self):
         from agione_ops.tasks import retry_abandoned_auto_sync
@@ -331,6 +396,31 @@ class ExpiredSyncTests(TestCase):
             self.assertTrue(retry_abandoned_auto_sync(run.pk))
         self.assertEqual(submit.call_args.args[2:4], (run.window_start, run.window_end))
         self.assertTrue(submit.call_args.args[-1].endswith("-retry-1"))
+
+    def test_busy_connection_defers_recovery_without_losing_it(self):
+        from agione_ops.client import AgioneOpsError
+        from agione_ops.tasks import recover_abandoned_native_syncs
+
+        run = self.make_active()
+        SyncRun.objects.filter(pk=run.pk).update(
+            status="interrupted", error_code="LEASE_EXPIRED", attempt=1,
+            finished_at=self.now,
+        )
+        NotificationRules.objects.create(
+            connection=self.connection, user=self.user,
+            config={"auto_refresh_enabled": True},
+        )
+        with patch("django.utils.timezone.now", return_value=self.now), patch(
+            "agione_ops.sync.submit_sync",
+            side_effect=AgioneOpsError("CONNECTION_BUSY"),
+        ) as submit:
+            recover_abandoned_native_syncs()
+            recover_abandoned_native_syncs()
+        run.refresh_from_db()
+        self.assertFalse(run.recovery_handled)
+        self.assertEqual(run.recovery_next_check_at,
+                         self.now + timedelta(minutes=5))
+        self.assertEqual(submit.call_count, 1)
 
     @override_settings(AGIONE_OPS_NATIVE_ENABLED=True)
     def test_unclaimed_queued_runs_stop_after_three_expirations(self):
