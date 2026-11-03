@@ -977,7 +977,11 @@ def retry_abandoned_auto_sync(run_id):
         connection = SourceConnection.objects.select_for_update().get(
             pk=candidate.connection_id,
         )
-        superseded = NativePublishedSnapshot.objects.filter(
+        if (rules.last_inspection_at
+                and rules.last_inspection_at >= candidate.window_end):
+            SyncRun.objects.filter(pk=run_id).update(recovery_handled=True)
+            return False
+        newer_snapshot = NativePublishedSnapshot.objects.filter(
             version__connection=connection,
             version__run__status="succeeded",
             version__run__config_version=connection.config_version,
@@ -987,9 +991,6 @@ def retry_abandoned_auto_sync(run_id):
             ),
             version__window_end__gte=candidate.window_end,
         ).exists()
-        if superseded:
-            SyncRun.objects.filter(pk=run_id).update(recovery_handled=True)
-            return False
         runs = list(SyncRun.objects.filter(
             connection=connection, initiated_by_id=candidate.initiated_by_id,
         ).filter(Q(idempotency_key=base) | Q(idempotency_key__startswith=base + "-retry-"))
@@ -1008,10 +1009,15 @@ def retry_abandoned_auto_sync(run_id):
                    if (match := re.search(r"-retry-(\d+)$", run.idempotency_key))]
         key = f"{base}-retry-{max(numbers, default=0) + 1}"
         started = timezone.now()
+        window_end = (started.replace(microsecond=0) if newer_snapshot
+                      else candidate.window_end)
+        window_start = max(
+            candidate.window_start, window_end - timedelta(days=31),
+        )
         try:
             next_run, created = submit_sync(
-                connection, candidate.initiated_by, candidate.window_start,
-                candidate.window_end, candidate.timezone, key,
+                connection, candidate.initiated_by, window_start,
+                window_end, candidate.timezone, key,
             )
         except APIException:
             SyncRun.objects.filter(pk=run_id).update(
@@ -1020,10 +1026,10 @@ def retry_abandoned_auto_sync(run_id):
             return False
         if created:
             SyncRun.objects.filter(pk=next_run.pk).update(attempt=prior_attempts)
-            NotificationRules.objects.filter(
-                pk=rules.pk, last_auto_started_at__lte=candidate.created_at,
-            ).update(last_auto_started_at=started, last_auto_status="queued",
-                     last_auto_error_code="")
+            NotificationRules.objects.filter(pk=rules.pk).update(
+                last_auto_started_at=started, last_auto_status="queued",
+                last_auto_error_code="",
+            )
         SyncRun.objects.filter(pk=run_id).update(recovery_handled=True)
         return created
 

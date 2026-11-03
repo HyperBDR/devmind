@@ -422,7 +422,7 @@ class ExpiredSyncTests(TestCase):
                          self.now + timedelta(minutes=5))
         self.assertEqual(submit.call_count, 1)
 
-    def test_newer_publication_supersedes_old_recovery_and_alert(self):
+    def test_newer_short_snapshot_retries_current_window_for_owner(self):
         from agione_ops.models import DatasetVersion
         from agione_ops.native_sync_models import NativePublishedSnapshot
         from agione_ops.tasks import retry_abandoned_auto_sync
@@ -437,10 +437,11 @@ class ExpiredSyncTests(TestCase):
             connection=self.connection, user=self.user,
             config={"auto_refresh_enabled": True, "enabled": True,
                     "channel_id": str(uuid4())},
+            last_auto_started_at=self.now + timedelta(minutes=1),
         )
         newer = SyncRun.objects.create(
             connection=self.connection, initiated_by=self.user,
-            window_start=old.window_start + timedelta(minutes=10),
+            window_start=old.window_end - timedelta(minutes=50),
             window_end=old.window_end + timedelta(minutes=10),
             idempotency_key="newer-manual", request_hash="b" * 64,
             credential_version=self.connection.credential_version,
@@ -465,22 +466,46 @@ class ExpiredSyncTests(TestCase):
             version__published_at__gte=self.now - timedelta(minutes=5),
             version__window_end__gte=old.window_end,
         ).exists())
-        for attempt in (1, 3):
+        other = get_user_model().objects.create_user(username="other-owner")
+        for owner in (self.user, other):
+            SyncRun.objects.filter(pk=newer.pk).update(initiated_by=owner)
             SyncRun.objects.filter(pk=old.pk).update(
-                attempt=attempt, recovery_handled=False,
+                attempt=1, recovery_handled=False,
             )
-            old.refresh_from_db()
-            self.assertEqual(old.finished_at, self.now - timedelta(minutes=5))
-            connection = SourceConnection.objects.get(pk=old.connection_id)
-            self.assertEqual(connection.config_version, newer.config_version)
-            self.assertEqual(connection.credential_version,
-                             newer.credential_version)
-            with patch("agione_ops.sync.submit_sync") as submit:
-                self.assertFalse(retry_abandoned_auto_sync(old.pk))
-            submit.assert_not_called()
+            now = self.now + timedelta(minutes=20)
+            with patch("django.utils.timezone.now", return_value=now), patch(
+                "agione_ops.sync.submit_sync", return_value=(old, True),
+            ) as submit:
+                self.assertTrue(retry_abandoned_auto_sync(old.pk))
+            self.assertEqual(submit.call_args.args[1], self.user)
+            self.assertEqual(submit.call_args.args[2], old.window_start)
+            self.assertEqual(submit.call_args.args[3], now)
             old.refresh_from_db()
             self.assertTrue(old.recovery_handled)
+            rules.refresh_from_db()
+            self.assertEqual(rules.last_auto_status, "queued")
         self.assertFalse(NotificationDelivery.objects.filter(rules=rules).exists())
+
+    def test_completed_inspection_supersedes_old_run(self):
+        from agione_ops.tasks import retry_abandoned_auto_sync
+
+        old = self.make_active()
+        SyncRun.objects.filter(pk=old.pk).update(
+            status="interrupted", error_code="LEASE_EXPIRED", attempt=3,
+            finished_at=self.now - timedelta(minutes=5),
+        )
+        NotificationRules.objects.create(
+            connection=self.connection, user=self.user,
+            config={"auto_refresh_enabled": True, "enabled": True,
+                    "channel_id": str(uuid4())},
+            last_inspection_at=old.window_end,
+        )
+        with patch("agione_ops.sync.submit_sync") as submit:
+            self.assertFalse(retry_abandoned_auto_sync(old.pk))
+        submit.assert_not_called()
+        old.refresh_from_db()
+        self.assertTrue(old.recovery_handled)
+        self.assertFalse(NotificationDelivery.objects.exists())
 
     def test_older_publication_does_not_suppress_recovery(self):
         from agione_ops.models import DatasetVersion
