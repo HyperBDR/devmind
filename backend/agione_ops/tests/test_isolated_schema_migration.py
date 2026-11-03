@@ -23,6 +23,7 @@ def private_schema_connection(django_db_blocker):
         {
             "ENGINE": "django.db.backends.sqlite3",
             "NAME": ":memory:",
+            "OPTIONS": {},
             "AUTOCOMMIT": True,
             "ATOMIC_REQUESTS": False,
         }
@@ -209,7 +210,7 @@ def test_full_migration_from_initial_history(private_schema_connection, legacy):
         make_legacy_marker(connection)
     executor = MigrationExecutor(connection)
     target = executor.loader.graph.leaf_nodes("agione_ops")
-    assert target == [("agione_ops", "0020_sourceconnection_removed_at")]
+    assert target == [("agione_ops", "0021_nativefinancerun")]
     executor.migrate(target)
     executor = MigrationExecutor(connection)
     assert all(node in executor.loader.applied_migrations for node in target)
@@ -222,7 +223,8 @@ def test_full_migration_from_empty_database(django_db_blocker):
     alias = "agione_schema_fresh_memory"
     assert alias not in connections.databases
     config = deepcopy(connections.databases["default"])
-    config.update({"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"})
+    config.update({"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:",
+                   "OPTIONS": {}})
     connections.databases[alias] = config
     with django_db_blocker.unblock():
         connection = connections[alias]
@@ -231,7 +233,7 @@ def test_full_migration_from_empty_database(django_db_blocker):
             assert not executor.loader.applied_migrations
             target = executor.loader.graph.leaf_nodes("agione_ops")
             executor.migrate(target)
-            assert target == [("agione_ops", "0020_sourceconnection_removed_at")]
+            assert target == [("agione_ops", "0021_nativefinancerun")]
             assert TABLES <= tables(connection)
             assert all(node in MigrationExecutor(connection).loader.applied_migrations
                        for node in target)

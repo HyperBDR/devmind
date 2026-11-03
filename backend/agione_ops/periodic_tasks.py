@@ -49,3 +49,9 @@ def register_periodic_tasks():
         schedule=schedule(60),
         enabled=True,
     )
+    TASK_REGISTRY.add(
+        name="agione_recover_abandoned_native_syncs",
+        task="agione_ops.tasks.recover_abandoned_native_syncs",
+        schedule=schedule(60),
+        enabled=True,
+    )

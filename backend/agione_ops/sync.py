@@ -154,6 +154,45 @@ def _terminal(run, connection, status, code):
     _release(connection)
 
 
+def recover_expired_run(connection_id, run_id=None):
+    """Fence abandoned work after a grace period, without touching live leases."""
+    from agione_ops.models import NotificationRules
+
+    now = django_timezone.now()
+    recovered = None
+    with transaction.atomic():
+        connection = SourceConnection.objects.select_for_update().filter(
+            pk=connection_id,
+        ).first()
+        if not connection or not (run_id or connection.active_run_id):
+            return False
+        run = SyncRun.objects.select_for_update().filter(
+            pk=run_id or connection.active_run_id, connection=connection,
+        ).first()
+        if not run or run.status not in ACTIVE_STATUSES:
+            return False
+        owns_lease = connection.active_run_id == run.pk
+        expires = connection.lease_expires_at if owns_lease else None
+        if expires:
+            if expires > now - timedelta(minutes=3):
+                return False
+        elif (run.heartbeat_at or run.created_at) > now - timedelta(minutes=5):
+            return False
+        if owns_lease:
+            _terminal(run, connection, "interrupted", "LEASE_EXPIRED")
+        else:
+            _update_run(run, status="interrupted", phase="interrupted",
+                        error_code="LEASE_EXPIRED", finished_at=now)
+        recovered = run
+    if recovered.idempotency_key.startswith("agione-auto-"):
+        NotificationRules.objects.filter(
+            connection_id=connection_id, user_id=recovered.initiated_by_id,
+            last_auto_started_at__lte=recovered.created_at,
+        ).update(last_auto_status="interrupted", last_auto_error_code="LEASE_EXPIRED")
+    _project(recovered.pk)
+    return True
+
+
 def interrupt_connection_run(connection):
     """Fence the active run while the caller holds the connection lock."""
     if not connection.active_run_id:

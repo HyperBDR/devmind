@@ -429,7 +429,7 @@ def _prepare(run, connection, client, checkpoint):
 
 def _seed_timed_out(run, state, checkpoint):
     """Resume fully staged slices from an earlier timed-out collection."""
-    if run.attempt != 1:
+    if run.attempt != 1 and run.native_shards.filter(status="succeeded").exists():
         return
     previous = SyncRun.objects.filter(
         connection_id=run.connection_id,
@@ -438,8 +438,8 @@ def _seed_timed_out(run, state, checkpoint):
         initiated_by_id=run.initiated_by_id,
         grant_revision=run.grant_revision,
         created_at__gte=timezone.now() - timedelta(days=1),
-        status="failed",
-        error_code__in=("NATIVE_SYNC_DEADLINE", "SYNC_FAILED"),
+        status__in=("failed", "interrupted"),
+        error_code__in=("NATIVE_SYNC_DEADLINE", "SYNC_FAILED", "LEASE_EXPIRED"),
         native_state__directory_complete=True,
     ).exclude(pk=run.pk).select_related("native_state").order_by("-created_at")
     for old in previous:
@@ -469,7 +469,7 @@ def _seed_timed_out(run, state, checkpoint):
 
 def _seed_incremental(run, state, checkpoint):
     """Reuse only old fully covered shards; overlap is freshly re-collected."""
-    if run.attempt != 1:
+    if run.attempt != 1 and run.native_shards.filter(status="succeeded").exists():
         return
     snapshots = NativePublishedSnapshot.objects.filter(
         version__connection_id=run.connection_id,
@@ -811,6 +811,22 @@ def _publish(run, connection, state, finance, checkpoint):
     return {"status": "succeeded", "dataVersion": str(version.pk)}
 
 
+def _make_progress_counter(run):
+    """Avoid recounting staged rows at every lease heartbeat."""
+    last_checked = float("-inf")
+    last_count = 0
+
+    def count(phase):
+        nonlocal last_checked, last_count
+        now = time.monotonic()
+        if phase in {"staging", "finance"} or now - last_checked >= 15:
+            last_count = run.native_staging.count()
+            last_checked = now
+        return last_count
+
+    return count
+
+
 def execute_native_sync(run_id, *, client_factory=None):
     """Resume only pending/failed shards under the existing domain lease."""
     from agione_ops.sync import (
@@ -828,13 +844,14 @@ def execute_native_sync(run_id, *, client_factory=None):
     duration = _setting("AGIONE_OPS_NATIVE_MAX_SECONDS", 600, 30, 1800)
     elapsed = max(0, (timezone.now() - run.created_at).total_seconds())
     deadline = time.monotonic() + max(0, duration - elapsed)
+    progress_count = _make_progress_counter(run)
 
     def checkpoint(phase):
         if time.monotonic() >= deadline:
             raise AgioneOpsError("NATIVE_SYNC_DEADLINE", status_code=504)
         _checkpoint(
             run.pk, lease_token, epoch, phase,
-            run.native_staging.count(), None,
+            progress_count(phase), None,
         )
 
     client = None
