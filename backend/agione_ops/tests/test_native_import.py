@@ -58,11 +58,9 @@ def test_import_native_without_demo_binding_with_explicit_sync(provision):
 
 
 def test_initial_collection_requires_explicit_sync_grant(provision, monkeypatch):
-    from agione_ops import tasks
-
     submitted = []
-    monkeypatch.setattr(tasks, 'submit_recent_sync',
-                        lambda connection, user, end: submitted.append(connection.pk))
+    monkeypatch.setattr('agione_ops.sync.submit_sync',
+                        lambda connection, *args: submitted.append(connection.pk))
     invoke(provision, [row()])
     assert submitted == []
     invoke(provision, [row()], '--allow-sync')
