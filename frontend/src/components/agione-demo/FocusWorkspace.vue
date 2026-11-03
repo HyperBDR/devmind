@@ -21,6 +21,7 @@
     </div>
     <p>自动刷新只发送紧急事件；运营日报仍只在下方设置的时间发送。</p>
     <div v-if="autoStatus" class="notify-status"><span>{{ autoStatus }}</span></div>
+    <div v-if="serverRules?.inspectionGap" class="notify-status"><span>{{ locale.startsWith('en') ? 'Inspection gap requiring manual review:' : '巡检存在缺口，请人工核查：' }} {{ displayTime(serverRules.inspectionGap.start) }} — {{ displayTime(serverRules.inspectionGap.end) }} ({{ locale.startsWith('en') ? 'Beijing time' : '北京时间' }})</span></div>
     <div v-if="financeStatus" class="notify-status"><span>{{ financeStatus }}</span></div>
     <details v-if="recentRuns.length" class="recent-syncs">
      <summary class="recent-syncs-heading"><strong>{{ locale.startsWith('en') ? 'Recent collection tasks' : '最近采集任务' }}</strong><span>{{ locale.startsWith('en') ? 'Latest 5' : '最近 5 条' }}</span></summary>

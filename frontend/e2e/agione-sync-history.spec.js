@@ -5,7 +5,9 @@ test('rule settings show safe collection status and heartbeat', async ({ page })
   test.skip(!module.headers()['content-type']?.includes('javascript'), 'Requires the Vite development server')
   await page.route('**/v1/agione-ops/connections/test/notification-rules/', route => route.fulfill({
     status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data: {
-      configured: true, channels: [], recentRuns: [{
+      configured: true, channels: [], inspectionGap: {
+        start: '2026-11-02T00:00:00Z', end: '2026-11-02T00:10:00Z'
+      }, recentRuns: [{
         runId: 'test-run', trigger: 'automatic', status: 'interrupted',
         phase: 'interrupted', attempt: 1, errorCode: 'LEASE_EXPIRED',
         createdAt: '2026-11-03T00:49:00Z', heartbeatAt: '2026-11-03T00:51:00Z'
@@ -36,6 +38,7 @@ test('rule settings show safe collection status and heartbeat', async ({ page })
     button.click()
   })
   const dialog = page.getByRole('dialog')
+  await expect(dialog.getByText('巡检存在缺口，请人工核查：')).toContainText('2026/11/2 08:00:00')
   await expect(dialog.getByText('自动刷新', { exact: true }).last()).not.toBeVisible()
   await dialog.getByText('最近采集任务').click()
   const row = dialog.locator('.recent-sync').first()

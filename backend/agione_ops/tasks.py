@@ -999,12 +999,6 @@ def retry_abandoned_auto_sync(run_id):
             SyncRun.objects.filter(pk=run_id).update(recovery_handled=True)
             return False
         prior_attempts = max(_consumed_attempts(run) for run in runs)
-        if prior_attempts >= 3:
-            from agione_ops.notification_delivery import notify_collection_failure
-
-            notify_collection_failure(rules, "calls", "LEASE_EXPIRED")
-            SyncRun.objects.filter(pk=run_id).update(recovery_handled=True)
-            return False
         numbers = [int(match.group(1)) for run in runs
                    if (match := re.search(r"-retry-(\d+)$", run.idempotency_key))]
         key = f"{base}-retry-{max(numbers, default=0) + 1}"
@@ -1014,6 +1008,36 @@ def retry_abandoned_auto_sync(run_id):
         window_start = max(
             candidate.window_start, window_end - timedelta(days=31),
         )
+        inspection_start = rules.last_inspection_at or (
+            window_end - timedelta(hours=rules.config.get("auto_refresh_hours", 3))
+        )
+        required_start = inspection_start - timedelta(
+            minutes=rules.config.get("event_window_minutes", 120),
+        )
+        if window_start > required_start:
+            from agione_ops.notification_delivery import notify_inspection_gap
+
+            gap = {
+                "start": inspection_start.isoformat(),
+                "end": min(window_end, window_start + (
+                    inspection_start - required_start
+                )).isoformat(),
+                "required_start": required_start.isoformat(),
+                "available_start": window_start.isoformat(),
+            }
+            NotificationRules.objects.filter(pk=rules.pk).update(
+                inspection_gap=gap, last_auto_status="inspection_failed",
+                last_auto_error_code="INSPECTION_WINDOW_GAP",
+            )
+            SyncRun.objects.filter(pk=run_id).update(recovery_handled=True)
+            notify_inspection_gap(rules, gap)
+            return False
+        if prior_attempts >= 3:
+            from agione_ops.notification_delivery import notify_collection_failure
+
+            notify_collection_failure(rules, "calls", "LEASE_EXPIRED")
+            SyncRun.objects.filter(pk=run_id).update(recovery_handled=True)
+            return False
         try:
             next_run, created = submit_sync(
                 connection, candidate.initiated_by, window_start,

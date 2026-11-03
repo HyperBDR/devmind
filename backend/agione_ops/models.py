@@ -345,6 +345,7 @@ class NotificationRules(models.Model):
     last_auto_success_at = models.DateTimeField(null=True, blank=True)
     next_auto_refresh_at = models.DateTimeField(null=True, blank=True)
     last_inspection_at = models.DateTimeField(null=True, blank=True)
+    inspection_gap = models.JSONField(null=True, blank=True)
     last_auto_status = models.CharField(max_length=24, default="idle")
     last_auto_error_code = models.CharField(max_length=64, blank=True, default="")
     updated_at = models.DateTimeField(auto_now=True)

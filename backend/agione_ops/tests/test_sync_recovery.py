@@ -507,6 +507,95 @@ class ExpiredSyncTests(TestCase):
         self.assertTrue(old.recovery_handled)
         self.assertFalse(NotificationDelivery.objects.exists())
 
+    def test_recovery_reports_uncovered_inspection_window(self):
+        from agione_ops.tasks import retry_abandoned_auto_sync
+
+        old = self.make_active()
+        original_end = self.now - timedelta(minutes=10)
+        original_start = original_end - timedelta(days=31)
+        SyncRun.objects.filter(pk=old.pk).update(
+            status="interrupted", error_code="LEASE_EXPIRED", attempt=1,
+            window_start=original_start, window_end=original_end,
+            finished_at=self.now - timedelta(minutes=5),
+        )
+        inspection = original_start + timedelta(minutes=120)
+        rules = NotificationRules.objects.create(
+            connection=self.connection, user=self.user,
+            config={"auto_refresh_enabled": True, "enabled": True,
+                    "channel_id": str(uuid4()), "event_window_minutes": 120},
+            last_inspection_at=inspection,
+        )
+        with patch("django.utils.timezone.now", return_value=self.now), patch(
+            "agione_ops.native_sync_models.NativePublishedSnapshot.objects.filter"
+        ) as snapshots, patch("agione_ops.sync.submit_sync") as submit:
+            snapshots.return_value.exists.return_value = True
+            self.assertFalse(retry_abandoned_auto_sync(old.pk))
+            self.assertFalse(retry_abandoned_auto_sync(old.pk))
+        submit.assert_not_called()
+        rules.refresh_from_db()
+        old.refresh_from_db()
+        self.assertTrue(old.recovery_handled)
+        self.assertEqual(rules.last_inspection_at, inspection)
+        self.assertEqual(rules.last_auto_status, "inspection_failed")
+        self.assertEqual(rules.last_auto_error_code, "INSPECTION_WINDOW_GAP")
+        self.assertEqual(rules.inspection_gap["start"], inspection.isoformat())
+        self.assertEqual(rules.inspection_gap["end"], (
+            inspection + timedelta(minutes=10)
+        ).isoformat())
+        delivery = NotificationDelivery.objects.get(rules=rules)
+        self.assertIn("巡检数据缺口", delivery.payload["text"])
+        client = APIClient()
+        client.force_authenticate(self.user)
+        response = client.get(
+            f"/api/v1/agione-ops/connections/{self.connection.pk}/"
+            "notification-rules/"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["data"]["inspectionGap"]["start"],
+                         inspection.isoformat())
+
+    def test_gap_is_visible_when_notifications_are_disabled(self):
+        from agione_ops.tasks import retry_abandoned_auto_sync
+
+        old = self.make_active()
+        end = self.now - timedelta(minutes=10)
+        start = end - timedelta(days=31)
+        SyncRun.objects.filter(pk=old.pk).update(
+            status="interrupted", error_code="LEASE_EXPIRED", attempt=3,
+            window_start=start, window_end=end,
+            finished_at=self.now - timedelta(minutes=5),
+        )
+        rules = NotificationRules.objects.create(
+            connection=self.connection, user=self.user,
+            config={"auto_refresh_enabled": True, "enabled": False},
+            last_inspection_at=start + timedelta(minutes=120),
+        )
+        with patch("django.utils.timezone.now", return_value=self.now), patch(
+            "agione_ops.native_sync_models.NativePublishedSnapshot.objects.filter"
+        ) as snapshots:
+            snapshots.return_value.exists.return_value = True
+            self.assertFalse(retry_abandoned_auto_sync(old.pk))
+        rules.refresh_from_db()
+        self.assertIsNotNone(rules.inspection_gap)
+        self.assertFalse(NotificationDelivery.objects.exists())
+
+    def test_recovery_accepts_exact_inspection_window(self):
+        from agione_ops.tasks import retry_abandoned_auto_sync
+
+        old = self.make_active()
+        SyncRun.objects.filter(pk=old.pk).update(
+            status="interrupted", error_code="LEASE_EXPIRED", attempt=1,
+            finished_at=self.now - timedelta(minutes=5),
+        )
+        NotificationRules.objects.create(
+            connection=self.connection, user=self.user,
+            config={"auto_refresh_enabled": True, "event_window_minutes": 120},
+            last_inspection_at=old.window_start + timedelta(minutes=120),
+        )
+        with patch("agione_ops.sync.submit_sync", return_value=(old, True)) as submit:
+            self.assertTrue(retry_abandoned_auto_sync(old.pk))
+        submit.assert_called_once()
+
     def test_older_publication_does_not_suppress_recovery(self):
         from agione_ops.models import DatasetVersion
         from agione_ops.native_sync_models import NativePublishedSnapshot

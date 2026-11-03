@@ -220,6 +220,7 @@ class NotificationRulesAPIView(LocalAPIView):
             **serializer.validated_data,
             "recent_runs": recent_runs[:5],
             "configured": row is not None,
+            "inspection_gap": row.inspection_gap if row else None,
             "last_analysis": row.last_analysis if row else None,
             "delivery_status": {
                 "status": latest_delivery.status,
