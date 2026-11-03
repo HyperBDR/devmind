@@ -579,6 +579,81 @@ class ExpiredSyncTests(TestCase):
         self.assertIsNotNone(rules.inspection_gap)
         self.assertFalse(NotificationDelivery.objects.exists())
 
+    def test_unresolved_gap_is_never_shortened_by_later_recovery(self):
+        from agione_ops.tasks import retry_abandoned_auto_sync
+
+        old = self.make_active()
+        end = self.now - timedelta(minutes=10)
+        start = end - timedelta(days=31)
+        SyncRun.objects.filter(pk=old.pk).update(
+            status="interrupted", error_code="LEASE_EXPIRED", attempt=1,
+            window_start=start + timedelta(minutes=25), window_end=end,
+            finished_at=self.now - timedelta(minutes=5),
+        )
+        rules = NotificationRules.objects.create(
+            connection=self.connection, user=self.user,
+            config={"auto_refresh_enabled": True, "enabled": False},
+            last_inspection_at=start + timedelta(minutes=120),
+        )
+        with patch("django.utils.timezone.now", return_value=self.now), patch(
+            "agione_ops.native_sync_models.NativePublishedSnapshot.objects.filter"
+        ) as snapshots:
+            snapshots.return_value.exists.return_value = True
+            self.assertFalse(retry_abandoned_auto_sync(old.pk))
+            rules.refresh_from_db()
+            original = rules.inspection_gap
+            SyncRun.objects.filter(pk=old.pk).update(
+                recovery_handled=False, window_start=start,
+            )
+            self.assertFalse(retry_abandoned_auto_sync(old.pk))
+        rules.refresh_from_db()
+        self.assertEqual(rules.inspection_gap["start"], original["start"])
+        self.assertEqual(rules.inspection_gap["end"], original["end"])
+
+    def test_gap_acknowledgement_requires_owner_and_current_range(self):
+        from agione_ops.tasks import _mark_auto_inspection_failed
+
+        old = self.make_active()
+        SyncRun.objects.filter(pk=old.pk).update(
+            created_at=self.now - timedelta(minutes=1),
+        )
+        gap = {"start": (self.now - timedelta(days=31)).isoformat(),
+               "end": (self.now - timedelta(days=30)).isoformat()}
+        rules = NotificationRules.objects.create(
+            connection=self.connection, user=self.user,
+            config={"auto_refresh_enabled": True}, inspection_gap=gap,
+            last_inspection_at=self.now - timedelta(days=31),
+        )
+        url = (f"/api/v1/agione-ops/connections/{self.connection.pk}/"
+               "inspection-gap/acknowledge/")
+        client = APIClient()
+        client.force_authenticate(self.user)
+        stale = client.post(url, {**gap, "end": self.now.isoformat()}, format="json")
+        self.assertEqual(stale.status_code, 400)
+        rules.refresh_from_db()
+        self.assertEqual(rules.inspection_gap, gap)
+        with patch("django.utils.timezone.now", return_value=self.now):
+            result = client.post(url, gap, format="json")
+        self.assertEqual(result.status_code, 200)
+        rules.refresh_from_db()
+        self.assertEqual(rules.inspection_gap["status"], "acknowledged")
+        self.assertEqual(rules.inspection_gap["acknowledged_by"], self.user.pk)
+        self.assertEqual(rules.last_inspection_at, self.now)
+        self.assertEqual(rules.next_auto_refresh_at, self.now)
+        self.assertEqual(rules.last_auto_status, "scheduled")
+        _mark_auto_inspection_failed(old.pk)
+        rules.refresh_from_db()
+        self.assertEqual(rules.last_auto_status, "scheduled")
+        self.assertEqual(client.post(url, gap, format="json").status_code, 400)
+
+        other = get_user_model().objects.create_user(username="gap-other")
+        for action in ("view_business", "run_sync"):
+            other.user_permissions.add(Permission.objects.get(
+                content_type__app_label="agione_ops", codename=action,
+            ))
+        client.force_authenticate(other)
+        self.assertEqual(client.post(url, gap, format="json").status_code, 404)
+
     def test_recovery_accepts_exact_inspection_window(self):
         from agione_ops.tasks import retry_abandoned_auto_sync
 

@@ -575,17 +575,23 @@ def analyze_native_snapshot(scope_id, run_id):
 
 def _mark_auto_inspection_failed(run_id):
     """Expose an inspection failure without advancing its checkpoint."""
+    from django.db.models import Q
+
     from agione_ops.models import NotificationRules, SyncRun
 
     run = SyncRun.objects.filter(pk=run_id).only(
         "connection_id",
         "initiated_by_id",
         "idempotency_key",
+        "created_at",
     ).first()
     if run and run.idempotency_key.startswith("agione-auto-"):
         NotificationRules.objects.filter(
             connection_id=run.connection_id,
             user_id=run.initiated_by_id,
+        ).filter(
+            Q(last_auto_started_at__isnull=True)
+            | Q(last_auto_started_at__lte=run.created_at)
         ).update(
             last_auto_status="inspection_failed",
             last_auto_error_code="INSPECTION_FAILED",
@@ -1015,13 +1021,21 @@ def retry_abandoned_auto_sync(run_id):
             minutes=rules.config.get("event_window_minutes", 120),
         )
         if window_start > required_start:
+            from datetime import datetime
+
             from agione_ops.notification_delivery import notify_inspection_gap
 
+            gap_start = inspection_start
+            gap_end = min(window_end, window_start + (
+                inspection_start - required_start
+            ))
+            previous = rules.inspection_gap or {}
+            if previous and previous.get("status") != "acknowledged":
+                gap_start = min(gap_start, datetime.fromisoformat(previous["start"]))
+                gap_end = max(gap_end, datetime.fromisoformat(previous["end"]))
             gap = {
-                "start": inspection_start.isoformat(),
-                "end": min(window_end, window_start + (
-                    inspection_start - required_start
-                )).isoformat(),
+                "start": gap_start.isoformat(),
+                "end": gap_end.isoformat(),
                 "required_start": required_start.isoformat(),
                 "available_start": window_start.isoformat(),
             }

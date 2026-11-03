@@ -10,6 +10,9 @@ export const agioneOpsApi = {
   saveNotificationRules(id, body) {
     return apiClient.put(`${connectionPath(id)}/notification-rules/`, body)
   },
+  acknowledgeInspectionGap(id, body) {
+    return apiClient.post(`${connectionPath(id)}/inspection-gap/acknowledge/`, body)
+  },
   tenantClassifications(id, params = {}) {
     return apiClient.get(`${connectionPath(id)}/tenant-classifications/`, {
       params

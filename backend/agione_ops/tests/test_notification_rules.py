@@ -532,6 +532,72 @@ class NotificationRuleApiTests(TestCase):
             f"{self.connection.pk}/notification-rules/"
         )
 
+    def test_acknowledged_gap_resumes_automatic_alerts(self):
+        from agione_ops.notification_rules import (
+            acknowledge_inspection_gap, analyze_completed_snapshot,
+        )
+
+        start = datetime(2026, 10, 29, 8, 0, tzinfo=ZONE)
+        end = start + timedelta(hours=1)
+        rows = [{
+            "customer_id": "200", "result": "FAILURE",
+            "failureKey": "source:3",
+            "occurred_at": (start + timedelta(minutes=i + 1)).isoformat(),
+        } for i in range(6)]
+        snapshot = SimpleNamespace(
+            data={"rows": rows, "customers": {"200": {"name": "Tenant"}},
+                  "metadata": {}}, content_digest="test",
+        )
+        run = SimpleNamespace(
+            pk="run", idempotency_key="agione-auto-20261029T030000Z-7",
+            window_start=start - timedelta(hours=1), window_end=end,
+            published_version=SimpleNamespace(native_snapshot=snapshot),
+        )
+        scope = SimpleNamespace(
+            run_id="run", run=run, connection=self.connection,
+            connection_id=self.connection.pk, user=self.user,
+        )
+        gap = {"start": (start - timedelta(days=2)).isoformat(),
+               "end": (start - timedelta(days=1)).isoformat()}
+        rules = NotificationRules.objects.create(
+            connection=self.connection, user=self.user,
+            inspection_gap=gap, last_inspection_at=start - timedelta(days=2),
+            config={**notification_rule_config(), "enabled": True,
+                    "auto_refresh_enabled": True,
+                    "channel_id": str(self.own_channel.uuid),
+                    "event_window_minutes": 30},
+        )
+        with patch("django.utils.timezone.now", return_value=start):
+            acknowledge_inspection_gap(
+                self.connection, self.user, gap["start"], gap["end"],
+            )
+        with ExitStack() as stack:
+            select = stack.enter_context(patch(
+                "agione_ops.native_sync_models.NativeAccountScope.objects."
+                "select_related"
+            ))
+            select.return_value.get.return_value = scope
+            stack.enter_context(patch("agione_ops.native_sync.authorize_native_run"))
+            stack.enter_context(patch("agione_ops.native_sync.validate_snapshot_data"))
+            stack.enter_context(patch(
+                "agione_ops.native_account_refresh.scope_for",
+                return_value=({}, "valid"),
+            ))
+            stack.enter_context(patch(
+                "agione_ops.native_account_scope.external_rows", return_value=rows,
+            ))
+            stack.enter_context(patch(
+                "agione_ops.tenant_directory.overrides_for", return_value={},
+            ))
+            with patch("agione_ops.tasks.deliver_notification.delay") as send:
+                with self.captureOnCommitCallbacks(execute=True):
+                    analyze_completed_snapshot(1, "run")
+            send.assert_called_once()
+        rules.refresh_from_db()
+        self.assertEqual(rules.last_inspection_at, end)
+        self.assertEqual(rules.last_auto_status, "succeeded")
+        self.assertIn("Tenant", NotificationDelivery.objects.get().payload["text"])
+
     def test_failed_notification_write_preserves_inspection_for_retry(self):
         from agione_ops.notification_rules import analyze_completed_snapshot
 

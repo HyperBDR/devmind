@@ -21,7 +21,7 @@
     </div>
     <p>自动刷新只发送紧急事件；运营日报仍只在下方设置的时间发送。</p>
     <div v-if="autoStatus" class="notify-status"><span>{{ autoStatus }}</span></div>
-    <div v-if="serverRules?.inspectionGap" class="notify-status"><span>{{ locale.startsWith('en') ? 'Inspection gap requiring manual review:' : '巡检存在缺口，请人工核查：' }} {{ displayTime(serverRules.inspectionGap.start) }} — {{ displayTime(serverRules.inspectionGap.end) }} ({{ locale.startsWith('en') ? 'Beijing time' : '北京时间' }})</span></div>
+    <div v-if="serverRules?.inspectionGap && serverRules.inspectionGap.status !== 'acknowledged'" class="notify-status"><span>{{ locale.startsWith('en') ? 'Inspection gap requiring manual review:' : '巡检存在缺口，请人工核查：' }} {{ displayTime(serverRules.inspectionGap.start) }} — {{ displayTime(serverRules.inspectionGap.end) }} ({{ locale.startsWith('en') ? 'Beijing time' : '北京时间' }})</span><button type="button" :disabled="rulesLoading" @click="acknowledgeGap">{{ locale.startsWith('en') ? 'Confirm manual review' : '确认已人工核查' }}</button></div>
     <div v-if="financeStatus" class="notify-status"><span>{{ financeStatus }}</span></div>
     <details v-if="recentRuns.length" class="recent-syncs">
      <summary class="recent-syncs-heading"><strong>{{ locale.startsWith('en') ? 'Recent collection tasks' : '最近采集任务' }}</strong><span>{{ locale.startsWith('en') ? 'Latest 5' : '最近 5 条' }}</span></summary>
@@ -131,6 +131,20 @@ async function saveRules(){
   try { localStorage.removeItem('agione-thresholds') } catch { /* Storage cleanup is best effort. */ }
   eventPage.value=1; rulesDialog.value.close()
  } catch { rulesError.value='规则保存失败，请检查连接权限后重试。' }
+ finally { rulesLoading.value=false }
+}
+async function acknowledgeGap(){
+ const gap=serverRules.value?.inspectionGap
+ if(!gap)return
+ const message=locale.value.startsWith('en')
+  ? 'Confirm manual review? Uninspected events through now will be skipped; automatic inspection will resume from now.'
+  : '确认已人工核查？系统将跳过截至当前时间尚未巡检的历史事件，并从当前时间恢复自动巡检。'
+ if(!window.confirm(message))return
+ rulesLoading.value=true;rulesError.value=''
+ try {
+  await agioneOpsApi.acknowledgeInspectionGap(props.state.connectionId,{start:gap.start,end:gap.end})
+  await loadRules(props.state.connectionId,true)
+ } catch { rulesError.value='确认失败，缺口可能已变化，请刷新后重试。' }
  finally { rulesLoading.value=false }
 }
 async function openRules(){

@@ -3,10 +3,16 @@ import { test, expect } from '@playwright/test'
 test('rule settings show safe collection status and heartbeat', async ({ page }) => {
   const module = await page.request.get('/src/components/agione-demo/FocusWorkspace.vue')
   test.skip(!module.headers()['content-type']?.includes('javascript'), 'Requires the Vite development server')
+  let acknowledged = false
+  await page.route('**/v1/agione-ops/connections/test/inspection-gap/acknowledge/', route => {
+    acknowledged = true
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data: {} }) })
+  })
   await page.route('**/v1/agione-ops/connections/test/notification-rules/', route => route.fulfill({
     status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data: {
       configured: true, channels: [], inspectionGap: {
-        start: '2026-11-02T00:00:00Z', end: '2026-11-02T00:10:00Z'
+        start: '2026-11-02T00:00:00Z', end: '2026-11-02T00:10:00Z',
+        ...(acknowledged ? { status: 'acknowledged' } : {})
       }, recentRuns: [{
         runId: 'test-run', trigger: 'automatic', status: 'interrupted',
         phase: 'interrupted', attempt: 1, errorCode: 'LEASE_EXPIRED',
@@ -39,6 +45,9 @@ test('rule settings show safe collection status and heartbeat', async ({ page })
   })
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByText('巡检存在缺口，请人工核查：')).toContainText('2026/11/2 08:00:00')
+  page.once('dialog', prompt => prompt.accept())
+  await dialog.getByRole('button', { name: '确认已人工核查' }).click()
+  await expect(dialog.getByText('巡检存在缺口，请人工核查：')).not.toBeVisible()
   await expect(dialog.getByText('自动刷新', { exact: true }).last()).not.toBeVisible()
   await dialog.getByText('最近采集任务').click()
   const row = dialog.locator('.recent-sync').first()

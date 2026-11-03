@@ -334,6 +334,20 @@ class NotificationRulesAPIView(LocalAPIView):
         return Response(config)
 
 
+class InspectionGapAcknowledgeAPIView(LocalAPIView):
+    """Acknowledge the current gap only for its authorized owner."""
+
+    def post(self, request, connection_id):
+        from agione_ops.notification_rules import acknowledge_inspection_gap
+
+        connection = get_connection_for(request.user, connection_id, "run_sync")
+        gap = acknowledge_inspection_gap(
+            connection, request.user, request.data.get("start"),
+            request.data.get("end"),
+        )
+        return Response({"inspection_gap": gap})
+
+
 class ConnectionListCreateAPIView(LocalAPIView):
     """List authorized connection metadata or explicitly configure a source."""
 
