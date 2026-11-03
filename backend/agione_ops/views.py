@@ -588,6 +588,9 @@ class SelfServiceConnectionRemoveAPIView(SelfServiceConnectionDetailAPIView):
         EmptySerializer(data=request.data).is_valid(raise_exception=True)
         with transaction.atomic():
             connection = self._owned(request, connection_id, lock=True)
+            from agione_ops.sync import interrupt_connection_run
+
+            interrupt_connection_run(connection)
             connection.enabled = False
             connection.removed_at = timezone.now()
             connection.credential_ciphertext = ""

@@ -844,6 +844,7 @@ def test_remove_personal_connection_preserves_history_and_allows_reconnect(actor
     pending.refresh_from_db()
     assert pending.status == "silenced"
     assert NotificationRules.objects.filter(pk=rules.pk).exists()
+
     assert pending.payload == {"text": "test"}
     assert client_for(owner).get(BASE).data["data"]["count"] == 0
     assert client_for(manager).get(BASE).data["data"]["count"] == 0
@@ -870,3 +871,46 @@ def test_remove_personal_connection_preserves_history_and_allows_reconnect(actor
     assert connection.verified_tenant_id == "tenant-42"
     assert connection.verified_at is not None
     assert NotificationRules.objects.filter(pk=rules.pk).exists()
+
+
+@override_settings(
+    AGIONE_OPS_NATIVE_ENABLED=True,
+    AGIONE_OPS_ALLOWED_ENDPOINT_HOSTS=("agione.pro",),
+    AGIONE_OPS_SELF_SERVICE_ENDPOINTS={"pro": "https://agione.pro"},
+)
+def test_remove_running_connection_then_reconnect_starts_new_sync(actors):
+    from agione_ops.sync import submit_sync
+
+    _, owner, _ = actors
+    connection = SourceConnection.objects.create(
+        name="Personal", platform="pro", principal_kind="provider",
+        source_kind="native", endpoint="https://agione.pro",
+        expected_tenant_id="tenant-42", enabled=True, created_by=owner,
+    )
+    connection.set_credentials({"access_key": "old", "secret_key": "old"})
+    connection.save()
+    ConnectionGrant.objects.create(
+        connection=connection, user=owner, can_view=True, can_sync=True,
+    )
+    end = timezone.now().replace(microsecond=0)
+    run, _ = submit_sync(connection, owner, end - timedelta(days=1), end,
+                         "Asia/Shanghai", "old-running")
+    SyncRun.objects.filter(pk=run.pk).update(status="running")
+    with patch("agione_ops.views._probe_personal_connection", return_value=(
+        "https://agione.pro", {"access_key": "new", "secret_key": "new"},
+        {"tenant_id": "tenant-42", "principal_kind": "provider"},
+    )):
+        assert client_for(owner).post(
+            f"{BASE}self-service/{connection.pk}/remove/", {}, format="json",
+        ).status_code == 204
+        response = client_for(owner).post(
+            f"{BASE}self-service/", {"platform": "pro", "principalKind": "provider",
+                                     "accessKey": "new", "secretKey": "new"},
+            format="json",
+        )
+    assert response.status_code == 201
+    run.refresh_from_db()
+    connection.refresh_from_db()
+    assert (run.status, run.error_code) == ("interrupted", "CONNECTION_REMOVED")
+    assert connection.active_run_id != run.pk
+    assert SyncRun.objects.filter(pk=connection.active_run_id, status="queued").exists()

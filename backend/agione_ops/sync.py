@@ -193,6 +193,19 @@ def recover_expired_run(connection_id, run_id=None):
     return True
 
 
+def interrupt_connection_run(connection):
+    """Fence the active run while the caller holds the connection lock."""
+    if not connection.active_run_id:
+        return
+    run = SyncRun.objects.select_for_update().filter(
+        pk=connection.active_run_id, connection=connection,
+    ).first()
+    if run and run.status in ACTIVE_STATUSES:
+        _terminal(run, connection, "interrupted", "CONNECTION_REMOVED")
+    else:
+        _release(connection)
+
+
 def mark_dispatch_failed(run_id):
     """Record broker delivery failure without contacting the broker again."""
 
