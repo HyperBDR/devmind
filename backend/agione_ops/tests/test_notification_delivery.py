@@ -1,6 +1,7 @@
 """Verify durable AGIOne notification delivery and recovery behavior."""
 
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
@@ -17,6 +18,8 @@ from agione_ops.models import (
     SourceConnection,
 )
 from agione_ops.notification_delivery import (
+    _card_details,
+    _notification_text,
     delivery_events,
     enqueue_analysis_notifications,
 )
@@ -31,6 +34,56 @@ ZONE = ZoneInfo("Asia/Shanghai")
 
 class NotificationDeliveryUnitTests(TestCase):
     """Cover alert and recovery event derivation without transport calls."""
+
+    def test_large_daily_card_stays_within_signed_webhook_limit(self):
+        import requests
+
+        rules = SimpleNamespace(
+            config={"analysis_days": 7, "inactivity_days": 7},
+            connection=SimpleNamespace(name="数据源"),
+        )
+        findings = []
+        for reason in ("continuous_failure", "balance_failure", "decline", "inactive"):
+            for index in range(3):
+                findings.append({
+                    "customer_id": str(index) * 40,
+                    "customer_name": "租" * 160,
+                    "reasons": [reason],
+                    "failure_count": 12,
+                    "balance_failure_count": 1,
+                    "event_request_count": 12,
+                    "current_request_count": 10,
+                    "previous_request_count": 100,
+                    "decline_percent": 90,
+                })
+        event = {"kind": "alert", "findings": findings}
+        current = {"window_end": "2026-11-03T00:00:00+08:00"}
+        text = _notification_text(rules, event, current, "scheduled")
+        details = _card_details(rules, event, current, "scheduled")
+        payload = _webhook_payload("feishu", text, details)
+        payload.update(timestamp=9999999999, sign="x" * 44)
+        request = requests.Request("POST", "https://example.com", json=payload)
+        self.assertLessEqual(len(request.prepare().body), 20000)
+        for finding in findings:
+            finding["customer_name"] = "租" * 500
+        text = _notification_text(rules, event, current, "scheduled")
+        details = _card_details(rules, event, current, "scheduled")
+        payload = _webhook_payload("feishu", text, details)
+        payload.update(timestamp=9999999999, sign="x" * 44)
+        request = requests.Request("POST", "https://example.com", json=payload)
+        self.assertLessEqual(len(request.prepare().body), 20000)
+        body = payload["card"]["elements"][0]["text"]["content"]
+        self.assertIn("运营日报", body)
+        self.assertIn("内容过长已精简", body)
+
+    def test_extremely_long_feishu_text_is_bounded(self):
+        import requests
+
+        payload = _webhook_payload("feishu", "异常提醒\n" + "租" * 30000)
+        payload.update(timestamp=9999999999, sign="x" * 44)
+        request = requests.Request("POST", "https://example.com", json=payload)
+        self.assertLessEqual(len(request.prepare().body), 20000)
+        self.assertIn("内容过长已精简", payload["card"]["elements"][0]["text"]["content"])
 
     def test_daily_card_groups_findings_and_shows_range_once(self):
         details = {

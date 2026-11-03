@@ -30,6 +30,42 @@ def _retryable_schedule_run(run):
     )
 
 
+def _fit_feishu_payload(payload, text):
+    """Keep the serialized request below the bot limit, including signing."""
+    import json
+
+    def size(value):
+        signed = {**value, "timestamp": 9999999999, "sign": "x" * 44}
+        return len(json.dumps(signed, ensure_ascii=True).encode("utf-8"))
+
+    if size(payload) <= 20000:
+        return payload
+    fallback = {
+        "msg_type": "interactive",
+        "card": {
+            "header": {
+                "title": {"tag": "plain_text", "content": "AGIOne 通知"},
+                "template": "blue",
+            },
+            "elements": [{"tag": "div", "text": {
+                "tag": "plain_text", "content": "",
+            }}],
+        },
+    }
+    target = fallback["card"]["elements"][0]["text"]
+    suffix = "\n\n内容过长已精简，请查看经营看板。"
+    low, high = 0, len(text)
+    while low < high:
+        mid = (low + high + 1) // 2
+        target["content"] = text[:mid] + suffix
+        if size(fallback) <= 20000:
+            low = mid
+        else:
+            high = mid - 1
+    target["content"] = text[:low] + suffix
+    return fallback
+
+
 def _webhook_payload(provider_type, text, card_details=None):
     """Render text for the notifier's supported webhook providers."""
     if provider_type == "feishu":
@@ -216,18 +252,20 @@ def _webhook_payload(provider_type, text, card_details=None):
                     })
                 else:
                     converted.append(element)
-            return {"msg_type": "interactive", "card": {
+            payload = {"msg_type": "interactive", "card": {
                 "schema": "2.0",
                 "header": {"title": {"tag": "plain_text", "content": title},
                            "template": color},
                 "body": {"elements": converted},
             }}
-        return {"msg_type": "interactive", "card": {
+            return _fit_feishu_payload(payload, text)
+        payload = {"msg_type": "interactive", "card": {
             "config": {"wide_screen_mode": True},
             "header": {"title": {"tag": "plain_text", "content": title},
                        "template": color},
             "elements": elements,
         }}
+        return _fit_feishu_payload(payload, text)
     if provider_type in {"wechat", "wecom"}:
         return {"msgtype": "markdown", "markdown": {"content": text}}
     return {"text": text}
