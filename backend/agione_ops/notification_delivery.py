@@ -210,6 +210,57 @@ def _digest(value):
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _card_details(rules, event, current, trigger):
+    """Persist a small, transport-neutral presentation for new alerts."""
+    if event["kind"] != "alert" or event.get("historical_unconfirmed"):
+        return None
+    groups = []
+    for kind, label, items in _notification_groups(event["findings"]):
+        entries = []
+        for item in items[:3]:
+            details = _finding_text(kind, item, rules, False, trigger)
+            identity = _identity(item) + "："
+            metrics = []
+            if kind == "continuous_failure":
+                failed = int(item.get("failure_count") or 0)
+                total = item.get("event_request_count")
+                if total is None:
+                    total = item.get("current_request_count")
+                metrics = [{"label": "失败次数", "value": f"{failed:,} 次", "highlight": True}]
+                if total is not None:
+                    metrics.append({"label": "成功次数", "value": f"{max(0, int(total) - failed):,} 次"})
+            elif kind == "balance_failure":
+                metrics = [{"label": "余额不足失败", "value": f"{int(item.get('balance_failure_count') or 0):,} 次", "highlight": True}]
+            elif kind == "decline":
+                metrics = [{"label": "本期调用", "value": f"{int(item.get('current_request_count') or 0):,} 次"},
+                           {"label": "前期调用", "value": f"{int(item.get('previous_request_count') or 0):,} 次"}]
+            entries.append({
+                "name": str(item.get("customer_name") or item.get("customer_id") or "-"),
+                "id": str(item.get("customer_id") or "-"),
+                "details": details.removeprefix(identity),
+                "reason": "余额不足" if "balance_failure" in item.get("reasons", []) else "",
+                "metrics": metrics,
+            })
+        groups.append({"label": label, "count": len(items), "entries": entries})
+    start = _parse_time(current.get("event_start"))
+    end = _parse_time(current.get("window_end"))
+    event_times = None
+    if trigger in {"manual", "automatic"} and start and end and start < end:
+        event_times = [
+            f"{value.month} 月 {value.day} 日 {value:%H:%M}"
+            for value in (start, end)
+        ]
+    return {
+        "groups": groups,
+        "event_times": event_times,
+        "window": (_display_event_range(current) if trigger in {"manual", "automatic"}
+                   else _display_range(current, int(rules.config.get("analysis_days", 7)))),
+        "window_label": "事件观察" if trigger in {"manual", "automatic"} else "统计范围",
+        "collected": _display_collected(current.get("collected_at")),
+        "source": rules.connection.name,
+    }
+
+
 def _notification_text(rules, event, current, trigger):
     findings = event["findings"]
     groups = _notification_groups(findings)
@@ -345,6 +396,7 @@ def _create_delivery(rules, event, current, trigger, scheduled_date):
                 "scheduled_date": scheduled_date,
                 "trigger": trigger,
                 "issues": normalized,
+                "card_details": _card_details(rules, event, current, trigger),
             },
         },
     )

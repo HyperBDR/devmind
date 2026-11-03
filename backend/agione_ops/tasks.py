@@ -30,9 +30,10 @@ def _retryable_schedule_run(run):
     )
 
 
-def _webhook_payload(provider_type, text):
+def _webhook_payload(provider_type, text, card_details=None):
     """Render text for the notifier's supported webhook providers."""
     if provider_type == "feishu":
+        from html import escape
         from urllib.parse import urlsplit
 
         from django.core.exceptions import ValidationError
@@ -69,6 +70,127 @@ def _webhook_payload(provider_type, text):
         elements = [{"tag": "div", "text": {
             "tag": "plain_text", "content": content or title,
         }}]
+        groups = card_details.get("groups") if isinstance(card_details, dict) else None
+        if groups and card_details.get("window_label") == "统计范围":
+            color = "blue"
+            elements = []
+            for offset in range(0, len(groups), 2):
+                columns = []
+                for group in groups[offset:offset + 2]:
+                    columns.append({
+                        "tag": "column", "width": "weighted", "weight": 1,
+                        "elements": [{"tag": "markdown", "content": (
+                            f"{group['label']}\n"
+                            f"<font color='red'>**{group['count']} 位租户**</font>"
+                        )}],
+                    })
+                elements.append({
+                    "tag": "column_set", "flex_mode": "stretch",
+                    "background_style": "grey", "columns": columns,
+                })
+            elements.append({"tag": "hr"})
+            for group in groups:
+                elements.append({"tag": "markdown", "text_size": "heading",
+                                 "content": (
+                    f"**{group['label']} · {group['count']} 位租户**"
+                )})
+                rows = [("**租户**", "**异常详情**")]
+                for item in group["entries"]:
+                    row = []
+                    for value in (f"{item['name']}\nID：{item['id']}",
+                                  item["details"]):
+                        value = escape(value)
+                        for char in "\\`*_{}[]()#+!|~":
+                            value = value.replace(char, "\\" + char)
+                        row.append(value)
+                    rows.append(tuple(row))
+                for index, row in enumerate(rows):
+                    columns = [{
+                        "tag": "column", "width": "weighted", "weight": 1,
+                        "elements": [{"tag": "markdown", "content": value}],
+                    } for value in row]
+                    elements.append({
+                        "tag": "column_set", "flex_mode": "stretch",
+                        "background_style": (
+                            "blue" if index == 0 else
+                            "grey" if index % 2 else "default"
+                        ),
+                        "columns": columns,
+                    })
+                remaining = group["count"] - len(group["entries"])
+                if remaining:
+                    elements.append({"tag": "div", "text": {
+                        "tag": "plain_text",
+                        "content": f"另有 {remaining} 位租户。",
+                    }})
+                elements.append({"tag": "hr"})
+            elements.append({"tag": "div", "text": {
+                "tag": "plain_text", "content": (
+                    f"统计范围：{card_details['window']}\n"
+                    f"数据采集：{card_details['collected']}\n"
+                    f"数据源：{card_details['source']}"
+                ),
+            }})
+        elif groups:
+            title = "【重点关注】AGIOne 异常提醒"
+            color = "blue"
+            elements = []
+            for group in groups:
+                for item in group["entries"]:
+                    if item.get("reason") == "余额不足":
+                        elements.append({
+                            "tag": "markdown",
+                            "content": "<font color='red'>**余额不足**</font>",
+                            "text_size": "heading",
+                        })
+                    elements.append({"tag": "markdown", "content": (
+                        f"**{group['label']}**"
+                    )})
+                    elements.append({"tag": "div", "text": {"tag": "plain_text",
+                        "content": (
+                            f"租户：{item['name']}\n租户 ID：{item['id']}"
+                        )}})
+                    times = card_details.get("event_times")
+                    time_metrics = ([
+                        {"label": "观察开始", "value": times[0]},
+                        {"label": "观察结束", "value": times[1]},
+                    ] if times else [{
+                        "label": card_details["window_label"],
+                        "value": card_details["window"],
+                    }])
+                    for metrics in (time_metrics, item.get("metrics") or []):
+                        if not metrics:
+                            continue
+                        columns = []
+                        for metric in metrics:
+                            value = metric["value"]
+                            value = f"<font color='red'>**{value}**</font>" if metric.get("highlight") else f"**{value}**"
+                            columns.append({"tag": "column", "width": "weighted", "weight": 1,
+                                            "vertical_align": "center", "elements": [
+                                                {"tag": "markdown", "content": metric["label"]},
+                                                {"tag": "markdown", "content": value,
+                                                 "text_size": "heading"},
+                                            ]})
+                        elements.append({"tag": "column_set", "flex_mode": "stretch",
+                                         "background_style": "grey", "columns": columns})
+                    if not item.get("metrics") or group["label"] == "使用下降":
+                        elements.append({"tag": "div", "text": {
+                            "tag": "plain_text", "content": item["details"],
+                        }})
+                    if item.get("reason") == "余额不足":
+                        elements.append({"tag": "markdown", "content": (
+                            "**建议处理**\n检查账户余额及充值情况"
+                        )})
+                    elements.append({"tag": "hr"})
+                remaining = group["count"] - len(group["entries"])
+                if remaining:
+                    elements.append({"tag": "div", "text": {"tag": "plain_text",
+                                     "content": f"另有 {remaining} 位租户。"}})
+            elements.extend([{"tag": "div", "text": {
+                "tag": "plain_text", "content": (
+                    f"数据采集：{card_details['collected']}\n"
+                    f"数据源：{card_details['source']}"),
+            }}])
         if url:
             elements.extend([
                 {"tag": "hr"},
@@ -78,6 +200,28 @@ def _webhook_payload(provider_type, text):
                     }, "type": "primary", "url": url,
                 }]},
             ])
+        if groups:
+            converted = []
+            for element in elements:
+                if element["tag"] == "div":
+                    value = escape(element["text"]["content"])
+                    for char in "\\`*_{}[]()#+!|~":
+                        value = value.replace(char, "\\" + char)
+                    converted.append({"tag": "markdown", "content": value})
+                elif element["tag"] == "action":
+                    converted.append({
+                        "tag": "button", "type": "primary",
+                        "text": {"tag": "plain_text", "content": "查看经营看板 →"},
+                        "behaviors": [{"type": "open_url", "default_url": url}],
+                    })
+                else:
+                    converted.append(element)
+            return {"msg_type": "interactive", "card": {
+                "schema": "2.0",
+                "header": {"title": {"tag": "plain_text", "content": title},
+                           "template": color},
+                "body": {"elements": converted},
+            }}
         return {"msg_type": "interactive", "card": {
             "config": {"wide_screen_mode": True},
             "header": {"title": {"tag": "plain_text", "content": title},
@@ -156,6 +300,7 @@ def deliver_notification(delivery_id):
                 "payload": _webhook_payload(
                     provider_type,
                     delivery.payload.get("text", ""),
+                    delivery.payload.get("card_details"),
                 ),
                 "provider_type": provider_type,
             },
