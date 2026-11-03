@@ -289,6 +289,32 @@ class ExpiredSyncTests(TestCase):
         run.refresh_from_db()
         self.assertEqual(run.status, "interrupted")
 
+    def test_watchdog_scans_older_interrupted_runs_on_each_pass(self):
+        from agione_ops.tasks import recover_abandoned_native_syncs
+
+        runs = [
+            SyncRun(
+                connection=self.connection, initiated_by=self.user,
+                window_start=self.now - timedelta(days=7), window_end=self.now,
+                idempotency_key=f"agione-auto-{index}", request_hash="a" * 64,
+                credential_version=self.connection.credential_version,
+                config_version=self.connection.config_version,
+                grant_revision=self.grant.revision, lease_epoch=1,
+                status="interrupted", error_code="LEASE_EXPIRED",
+                finished_at=self.now - timedelta(seconds=index),
+            )
+            for index in range(201)
+        ]
+        SyncRun.objects.bulk_create(runs)
+        with patch("agione_ops.tasks.retry_abandoned_auto_sync") as retry:
+            recover_abandoned_native_syncs()
+            recover_abandoned_native_syncs()
+        self.assertEqual(retry.call_count, 402)
+        self.assertEqual(
+            sum(call.args[0] == runs[-1].pk for call in retry.call_args_list),
+            2,
+        )
+
     def test_abandoned_auto_run_retries_without_waiting_for_next_period(self):
         from agione_ops.tasks import retry_abandoned_auto_sync
 

@@ -1021,8 +1021,8 @@ def recover_abandoned_native_syncs():
         connection__source_kind="native", status="interrupted",
         error_code="LEASE_EXPIRED", idempotency_key__startswith="agione-auto-",
         finished_at__gte=timezone.now() - timedelta(days=1),
-    ).order_by("-finished_at").values_list("pk", flat=True)[:200]
-    for run_id in interrupted:
+    ).order_by("-finished_at").values_list("pk", flat=True)
+    for run_id in interrupted.iterator(chunk_size=200):
         retry_abandoned_auto_sync(run_id)
     from agione_ops.native_finance_refresh import recover_expired_finance
 
