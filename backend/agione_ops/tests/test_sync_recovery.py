@@ -611,6 +611,9 @@ class ExpiredSyncTests(TestCase):
         self.assertEqual(rules.inspection_gap["end"], original["end"])
 
     def test_gap_acknowledgement_requires_owner_and_current_range(self):
+        from django.core.exceptions import ValidationError
+
+        from agione_ops.models import InspectionGapAcknowledgement
         from agione_ops.tasks import _mark_auto_inspection_failed
 
         old = self.make_active()
@@ -645,6 +648,25 @@ class ExpiredSyncTests(TestCase):
         rules.refresh_from_db()
         self.assertEqual(rules.last_auto_status, "scheduled")
         self.assertEqual(client.post(url, gap, format="json").status_code, 400)
+
+        next_gap = {"start": (self.now - timedelta(days=2)).isoformat(),
+                    "end": (self.now - timedelta(days=1)).isoformat()}
+        NotificationRules.objects.filter(pk=rules.pk).update(
+            inspection_gap=next_gap,
+        )
+        with patch("django.utils.timezone.now", return_value=self.now):
+            self.assertEqual(client.post(url, next_gap, format="json").status_code, 200)
+        history = InspectionGapAcknowledgement.objects.filter(rules=rules)
+        self.assertEqual(history.count(), 2)
+        self.assertTrue(history.filter(gap_start=gap["start"],
+                                       gap_end=gap["end"]).exists())
+        with self.assertRaises(ValidationError):
+            history.update(gap_end=self.now)
+        response = client.get(
+            f"/api/v1/agione-ops/connections/{self.connection.pk}/"
+            "notification-rules/"
+        )
+        self.assertEqual(len(response.data["data"]["inspectionGapHistory"]), 2)
 
         other = get_user_model().objects.create_user(username="gap-other")
         for action in ("view_business", "run_sync"):

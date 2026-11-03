@@ -2,7 +2,7 @@
 
 import re
 from collections import defaultdict
-from datetime import timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from rest_framework import serializers
@@ -21,7 +21,7 @@ def acknowledge_inspection_gap(connection, user, start, end):
     from django.db import transaction
     from django.utils import timezone
 
-    from agione_ops.models import NotificationRules
+    from agione_ops.models import InspectionGapAcknowledgement, NotificationRules
 
     with transaction.atomic():
         rules = NotificationRules.objects.select_for_update().filter(
@@ -32,6 +32,12 @@ def acknowledge_inspection_gap(connection, user, start, end):
                 or gap.get("start") != start or gap.get("end") != end):
             raise ValidationError("巡检缺口已变化，请刷新后重新确认。")
         now = timezone.now().replace(microsecond=0)
+        InspectionGapAcknowledgement.objects.create(
+            rules=rules, acknowledged_by=user,
+            gap_start=datetime.fromisoformat(gap["start"]),
+            gap_end=datetime.fromisoformat(gap["end"]),
+            skipped_until=now, acknowledged_at=now,
+        )
         rules.inspection_gap = {
             **gap, "status": "acknowledged", "acknowledged_at": now.isoformat(),
             "skipped_until": now.isoformat(), "acknowledged_by": user.pk,
@@ -608,7 +614,9 @@ def analyze_completed_snapshot(scope_id, run_id):
         )
         prior = locked.last_analysis or {}
         if (trigger == "automatic"
-                and locked.last_inspection_at != config.last_inspection_at):
+                and (locked.last_inspection_at != config.last_inspection_at
+                     or (locked.last_inspection_at
+                         and end <= locked.last_inspection_at))):
             return prior
         older = prior.get("window_end", "") > end.isoformat()
         if older and trigger != "scheduled":

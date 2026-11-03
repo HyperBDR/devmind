@@ -576,6 +576,26 @@ class ImmutableModel(models.Model):
         raise ValidationError("Published data is immutable.")
 
 
+class InspectionGapAcknowledgement(ImmutableModel):
+    """Keep the actor and interval of each explicit gap acknowledgement."""
+
+    rules = models.ForeignKey(
+        NotificationRules, on_delete=models.CASCADE,
+        related_name="gap_acknowledgements",
+    )
+    acknowledged_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+    )
+    gap_start = models.DateTimeField()
+    gap_end = models.DateTimeField()
+    skipped_until = models.DateTimeField()
+    acknowledged_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "devmind_agione_gap_acknowledgement"
+        ordering = ["-acknowledged_at", "-id"]
+
+
 class DatasetVersion(ImmutableModel):
     """One complete immutable publication, never a partially visible sync."""
 

@@ -589,6 +589,12 @@ class NotificationRuleApiTests(TestCase):
             stack.enter_context(patch(
                 "agione_ops.tenant_directory.overrides_for", return_value={},
             ))
+            run.window_end = start - timedelta(minutes=5)
+            analyze_completed_snapshot(1, "run")
+            rules.refresh_from_db()
+            self.assertEqual(rules.last_inspection_at, start)
+            self.assertFalse(NotificationDelivery.objects.exists())
+            run.window_end = end
             with patch("agione_ops.tasks.deliver_notification.delay") as send:
                 with self.captureOnCommitCallbacks(execute=True):
                     analyze_completed_snapshot(1, "run")

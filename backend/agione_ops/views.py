@@ -221,6 +221,12 @@ class NotificationRulesAPIView(LocalAPIView):
             "recent_runs": recent_runs[:5],
             "configured": row is not None,
             "inspection_gap": row.inspection_gap if row else None,
+            "inspection_gap_history": list(
+                row.gap_acknowledgements.values(
+                    "gap_start", "gap_end", "acknowledged_at",
+                    "skipped_until", "acknowledged_by_id",
+                )[:20]
+            ) if row else [],
             "last_analysis": row.last_analysis if row else None,
             "delivery_status": {
                 "status": latest_delivery.status,

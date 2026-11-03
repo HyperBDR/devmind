@@ -13,7 +13,11 @@ test('rule settings show safe collection status and heartbeat', async ({ page })
       configured: true, channels: [], inspectionGap: {
         start: '2026-11-02T00:00:00Z', end: '2026-11-02T00:10:00Z',
         ...(acknowledged ? { status: 'acknowledged' } : {})
-      }, recentRuns: [{
+      }, inspectionGapHistory: [{
+        gapStart: '2026-11-01T00:00:00Z', gapEnd: '2026-11-01T01:00:00Z',
+        acknowledgedAt: '2026-11-01T02:00:00Z', skippedUntil: '2026-11-01T02:00:00Z',
+        acknowledgedById: 42
+      }], recentRuns: [{
         runId: 'test-run', trigger: 'automatic', status: 'interrupted',
         phase: 'interrupted', attempt: 1, errorCode: 'LEASE_EXPIRED',
         createdAt: '2026-11-03T00:49:00Z', heartbeatAt: '2026-11-03T00:51:00Z'
@@ -48,6 +52,8 @@ test('rule settings show safe collection status and heartbeat', async ({ page })
   page.once('dialog', prompt => prompt.accept())
   await dialog.getByRole('button', { name: '确认已人工核查' }).click()
   await expect(dialog.getByText('巡检存在缺口，请人工核查：')).not.toBeVisible()
+  await dialog.getByText('缺口确认记录（最近 20 条）').click()
+  await expect(dialog.getByText(/跳过至/)).toContainText('ID 42')
   await expect(dialog.getByText('自动刷新', { exact: true }).last()).not.toBeVisible()
   await dialog.getByText('最近采集任务').click()
   const row = dialog.locator('.recent-sync').first()
