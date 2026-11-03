@@ -21,6 +21,27 @@
     </div>
     <p>自动刷新只发送紧急事件；运营日报仍只在下方设置的时间发送。</p>
     <div v-if="autoStatus" class="notify-status"><span>{{ autoStatus }}</span></div>
+    <div v-if="financeStatus" class="notify-status"><span>{{ financeStatus }}</span></div>
+    <details v-if="recentRuns.length" class="recent-syncs">
+     <summary class="recent-syncs-heading"><strong>{{ locale.startsWith('en') ? 'Recent collection tasks' : '最近采集任务' }}</strong><span>{{ locale.startsWith('en') ? 'Latest 5' : '最近 5 条' }}</span></summary>
+     <div class="recent-sync-list">
+      <details v-for="run in recentRuns" :key="run.runId" class="recent-sync">
+       <summary class="recent-sync-row">
+        <strong>{{ runType(run.trigger) }}</strong>
+        <span class="recent-sync-status" :class="`status-${run.status}`">{{ runStatus(run.status) }}</span>
+        <time>{{ displayShortTime(run.createdAt) }}</time>
+        <span class="recent-sync-duration">{{ run.finishedAt ? runDuration(run.createdAt, run.finishedAt) : '—' }}</span>
+        <span class="recent-sync-more"><span class="when-closed">{{ locale.startsWith('en') ? 'Details' : '查看详情' }} ⌄</span><span class="when-open">{{ locale.startsWith('en') ? 'Hide' : '收起详情' }} ⌃</span></span>
+       </summary>
+       <div class="recent-sync-detail">
+        <span>{{ locale.startsWith('en') ? 'Started:' : '开始：' }} {{ displayTime(run.createdAt) }} · {{ locale.startsWith('en') ? 'Stage:' : '阶段：' }} {{ runPhase(run.phase) }}</span>
+        <span>{{ locale.startsWith('en') ? 'Last heartbeat:' : '最后心跳：' }} {{ displayTime(run.heartbeatAt) }} · {{ locale.startsWith('en') ? 'Attempts:' : '尝试：' }} {{ run.attempt }}</span>
+        <span v-if="run.finishedAt">{{ locale.startsWith('en') ? 'Duration:' : '耗时：' }} {{ runDuration(run.createdAt, run.finishedAt) }}</span>
+        <span v-if="run.errorCode">{{ locale.startsWith('en') ? 'Reason:' : '原因：' }} {{ runError(run.errorCode) }} ({{ run.errorCode }})</span>
+       </div>
+      </details>
+     </div>
+    </details>
    </section>
    <section class="notify-settings">
     <div class="notify-heading"><div><h3>通知设置</h3><p>分析完成后，将需要处理的问题发送给运营</p></div><label class="switch"><input v-model="draft.enabled" type="checkbox"><span>{{ draft.enabled ? '已启用' : '未启用' }}</span></label></div>
@@ -59,11 +80,19 @@ const defaults=notificationRuleDefaults
 const rulesDialog=ref(null),thresholds=ref({...defaults}),draft=ref({...defaults})
 const rulesError=ref(''),rulesLoading=ref(false),serverRules=ref(null)
 const channels=ref([])
+const recentRuns=computed(()=>serverRules.value?.recentRuns || [])
+const runType=value=>(locale.value.startsWith('en') ? {automatic:'Automatic refresh',scheduled:'Daily report',manual:'Manual refresh',finance:'Finance'} : {automatic:'自动刷新',scheduled:'日报采集',manual:'手动刷新',finance:'财务采集'})[value] || (locale.value.startsWith('en') ? 'Collection' : '数据采集')
+const runStatus=value=>(locale.value.startsWith('en') ? {queued:'Queued',running:'Collecting',retrying:'Retrying',succeeded:'Collected',failed:'Failed',interrupted:'Interrupted',dispatch_failed:'Dispatch failed',revoked:'Access revoked'} : {queued:'排队中',running:'采集中',retrying:'重试中',succeeded:'采集完成',failed:'失败',interrupted:'已中断',dispatch_failed:'派发失败',revoked:'权限已撤销'})[value] || (locale.value.startsWith('en') ? 'Unknown' : '状态待确认')
+const runPhase=value=>(locale.value.startsWith('en') ? {queued:'Queued',identity:'Verifying connection',calls:'Fetching requests',models:'Fetching models',staging:'Saving data',finance:'Processing finance',splitting:'Splitting periods',retrying:'Waiting to retry',succeeded:'Complete',failed:'Failed',interrupted:'Interrupted'} : {queued:'等待执行',identity:'验证连接',calls:'读取调用',models:'读取模型',staging:'保存数据',finance:'处理财务',splitting:'拆分时段',retrying:'等待重试',succeeded:'完成',failed:'失败',interrupted:'已中断'})[value] || value || (locale.value.startsWith('en') ? 'Unknown' : '待确认')
+const runError=value=>(locale.value.startsWith('en') ? {FINANCE_REFRESH_TIMEOUT:'Finance collection timed out',LEASE_EXPIRED:'Heartbeat expired',NATIVE_SYNC_DEADLINE:'Collection timed out',SOURCE_TIMEOUT:'Upstream request timed out',SOURCE_UNREACHABLE:'Upstream connection failed',SOURCE_RATE_LIMITED:'Upstream rate limit',DISPATCH_FAILED:'Task dispatch failed',SYNC_FAILED:'Collection error',ACCESS_REVOKED:'Access revoked'} : {FINANCE_REFRESH_TIMEOUT:'财务采集超时',LEASE_EXPIRED:'任务心跳超时，等待恢复',NATIVE_SYNC_DEADLINE:'采集超时',SOURCE_TIMEOUT:'上游接口超时',SOURCE_UNREACHABLE:'上游连接失败',SOURCE_RATE_LIMITED:'上游请求受限',DISPATCH_FAILED:'任务派发失败',SYNC_FAILED:'采集异常',ACCESS_REVOKED:'访问权限已撤销'})[value] || (locale.value.startsWith('en') ? 'Collection incomplete' : '采集未完成')
 const callPeriods=[{value:2,label:'每 2 小时'},{value:3,label:'每 3 小时'},{value:4,label:'每 4 小时'}]
 const dataPeriods=[{value:6,label:'每 6 小时'},{value:12,label:'每 12 小时'},{value:24,label:'每 24 小时'}]
 const channelOptions=computed(()=>[{value:null,label:'请选择通知渠道'},...channels.value.map(channel=>({value:channel.id,label:channel.name}))])
-function displayTime(value){if(!value)return '尚未成功';const date=new Date(value);return Number.isNaN(date.getTime())?'尚未成功':date.toLocaleString('zh-CN',{hour12:false})}
+function displayTime(value){const none=locale.value.startsWith('en')?'Unavailable':'暂无';if(!value)return none;const date=new Date(value);return Number.isNaN(date.getTime())?none:date.toLocaleString(locale.value.startsWith('en')?'en-GB':'zh-CN',{hour12:false,timeZone:'Asia/Shanghai'})}
+function displayShortTime(value){if(!value)return '—';const date=new Date(value);if(Number.isNaN(date.getTime()))return '—';const parts=Object.fromEntries(new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(date).map(({type,value})=>[type,value]));return `${parts.month}/${parts.day} ${parts.hour}:${parts.minute}`}
 const autoStatus=computed(()=>{const value=serverRules.value?.refreshStatus?.calls;if(!value)return '';return `最近执行：${value.status || '未运行'}；下次预计：${displayTime(value.nextAt)}`})
+const financeStatus=computed(()=>{const value=serverRules.value?.refreshStatus?.finance;if(!value)return '';const en=locale.value.startsWith('en');const labels=en?{ready:'Ready',queued:'Queued',running:'Collecting',retrying:'Retrying',failed:'Failed',not_run:'Not collected'}:{ready:'已完成',queued:'等待执行',running:'采集中',retrying:'重试中',failed:'失败',not_run:'尚未采集'};return `${en?'Finance':'财务采集'}：${labels[value.status] || value.status}${value.updatedAt ? ` · ${displayTime(value.updatedAt)}` : ''}${value.errorCode ? ` · ${runError(value.errorCode)} (${value.errorCode})` : ''}`})
+function runDuration(start,end){const seconds=Math.max(0,Math.round((new Date(end)-new Date(start))/1000));return Number.isFinite(seconds)?`${Math.floor(seconds/60)} ${locale.value.startsWith('en')?'min':'分'} ${seconds%60} ${locale.value.startsWith('en')?'sec':'秒'}`:'—'}
 const dailyStatus=computed(()=>{const value=serverRules.value?.dailyReport;if(!value)return '';return `今日日报：${dailyReportLabel(value)}${value.updatedAt ? ` · ${displayTime(value.updatedAt)}` : ''}`})
 const analysisStatus=computed(()=>{
  const value=serverRules.value?.lastAnalysis
@@ -162,5 +191,24 @@ input { width:80px; border:1px solid #dce3ee; border-radius:6px; padding:8px; }
 .schedule-time input { width:140px; padding:9px 12px; border:1px solid #dce3ee; border-radius:6px; color:#1b304d; background:#fff; }
 .notify-settings details { margin-top:18px; border-top:1px solid #edf1f6; padding-top:16px; } .notify-settings summary { cursor:pointer; font-size:13px; }
 .notify-status { display:flex; flex-wrap:wrap; gap:8px 16px; margin-top:14px; padding:10px 12px; border-radius:7px; background:#f4f7fb; color:#667b96; font-size:12px; } .recovery { justify-content:flex-start; }
+.notify-settings .recent-syncs { margin-top:16px; padding:0; border:1px solid #dce5f1; border-radius:8px; overflow:hidden; }
+.recent-syncs-heading { display:flex; align-items:center; gap:8px; padding:14px 16px; color:#1b304d; font-size:14px; cursor:pointer; }
+.recent-syncs-heading::before { content:'▸'; color:#71849e; }
+.recent-syncs[open] > .recent-syncs-heading::before { content:'▾'; }
+.recent-syncs-heading > span { margin-left:auto; color:#71849e; font-size:12px; }
+.recent-sync-list { border-top:1px solid #e6ecf4; }
+.notify-settings .recent-sync { margin:0; padding:0; border:0; }
+.notify-settings .recent-sync + .recent-sync { border-top:1px solid #edf1f6; }
+.recent-sync-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:12px 15px; color:#253c59; font-size:12px; cursor:pointer; list-style:none; }
+.recent-sync-row::-webkit-details-marker, .recent-syncs-heading::-webkit-details-marker { display:none; }
+.recent-sync-row strong { flex:1 1 80px; color:#1b304d; font-size:13px; }
+.recent-sync-status { padding:3px 7px; border-radius:4px; color:#657b96; background:#f1f4f8; white-space:nowrap; }
+.status-succeeded { color:#258c6b; background:#eaf8f2; }
+.status-failed, .status-interrupted, .status-revoked, .status-dispatch_failed { color:#d45454; background:#fff1f1; }
+.recent-sync-duration, .recent-sync-row time, .recent-sync-more { white-space:nowrap; }
+.recent-sync-more { color:#2864ed; }
+.recent-sync-more .when-open, .recent-sync[open] .when-closed { display:none; }
+.recent-sync[open] .when-open { display:inline; }
+.recent-sync-detail { display:grid; gap:4px; margin:0 15px 12px; padding:12px; border-radius:6px; background:#f5f8fd; color:#617894; font-size:12px; line-height:1.6; }
 footer { justify-content:flex-end; border-top:1px solid #e5ebf2; border-bottom:0; } footer button { padding:9px 14px; border:1px solid #dce3ee; border-radius:6px; background:#fff; cursor:pointer; } footer button.primary { background:#2864ed; border-color:#2864ed; color:#fff; }
 </style>

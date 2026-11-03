@@ -83,6 +83,26 @@ class NativeStagedRecord(models.Model):
         ]
 
 
+class NativeFinanceRun(models.Model):
+    """Durable status for one independently scheduled finance refresh."""
+
+    connection = models.ForeignKey("agione_ops.SourceConnection", on_delete=models.PROTECT)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    run = models.ForeignKey("agione_ops.SyncRun", on_delete=models.PROTECT)
+    generation = models.CharField(max_length=32, unique=True)
+    status = models.CharField(max_length=16, default="queued")
+    error_code = models.CharField(max_length=80, blank=True, default="")
+    attempt = models.PositiveSmallIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "devmind_agione_native_finance_run"
+        indexes = [models.Index(fields=["connection", "user", "-created_at"],
+                                name="dm_finance_history_idx")]
+
+
 class NativeFinanceProjection(models.Model):
     """Last authorized finance result and its independent refresh state."""
 

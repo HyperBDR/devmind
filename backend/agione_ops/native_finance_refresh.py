@@ -7,6 +7,7 @@ from datetime import timedelta
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.db.models import F
 from django.utils import timezone
 from rest_framework.exceptions import APIException
 
@@ -14,11 +15,42 @@ from agione_ops.models import SourceConnection, SyncRun
 from agione_ops.native_account_scope import FINANCE_SCOPE_VERSION
 from agione_ops.native_finance import unavailable_finance
 from agione_ops.native_sync_models import (
-    NativeFinanceProjection, NativePublishedSnapshot,
+    NativeFinanceProjection, NativeFinanceRun, NativePublishedSnapshot,
 )
 from agione_ops.permissions import connections_for, get_connection_for
 
 logger = logging.getLogger(__name__)
+
+
+def recover_expired_finance():
+    """Record finance jobs abandoned beyond the worker's hard time limit."""
+    cutoff = timezone.now() - timedelta(minutes=22)
+    ids = NativeFinanceProjection.objects.filter(
+        status__in=["queued", "running", "retrying"], updated_at__lt=cutoff,
+    ).values_list("pk", flat=True)[:200]
+    for pk in list(ids):
+        with transaction.atomic():
+            row = NativeFinanceProjection.objects.select_for_update().filter(
+                pk=pk, status__in=["queued", "running", "retrying"],
+                updated_at__lt=cutoff,
+            ).first()
+            if row is None:
+                continue
+            row.status = "failed"
+            row.error_code = "FINANCE_REFRESH_TIMEOUT"
+            row.save(update_fields=["status", "error_code", "updated_at"])
+            NativeFinanceRun.objects.filter(
+                connection_id=row.connection_id, user_id=row.user_id,
+                run_id=row.run_id, status__in=["queued", "running", "retrying"],
+            ).update(status="failed", error_code="FINANCE_REFRESH_TIMEOUT",
+                     finished_at=timezone.now())
+            from agione_ops.models import NotificationRules
+            from agione_ops.notification_delivery import notify_collection_failure
+
+            rules = NotificationRules.objects.select_related("connection").filter(
+                connection_id=row.connection_id, user_id=row.user_id,
+            ).first()
+            notify_collection_failure(rules, "finance", "FINANCE_REFRESH_TIMEOUT")
 
 
 def _operator(connection, user):
@@ -123,6 +155,15 @@ def schedule_finance(run_id):
             )
             row_id = row.pk
             generation = uuid.uuid4().hex
+            NativeFinanceRun.objects.filter(
+                connection=connection, user=user,
+                status__in=["queued", "running", "retrying"],
+            ).update(status="interrupted", error_code="FINANCE_REFRESH_TIMEOUT",
+                     finished_at=timezone.now())
+            NativeFinanceRun.objects.create(
+                connection=connection, user=user, run=run,
+                generation=generation,
+            )
 
             def dispatch():
                 try:
@@ -132,6 +173,10 @@ def schedule_finance(run_id):
                         pk=row_id, run_id=run.pk, status="queued",
                     ).update(status="failed", error_code="DISPATCH_FAILED",
                              updated_at=timezone.now())
+                    NativeFinanceRun.objects.filter(generation=generation).update(
+                        status="failed", error_code="DISPATCH_FAILED",
+                        finished_at=timezone.now(),
+                    )
                     logger.exception("Native finance dispatch failed")
 
             transaction.on_commit(dispatch)
@@ -147,12 +192,28 @@ def execute_finance(row_id, run_id, *, can_retry=False, checkpoint_scope=None):
     )
 
     started = time.perf_counter()
+
+    def owns_generation():
+        return not checkpoint_scope or NativeFinanceRun.objects.filter(
+            generation=checkpoint_scope, run_id=run_id, status="running",
+        ).exists()
+
     with transaction.atomic():
         row = NativeFinanceProjection.objects.select_for_update().filter(
             pk=row_id, run_id=run_id, status__in=["queued", "retrying"],
         ).select_related("connection", "operator", "run", "user").first()
         if row is None:
             return
+        if checkpoint_scope and not NativeFinanceRun.objects.filter(
+            generation=checkpoint_scope, run_id=run_id,
+            status__in=["queued", "retrying"],
+        ).exists():
+            if NativeFinanceRun.objects.filter(connection=row.connection, user=row.user).exists():
+                return
+            NativeFinanceRun.objects.create(
+                connection=row.connection, user=row.user, run_id=run_id,
+                generation=checkpoint_scope,
+            )
         queue_ms = max(0, round(
             (timezone.now() - row.updated_at).total_seconds() * 1000
         ))
@@ -160,6 +221,13 @@ def execute_finance(row_id, run_id, *, can_retry=False, checkpoint_scope=None):
         previous_digest = row.content_digest
         row.status = "running"
         row.save(update_fields=["status", "updated_at"])
+        if checkpoint_scope:
+            history = NativeFinanceRun.objects.filter(
+                generation=checkpoint_scope, run_id=run_id,
+                status__in=["queued", "retrying"],
+            )
+            history.filter(started_at__isnull=True).update(started_at=timezone.now())
+            history.update(status="running", attempt=F("attempt") + 1)
     try:
         user = get_user_model().objects.get(pk=row.user_id, is_active=True)
         connection = get_connection_for(
@@ -183,7 +251,8 @@ def execute_finance(row_id, run_id, *, can_retry=False, checkpoint_scope=None):
                 current = NativeFinanceProjection.objects.select_for_update().get(
                     pk=row_id,
                 )
-                if str(current.run_id) != str(run_id) or current.status != "running":
+                if (str(current.run_id) != str(run_id)
+                        or current.status != "running" or not owns_generation()):
                     return
                 active = get_connection_for(user, row.connection_id, "view_business")
                 authorize_native_run(row.run, active)
@@ -215,6 +284,7 @@ def execute_finance(row_id, run_id, *, can_retry=False, checkpoint_scope=None):
             if (
                 str(current.run_id) != str(run_id)
                 or current.status != "running"
+                or not owns_generation()
             ):
                 return
             connection = get_connection_for(
@@ -238,6 +308,10 @@ def execute_finance(row_id, run_id, *, can_retry=False, checkpoint_scope=None):
             current.save(update_fields=[
                 "data", "content_digest", "status", "error_code", "updated_at",
             ])
+            if checkpoint_scope:
+                NativeFinanceRun.objects.filter(
+                    generation=checkpoint_scope, status="running",
+                ).update(status="succeeded", error_code="", finished_at=timezone.now())
     except Exception as error:
         logger.exception("Native finance refresh failed")
         code = getattr(error, "code", "")
@@ -251,9 +325,32 @@ def execute_finance(row_id, run_id, *, can_retry=False, checkpoint_scope=None):
                    "updated_at": timezone.now()}
         if previous_data and previous_digest:
             updates.update(data=previous_data, content_digest=previous_digest)
-        changed = NativeFinanceProjection.objects.filter(
-            pk=row_id, run_id=run_id, status="running",
-        ).update(**updates)
+        with transaction.atomic():
+            current = NativeFinanceProjection.objects.select_for_update().filter(
+                pk=row_id, run_id=run_id, status="running",
+            ).first()
+            changed = 0
+            if current and owns_generation():
+                changed = NativeFinanceProjection.objects.filter(pk=row_id).update(
+                    **updates,
+                )
+        if checkpoint_scope and changed:
+            NativeFinanceRun.objects.filter(
+                generation=checkpoint_scope, status="running",
+            ).update(status="retrying" if retrying else "failed",
+                     error_code=updates["error_code"],
+                     finished_at=None if retrying else timezone.now())
+        if changed and not retrying:
+            try:
+                from agione_ops.models import NotificationRules
+                from agione_ops.notification_delivery import notify_collection_failure
+
+                rules = NotificationRules.objects.select_related("connection").filter(
+                    connection_id=row.connection_id, user_id=row.user_id,
+                ).first()
+                notify_collection_failure(rules, "finance", updates["error_code"])
+            except Exception:
+                logger.exception("Finance failure notification could not be queued")
         if retrying and changed:
             return code
     finally:
