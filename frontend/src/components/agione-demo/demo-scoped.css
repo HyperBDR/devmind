@@ -2463,6 +2463,11 @@
 .agione-demo .sidebar-connection-chevron{font-size:15px;color:#90a7c1;transition:transform .15s}
 .agione-demo .sidebar-connection-trigger[aria-expanded=true] .sidebar-connection-chevron{transform:rotate(180deg)}
 .agione-demo .sidebar-connection-menu{width:226px;padding:6px}
+.agione-demo .connection-menu-row{position:relative}
+.agione-demo .connection-menu-row [role=menuitemradio]{padding-right:38px}
+.agione-demo .connection-menu-row .connection-remove{position:absolute;right:6px;top:50%;transform:translateY(-50%);display:grid;place-items:center;width:28px;height:28px;border:0;border-radius:5px;background:transparent;color:#d1565f;cursor:pointer}
+.agione-demo .connection-menu-row .connection-remove:hover{background:#fff1f1;color:#c9303d}
+.agione-demo .connection-menu-row .connection-remove:focus-visible{outline:2px solid var(--blue)}
 .agione-demo .connection-menu-heading{padding:6px 8px 7px;color:var(--muted);font-size:11px;font-weight:600}
 .agione-demo .connection-menu-copy{min-width:0;flex:1}
 .agione-demo .connection-menu-copy b,.agione-demo .connection-menu-copy small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

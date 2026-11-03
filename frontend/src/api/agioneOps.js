@@ -39,6 +39,9 @@ export const agioneOpsApi = {
   disconnectPersonalConnection(id) {
     return apiClient.delete(`${base}/self-service/${encodeURIComponent(id)}/`)
   },
+  removePersonalConnection(id) {
+    return apiClient.post(`${base}/self-service/${encodeURIComponent(id)}/remove/`, {})
+  },
   grantConnection(id, userId, body) {
     return apiClient.put(
       `${connectionPath(id)}/grants/${encodeURIComponent(userId)}/`,

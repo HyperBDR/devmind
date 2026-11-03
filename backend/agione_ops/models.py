@@ -97,6 +97,7 @@ class SourceConnection(models.Model):
     )
     verified_at = models.DateTimeField(null=True, blank=True)
     enabled = models.BooleanField(default=False)
+    removed_at = models.DateTimeField(null=True, blank=True)
     credential_ciphertext = models.TextField(blank=True, default="")
     credential_version = models.PositiveBigIntegerField(default=1)
     key_id = models.CharField(max_length=80, blank=True, default="")

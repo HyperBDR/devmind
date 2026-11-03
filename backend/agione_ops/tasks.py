@@ -126,7 +126,8 @@ def deliver_notification(delivery_id):
         ).filter(
             Q(user__isnull=True) | Q(user=delivery.rules.user),
         ).first()
-        if not config.get("enabled") or channel is None:
+        if (delivery.rules.connection.removed_at is not None
+                or not config.get("enabled") or channel is None):
             delivery.status = "silenced"
             delivery.error_message = "通知规则已停用或渠道不可用。"
             delivery.save(update_fields=["status", "error_message"])
@@ -439,7 +440,11 @@ def start_initial_native_sync(connection, user):
 
     from agione_ops.models import ConnectionGrant
     from agione_ops.native_sync_models import NativePublishedSnapshot
+    from agione_ops.notification_rules import required_collection_days
     from agione_ops.permissions import has_action
+    from agione_ops.sync import submit_sync
+    from agione_ops.models import NotificationRules
+    from datetime import timedelta
 
     if not (getattr(settings, 'AGIONE_OPS_NATIVE_ENABLED', False)
             and connection.enabled and connection.source_kind == 'native'
@@ -447,13 +452,21 @@ def start_initial_native_sync(connection, user):
             and ConnectionGrant.objects.filter(connection=connection, user=user,
                                                 can_view=True, can_sync=True).exists()
             and not NativePublishedSnapshot.objects.filter(
-                version__connection=connection).exists()):
+                version__connection=connection,
+                version__run__config_version=connection.config_version,
+                version__run__credential_version=connection.credential_version,
+            ).exists()):
         return
     end = timezone.now().astimezone(ZoneInfo('Asia/Shanghai')).replace(
         hour=0, minute=0, second=0, microsecond=0,
     )
     try:
-        submit_recent_sync(connection, user, end)
+        rule = NotificationRules.objects.filter(connection=connection, user=user).first()
+        days = required_collection_days(rule.config if rule else {})
+        key = (f"agione-initial-{end.date().isoformat()}-{days}-"
+               f"{connection.config_version}-{connection.credential_version}")
+        submit_sync(connection, user, end - timedelta(days=days), end,
+                    "Asia/Shanghai", key)
     except APIException as error:
         logging.getLogger(__name__).info(
             'AGIOne initial collection skipped: %s',

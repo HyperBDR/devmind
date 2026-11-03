@@ -100,6 +100,9 @@ test('dynamic counts, pagination and semantic metric labels are natural English'
   assert.equal(workspaceText('2,731 次请求', 'en'), '2,731 requests')
   assert.equal(workspaceText('第 1 / 3 页 · 每页 2 位', 'en'), 'Page 1 of 3 · 2 customers per page')
   assert.equal(workspaceText('Credit 入账', 'zh-CN'), 'Credit 入账')
+  assert.equal(workspaceText('✓ 调用变化已完成比较', 'en'), '✓ Usage comparison complete')
+  assert.equal(workspaceText('6 位客户调用量下降', 'en'), '6 customers with declining usage')
+  assert.equal(workspaceText('连续 9 天无调用', 'en'), 'For 9 days without requests')
 })
 
 test('business terminology stays consistent across finance and diagnostics', () => {

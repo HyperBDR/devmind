@@ -85,9 +85,8 @@
             @keydown="menuKeys"
           >
             <div class="connection-menu-heading">AGIOne 连接</div>
+            <div v-for="item in state.configurableConnections" :key="item.id" class="connection-menu-row">
             <button
-              v-for="item in state.configurableConnections"
-              :key="item.id"
               role="menuitemradio"
               :aria-checked="item.id === state.connectionId"
               :disabled="!item.enabled && !item.selfManaged"
@@ -104,6 +103,12 @@
               </span>
               <span v-if="item.id === state.connectionId" class="connection-check">✓</span>
             </button>
+            <button v-if="item.selfManaged" type="button" class="connection-remove"
+              :aria-label="`删除 AGIOne ${item.platform === 'cc' ? 'CC' : 'Pro'} ${accountLabel(item.principalKind)} 连接`"
+              @click.stop="openDeleteConnection(item)">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v5M14 11v5" /></svg>
+            </button>
+            </div>
             <div class="connection-menu-actions">
               <button
                 v-if="connection?.selfManaged"
@@ -967,6 +972,9 @@
       @changed="connectionChanged"
       @disconnected="connectionDisconnected"
     />
+    <DeleteConnectionDialog ref="deleteConnectionDialog" :connection-name="deleteConnectionName"
+      description="删除后连接不再显示，密钥将被清除；历史数据和通知规则会保留。重新添加需重新输入密钥。"
+      :busy="deleteBusy" :error="deleteError" @confirm="confirmDeleteConnection" />
     <RequestDrawer
       :state="work"
       @close="workspace.closeDrawer"
@@ -1167,6 +1175,7 @@ import { claimOriginalDialog, releaseOriginalDialog } from '@/utils/agioneDialog
 import ScopeDialog from '@/components/agione-demo/ScopeDialog.vue'
 import DashboardSignals from '@/components/agione-demo/DashboardSignals.vue'
 import NativeConnectionDialog from '@/components/agione-demo/NativeConnectionDialog.vue'
+import DeleteConnectionDialog from '@/components/agione-demo/DeleteConnectionDialog.vue'
 import '@/components/agione-demo/demo-scoped.css'
 import '@/components/agione-demo/english-typography.css'
 
@@ -1381,6 +1390,13 @@ const connectionControl = ref(null)
 const connectionTrigger = ref(null)
 const connectionMenu = ref(null)
 const nativeConnectionDialog = ref(null)
+const deleteConnectionDialog = ref(null)
+const deletingConnection = ref(null)
+const deleteBusy = ref(false)
+const deleteError = ref('')
+const deleteConnectionName = computed(() => deletingConnection.value
+  ? `AGIOne ${deletingConnection.value.platform === 'cc' ? 'CC' : 'Pro'} · ${accountLabel(deletingConnection.value.principalKind)}`
+  : '')
 const menuOpen = ref(false)
 const menuPosition = ref({})
 const dateDialog = ref(null)
@@ -1599,6 +1615,29 @@ function openNewConnection() {
 function openConnectionSettings(item) {
   menuOpen.value = false
   nativeConnectionDialog.value?.open(item)
+}
+async function openDeleteConnection(item) {
+  menuOpen.value = false
+  deletingConnection.value = item
+  deleteError.value = ''
+  await nextTick()
+  deleteConnectionDialog.value?.open()
+}
+async function confirmDeleteConnection() {
+  if (!deletingConnection.value || deleteBusy.value) return
+  deleteBusy.value = true
+  deleteError.value = ''
+  const oldId = state.value.connectionId
+  const removedId = deletingConnection.value.id
+  try {
+    await agioneOpsApi.removePersonalConnection(removedId)
+    deleteConnectionDialog.value?.close()
+    await controller.load(oldId === removedId ? '' : oldId)
+  } catch (_) {
+    deleteError.value = '删除失败，请检查连接权限或稍后重试。'
+  } finally {
+    deleteBusy.value = false
+  }
 }
 async function connectionChanged(id) {
   await controller.load(id)

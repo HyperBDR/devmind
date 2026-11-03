@@ -62,7 +62,7 @@ def connections_for(user, action="view_business"):
     """Return only explicitly authorized connection rows for an action."""
 
     require_action(user, action)
-    queryset = SourceConnection.objects.all()
+    queryset = SourceConnection.objects.filter(removed_at__isnull=True)
     if getattr(settings, "AGIONE_OPS_NATIVE_ONLY", False):
         queryset = queryset.filter(source_kind="native")
     if action == "manage_connections":

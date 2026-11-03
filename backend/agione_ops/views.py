@@ -24,7 +24,9 @@ from agione_ops.encryption import (
     CredentialConfigurationError,
     CredentialDecryptionError,
 )
-from agione_ops.models import ConnectionGrant, SourceConnection, SyncRun
+from agione_ops.models import (
+    ConnectionGrant, NotificationDelivery, SourceConnection, SyncRun,
+)
 from agione_ops.permissions import (
     authorize_run,
     connections_for,
@@ -330,6 +332,7 @@ class ConnectionListCreateAPIView(LocalAPIView):
             queryset = SourceConnection.objects.filter(
                 pk__in=grants.filter(scope).values("connection_id")
             )
+        queryset = queryset.filter(removed_at__isnull=True)
         paginator = LimitOffsetPagination()
         paginator.default_limit = 50
         paginator.max_limit = 100
@@ -438,31 +441,40 @@ class SelfServiceConnectionListCreateAPIView(LocalAPIView):
                 raise AgioneOpsError(
                     "SELF_SERVICE_CONNECTION_EXISTS", status_code=409
                 )
-            if existing.exists():
+            if existing.filter(removed_at__isnull=True).exists():
                 raise AgioneOpsError(
                     "SELF_SERVICE_CONNECTION_DISABLED", status_code=409
                 )
             label = "Pro" if values["platform"] == "pro" else "CC"
             role = identity["principal_kind"].title()
-            connection = SourceConnection(
-                name=f"AGIOne {label} · {role}",
-                platform=values["platform"],
-                principal_kind=identity["principal_kind"],
-                source_kind="native",
-                endpoint=endpoint,
-                expected_tenant_id=identity["tenant_id"],
-                verified_tenant_id=identity["tenant_id"],
-                verified_at=timezone.now(),
-                enabled=True,
-                created_by=request.user,
-            )
+            connection = existing.select_for_update().first()
+            if connection is None:
+                connection = SourceConnection(
+                    name=f"AGIOne {label} · {role}",
+                    platform=values["platform"],
+                    principal_kind=identity["principal_kind"],
+                    source_kind="native",
+                    endpoint=endpoint,
+                    expected_tenant_id=identity["tenant_id"],
+                    verified_tenant_id=identity["tenant_id"],
+                    verified_at=timezone.now(),
+                    enabled=True,
+                    created_by=request.user,
+                )
+            else:
+                connection.endpoint = endpoint
+                connection.enabled = True
+                connection.removed_at = None
             connection.set_credentials(credentials)
             connection.save()
-            ConnectionGrant.objects.create(
+            if connection.verified_at is None:
+                connection.verified_tenant_id = identity["tenant_id"]
+                connection.verified_at = timezone.now()
+                connection.save(update_fields=["verified_tenant_id", "verified_at"])
+            ConnectionGrant.objects.get_or_create(
                 connection=connection,
                 user=request.user,
-                can_view=True,
-                can_sync=True,
+                defaults={"can_view": True, "can_sync": True},
             )
         connection.refresh_from_db()
         from agione_ops.tasks import start_initial_native_sync
@@ -488,7 +500,7 @@ class SelfServiceConnectionDetailAPIView(LocalAPIView):
             connection = get_object_or_404(
                 SourceConnection.objects.select_for_update(),
                 pk=connection_id, created_by=request.user,
-                source_kind="native",
+                source_kind="native", removed_at__isnull=True,
             )
             get_object_or_404(grants, connection_id=connection.pk)
             return connection
@@ -498,6 +510,7 @@ class SelfServiceConnectionDetailAPIView(LocalAPIView):
             pk=connection_id,
             created_by=request.user,
             source_kind="native",
+            removed_at__isnull=True,
         )
 
     def patch(self, request, connection_id):
@@ -544,6 +557,31 @@ class SelfServiceConnectionDetailAPIView(LocalAPIView):
         return Response(status=204)
 
 
+class SelfServiceConnectionRemoveAPIView(SelfServiceConnectionDetailAPIView):
+    """Remove a personal connection while retaining its history."""
+
+    http_method_names = ["post", "options"]
+
+    def post(self, request, connection_id):
+        EmptySerializer(data=request.data).is_valid(raise_exception=True)
+        with transaction.atomic():
+            connection = self._owned(request, connection_id, lock=True)
+            from agione_ops.sync import interrupt_connection_run
+
+            interrupt_connection_run(connection)
+            connection.enabled = False
+            connection.removed_at = timezone.now()
+            connection.credential_ciphertext = ""
+            connection.key_id = ""
+            connection.save(update_fields=[
+                "enabled", "removed_at", "credential_ciphertext", "key_id",
+            ])
+            NotificationDelivery.objects.filter(
+                rules__connection=connection, status__in=["pending", "retrying"],
+            ).update(status="silenced", error_message="连接已删除。")
+        return Response(status=204)
+
+
 class ConnectionDetailAPIView(LocalAPIView):
     """Update configuration only; there is deliberately no destructive API."""
 
@@ -552,7 +590,7 @@ class ConnectionDetailAPIView(LocalAPIView):
         with transaction.atomic():
             connection = get_object_or_404(
                 SourceConnection.objects.select_for_update(),
-                pk=connection_id,
+                pk=connection_id, removed_at__isnull=True,
             )
             serializer = ConnectionSerializer(
                 connection,
