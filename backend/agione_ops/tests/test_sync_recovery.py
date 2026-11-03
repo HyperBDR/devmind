@@ -306,6 +306,35 @@ class ExpiredSyncTests(TestCase):
         self.assertEqual(submit.call_args.args[2:4], (run.window_start, run.window_end))
         self.assertTrue(submit.call_args.args[-1].endswith("-retry-1"))
 
+    @override_settings(AGIONE_OPS_NATIVE_ENABLED=True)
+    def test_unclaimed_queued_runs_stop_after_three_expirations(self):
+        from agione_ops.sync import recover_expired_run
+        from agione_ops.tasks import retry_abandoned_auto_sync
+
+        run = self.make_active()
+        SyncRun.objects.filter(pk=run.pk).update(
+            status="queued", attempt=0, heartbeat_at=None,
+            created_at=self.now - timedelta(minutes=1),
+        )
+        NotificationRules.objects.create(
+            connection=self.connection, user=self.user,
+            config={"auto_refresh_enabled": True},
+            last_auto_started_at=self.now - timedelta(minutes=8),
+        )
+        for index in range(3):
+            current = self.now + timedelta(minutes=index * 6)
+            with patch("django.utils.timezone.now", return_value=current):
+                SourceConnection.objects.filter(pk=self.connection.pk).update(
+                    lease_expires_at=current - timedelta(minutes=4),
+                )
+                self.assertTrue(recover_expired_run(self.connection.pk, run.pk))
+                self.assertEqual(retry_abandoned_auto_sync(run.pk), index < 2, f"expiration {index}")
+                if index < 2:
+                    run = SyncRun.objects.get(
+                        idempotency_key=f"agione-auto-20261103T004900Z-7-retry-{index + 1}",
+                    )
+        self.assertEqual(SyncRun.objects.filter(connection=self.connection).count(), 3)
+
     def test_abandoned_auto_run_stops_after_three_attempts(self):
         from agione_ops.tasks import retry_abandoned_auto_sync
 

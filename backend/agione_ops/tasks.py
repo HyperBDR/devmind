@@ -433,7 +433,10 @@ def submit_recent_sync(connection, user, end, *, scheduled=False):
                 continue
     next_retry = max(retry_numbers, default=0) + 1
     if scheduled:
-        prior_attempts = max(max(run.attempt, 1) for run in runs)
+        prior_attempts = max(
+            max(run.attempt, 1) + int(run.attempt > 0 and run.heartbeat_at is None)
+            for run in runs
+        )
         if prior_attempts >= 3:
             return latest, False
         delay = _SCHEDULE_RETRY_DELAYS.get(next_retry)
@@ -765,7 +768,10 @@ def retry_abandoned_auto_sync(run_id):
             .order_by("-created_at", "-pk"))
         if not runs or runs[0].pk != candidate.pk:
             return False
-        prior_attempts = max(max(run.attempt, 1) for run in runs)
+        prior_attempts = max(
+            max(run.attempt, 1) + int(run.attempt > 0 and run.heartbeat_at is None)
+            for run in runs
+        )
         if prior_attempts >= 3:
             from agione_ops.notification_delivery import notify_collection_failure
 
