@@ -1030,6 +1030,26 @@ def test_month_end_shard_clips_query_and_checks_precision():
     assert exc.value.code == "SOURCE_TIME_PRECISION_CHANGED"
 
 
+def test_initial_sync_after_credentials_change_ignores_old_snapshot(native):
+    from agione_ops.tasks import start_initial_native_sync
+
+    run, result = collect(native)
+    assert result["status"] == "succeeded"
+    connection = native["connection"]
+    connection.refresh_from_db()
+    start_initial_native_sync(connection, native["user"])
+    assert SyncRun.objects.filter(connection=connection).count() == 1
+    connection.set_credentials({"access_key": "new", "secret_key": "new"})
+    connection.save()
+    connection.refresh_from_db()
+    start_initial_native_sync(connection, native["user"])
+    current = SyncRun.objects.exclude(pk=run.pk).get(connection=connection)
+    assert current.status == "queued"
+    assert current.credential_version == connection.credential_version
+    start_initial_native_sync(connection, native["user"])
+    assert SyncRun.objects.filter(connection=connection).count() == 2
+
+
 def test_recent_prefetch_uses_authorized_grant(native, monkeypatch):
     from agione_ops import tasks
 
