@@ -422,6 +422,104 @@ class ExpiredSyncTests(TestCase):
                          self.now + timedelta(minutes=5))
         self.assertEqual(submit.call_count, 1)
 
+    def test_newer_publication_supersedes_old_recovery_and_alert(self):
+        from agione_ops.models import DatasetVersion
+        from agione_ops.native_sync_models import NativePublishedSnapshot
+        from agione_ops.tasks import retry_abandoned_auto_sync
+
+        old = self.make_active()
+        self.connection.refresh_from_db()
+        SyncRun.objects.filter(pk=old.pk).update(
+            status="interrupted", error_code="LEASE_EXPIRED", attempt=3,
+            finished_at=self.now - timedelta(minutes=5),
+        )
+        rules = NotificationRules.objects.create(
+            connection=self.connection, user=self.user,
+            config={"auto_refresh_enabled": True, "enabled": True,
+                    "channel_id": str(uuid4())},
+        )
+        newer = SyncRun.objects.create(
+            connection=self.connection, initiated_by=self.user,
+            window_start=old.window_start + timedelta(minutes=10),
+            window_end=old.window_end + timedelta(minutes=10),
+            idempotency_key="newer-manual", request_hash="b" * 64,
+            credential_version=self.connection.credential_version,
+            config_version=self.connection.config_version,
+            grant_revision=self.grant.revision, lease_epoch=2,
+            status="running",
+        )
+        version = DatasetVersion.objects.create(
+            connection=self.connection, run=newer,
+            window_start=newer.window_start, window_end=newer.window_end,
+        )
+        with patch.object(NativePublishedSnapshot, "clean"):
+            NativePublishedSnapshot.objects.create(
+                version=version, data={"test": True}, content_digest="a" * 64,
+            )
+        SyncRun.objects.filter(pk=newer.pk).update(status="succeeded")
+        self.assertTrue(NativePublishedSnapshot.objects.filter(
+            version__connection=self.connection,
+            version__run__status="succeeded",
+            version__run__config_version=self.connection.config_version,
+            version__run__credential_version=self.connection.credential_version,
+            version__published_at__gte=self.now - timedelta(minutes=5),
+            version__window_end__gte=old.window_end,
+        ).exists())
+        for attempt in (1, 3):
+            SyncRun.objects.filter(pk=old.pk).update(
+                attempt=attempt, recovery_handled=False,
+            )
+            old.refresh_from_db()
+            self.assertEqual(old.finished_at, self.now - timedelta(minutes=5))
+            connection = SourceConnection.objects.get(pk=old.connection_id)
+            self.assertEqual(connection.config_version, newer.config_version)
+            self.assertEqual(connection.credential_version,
+                             newer.credential_version)
+            with patch("agione_ops.sync.submit_sync") as submit:
+                self.assertFalse(retry_abandoned_auto_sync(old.pk))
+            submit.assert_not_called()
+            old.refresh_from_db()
+            self.assertTrue(old.recovery_handled)
+        self.assertFalse(NotificationDelivery.objects.filter(rules=rules).exists())
+
+    def test_older_publication_does_not_suppress_recovery(self):
+        from agione_ops.models import DatasetVersion
+        from agione_ops.native_sync_models import NativePublishedSnapshot
+        from agione_ops.tasks import retry_abandoned_auto_sync
+
+        old = self.make_active()
+        self.connection.refresh_from_db()
+        SyncRun.objects.filter(pk=old.pk).update(
+            status="interrupted", error_code="LEASE_EXPIRED", attempt=1,
+            finished_at=self.now - timedelta(minutes=5),
+        )
+        NotificationRules.objects.create(
+            connection=self.connection, user=self.user,
+            config={"auto_refresh_enabled": True},
+        )
+        earlier = SyncRun.objects.create(
+            connection=self.connection, initiated_by=self.user,
+            window_start=old.window_start - timedelta(days=1),
+            window_end=old.window_end - timedelta(days=1),
+            idempotency_key="historical-manual", request_hash="c" * 64,
+            credential_version=self.connection.credential_version,
+            config_version=self.connection.config_version,
+            grant_revision=self.grant.revision, lease_epoch=2,
+            status="running",
+        )
+        version = DatasetVersion.objects.create(
+            connection=self.connection, run=earlier,
+            window_start=earlier.window_start, window_end=earlier.window_end,
+        )
+        with patch.object(NativePublishedSnapshot, "clean"):
+            NativePublishedSnapshot.objects.create(
+                version=version, data={"test": True}, content_digest="a" * 64,
+            )
+        SyncRun.objects.filter(pk=earlier.pk).update(status="succeeded")
+        with patch("agione_ops.sync.submit_sync", return_value=(old, True)) as submit:
+            self.assertTrue(retry_abandoned_auto_sync(old.pk))
+        submit.assert_called_once()
+
     @override_settings(AGIONE_OPS_NATIVE_ENABLED=True)
     def test_unclaimed_queued_runs_stop_after_three_expirations(self):
         from agione_ops.sync import recover_expired_run

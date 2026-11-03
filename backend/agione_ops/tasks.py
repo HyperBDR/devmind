@@ -951,6 +951,7 @@ def retry_abandoned_auto_sync(run_id):
     from rest_framework.exceptions import APIException
 
     from agione_ops.models import NotificationRules, SourceConnection, SyncRun
+    from agione_ops.native_sync_models import NativePublishedSnapshot
     from agione_ops.sync import submit_sync
 
     candidate = SyncRun.objects.filter(pk=run_id).first()
@@ -976,6 +977,19 @@ def retry_abandoned_auto_sync(run_id):
         connection = SourceConnection.objects.select_for_update().get(
             pk=candidate.connection_id,
         )
+        superseded = NativePublishedSnapshot.objects.filter(
+            version__connection=connection,
+            version__run__status="succeeded",
+            version__run__config_version=connection.config_version,
+            version__run__credential_version=connection.credential_version,
+            version__published_at__gte=(
+                candidate.finished_at or candidate.created_at
+            ),
+            version__window_end__gte=candidate.window_end,
+        ).exists()
+        if superseded:
+            SyncRun.objects.filter(pk=run_id).update(recovery_handled=True)
+            return False
         runs = list(SyncRun.objects.filter(
             connection=connection, initiated_by_id=candidate.initiated_by_id,
         ).filter(Q(idempotency_key=base) | Q(idempotency_key__startswith=base + "-retry-"))
