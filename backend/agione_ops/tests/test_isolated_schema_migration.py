@@ -23,6 +23,7 @@ def private_schema_connection(django_db_blocker):
         {
             "ENGINE": "django.db.backends.sqlite3",
             "NAME": ":memory:",
+            "OPTIONS": {},
             "AUTOCOMMIT": True,
             "ATOMIC_REQUESTS": False,
         }
@@ -209,7 +210,7 @@ def test_full_migration_from_initial_history(private_schema_connection, legacy):
         make_legacy_marker(connection)
     executor = MigrationExecutor(connection)
     target = executor.loader.graph.leaf_nodes("agione_ops")
-    assert target == [("agione_ops", "0020_sourceconnection_removed_at")]
+    assert target == [("agione_ops", "0024_inspectiongapacknowledgement")]
     executor.migrate(target)
     executor = MigrationExecutor(connection)
     assert all(node in executor.loader.applied_migrations for node in target)
@@ -222,7 +223,8 @@ def test_full_migration_from_empty_database(django_db_blocker):
     alias = "agione_schema_fresh_memory"
     assert alias not in connections.databases
     config = deepcopy(connections.databases["default"])
-    config.update({"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"})
+    config.update({"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:",
+                   "OPTIONS": {}})
     connections.databases[alias] = config
     with django_db_blocker.unblock():
         connection = connections[alias]
@@ -231,7 +233,9 @@ def test_full_migration_from_empty_database(django_db_blocker):
             assert not executor.loader.applied_migrations
             target = executor.loader.graph.leaf_nodes("agione_ops")
             executor.migrate(target)
-            assert target == [("agione_ops", "0020_sourceconnection_removed_at")]
+            assert target == [
+                ("agione_ops", "0024_inspectiongapacknowledgement")
+            ]
             assert TABLES <= tables(connection)
             assert all(node in MigrationExecutor(connection).loader.applied_migrations
                        for node in target)
@@ -239,3 +243,38 @@ def test_full_migration_from_empty_database(django_db_blocker):
             connection.close()
             del connections[alias]
             connections.databases.pop(alias)
+
+
+def test_migration_preserves_existing_gap_acknowledgement(
+    private_schema_connection,
+):
+    connection = private_schema_connection
+    executor = MigrationExecutor(connection)
+    previous = [("agione_ops", "0023_notificationrules_inspection_gap")]
+    executor.migrate(previous)
+    apps = executor.loader.project_state(previous).apps
+    user_model = apps.get_model("auth", "User")
+    source_model = apps.get_model("agione_ops", "SourceConnection")
+    rules_model = apps.get_model("agione_ops", "NotificationRules")
+    user = user_model.objects.using(connection.alias).create(username="gap-owner")
+    source = source_model.objects.using(connection.alias).create(
+        name="Gap", platform="pro", principal_kind="provider", created_by=user,
+    )
+    rules = rules_model.objects.using(connection.alias).create(
+        connection=source, user=user,
+        inspection_gap={
+            "status": "acknowledged", "start": "2026-10-01T00:00:00+00:00",
+            "end": "2026-10-02T00:00:00+00:00",
+            "acknowledged_at": "2026-10-03T00:00:00+00:00",
+            "skipped_until": "2026-10-03T00:00:00+00:00",
+            "acknowledged_by": user.pk,
+        },
+    )
+    target = [("agione_ops", "0024_inspectiongapacknowledgement")]
+    executor = MigrationExecutor(connection)
+    executor.migrate(target)
+    apps = executor.loader.project_state(target).apps
+    history = apps.get_model("agione_ops", "InspectionGapAcknowledgement")
+    entry = history.objects.using(connection.alias).get(rules_id=rules.pk)
+    assert entry.acknowledged_by_id == user.pk
+    assert entry.gap_start.isoformat() == "2026-10-01T00:00:00+00:00"

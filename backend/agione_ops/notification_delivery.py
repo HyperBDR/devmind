@@ -15,6 +15,51 @@ from agione_ops.models import NotificationDelivery, NotificationIssue
 logger = logging.getLogger(__name__)
 
 
+def notify_inspection_gap(rules, gap):
+    """Record one notification for an uncovered inspection interval."""
+    if not rules.config.get("enabled") or not rules.config.get("channel_id"):
+        return False
+    identity = f"inspection-gap:{rules.pk}:{gap['start']}:{gap['end']}"
+    key = hashlib.sha256(identity.encode()).hexdigest()
+    start = datetime.fromisoformat(gap["start"]).astimezone(
+        ZoneInfo("Asia/Shanghai")
+    ).strftime("%Y-%m-%d %H:%M:%S")
+    end = datetime.fromisoformat(gap["end"]).astimezone(
+        ZoneInfo("Asia/Shanghai")
+    ).strftime("%Y-%m-%d %H:%M:%S")
+    text = (f"【AGIOne 巡检数据缺口】{rules.connection.name}\n"
+            f"未完整巡检：{start} 至 {end}（北京时间）\n"
+            "采集范围超过 31 天上限，请人工核查该时段。")
+    delivery, created = NotificationDelivery.objects.get_or_create(
+        event_key=key, defaults={"rules": rules, "issue_signature": key,
+                                 "kind": "alert", "payload": {"text": text}},
+    )
+    if created:
+        transaction.on_commit(lambda: dispatch_analysis_notifications([delivery]))
+    return created
+
+
+def notify_collection_failure(rules, domain, error_code):
+    """Notify once per local day and collection domain after final failure."""
+    if not rules or not rules.config.get("enabled") or not rules.config.get("channel_id"):
+        return False
+    day = timezone.now().astimezone(ZoneInfo("Asia/Shanghai")).date()
+    identity = f"collection-failure:{rules.pk}:{domain}:{day}"
+    key = hashlib.sha256(identity.encode()).hexdigest()
+    label = "财务数据" if domain == "finance" else "调用数据"
+    text = (f"【AGIOne 采集异常】{label}更新失败\n"
+            f"数据源：{rules.connection.name}\n"
+            f"原因代码：{error_code or 'UNKNOWN'}\n"
+            "如有上次成功的数据，将继续保留；请检查连接并查看采集状态。")
+    delivery, created = NotificationDelivery.objects.get_or_create(
+        event_key=key, defaults={"rules": rules, "issue_signature": key,
+                                 "kind": "alert", "payload": {"text": text}},
+    )
+    if created:
+        transaction.on_commit(lambda: dispatch_analysis_notifications([delivery]))
+    return created
+
+
 def _parse_time(value):
     try:
         return datetime.fromisoformat(str(value)).astimezone(

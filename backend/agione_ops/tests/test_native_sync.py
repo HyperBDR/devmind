@@ -334,10 +334,12 @@ def test_two_daily_shards_are_fetched_concurrently(native, settings):
     )
     assert len(snapshot.data["rows"]) == 2
 
+@pytest.mark.parametrize("interrupted", [False, True])
 def test_deadline_allows_new_run_to_reuse_completed_shard(
     native,
     monkeypatch,
     settings,
+    interrupted,
 ):
     from types import SimpleNamespace
     from agione_ops import native_sync
@@ -356,10 +358,17 @@ def test_deadline_allows_new_run_to_reuse_completed_shard(
     run.refresh_from_db()
     assert run.error_code == "NATIVE_SYNC_DEADLINE"
     assert run.native_shards.filter(status="succeeded").count() == 1
+    if interrupted:
+        SyncRun.objects.filter(pk=run.pk).update(
+            status="interrupted", error_code="LEASE_EXPIRED",
+        )
     clock[0] = 0
     native["mutation"] = None
     before = len(native["calls"])
-    _, result = collect(native)
+    retry_run = submit(native)
+    if interrupted:
+        SyncRun.objects.filter(pk=retry_run.pk).update(attempt=1)
+    _, result = collect(native, retry_run)
     assert result["status"] == "succeeded"
     logs = [p for path, p in native["calls"][before:]
             if path.endswith("call-logs")]
@@ -691,7 +700,7 @@ def test_transient_finance_failure_is_queued_for_retry(native, settings, monkeyp
 def test_finance_task_stops_retrying_after_three_failures(
     native, settings, monkeypatch,
 ):
-    from agione_ops.native_sync_models import NativeFinanceProjection
+    from agione_ops.native_sync_models import NativeFinanceProjection, NativeFinanceRun
     from agione_ops.tasks import refresh_native_finance
 
     settings.AGIONE_OPS_FINANCE_REFRESH_ON_SYNC = False
@@ -705,6 +714,7 @@ def test_finance_task_stops_retrying_after_three_failures(
     )
     run, _ = collect(native)
     row = NativeFinanceProjection.objects.get(run=run)
+    generation = NativeFinanceRun.objects.get(run=run).generation
     reader = Mock(side_effect=AgioneOpsError("SOURCE_TIMEOUT", status_code=504))
     monkeypatch.setattr("agione_ops.native_queries.collect_native_finance", reader)
     from celery.exceptions import Retry
@@ -716,16 +726,83 @@ def test_finance_task_stops_retrying_after_three_failures(
             if attempt < 2:
                 with pytest.raises(Retry):
                     refresh_native_finance.run(
-                        row.pk, str(run.pk), "test-generation",
+                        row.pk, str(run.pk), generation,
                     )
             else:
-                refresh_native_finance.run(row.pk, str(run.pk), "test-generation")
+                refresh_native_finance.run(row.pk, str(run.pk), generation)
         finally:
             refresh_native_finance.pop_request()
     row.refresh_from_db()
     assert reader.call_count == 3
     assert row.status == "failed"
     assert row.error_code == "SOURCE_TIMEOUT"
+    history = NativeFinanceRun.objects.get(generation=generation)
+    assert history.status == "failed"
+    assert history.attempt == 3
+    assert history.started_at is not None
+    assert history.finished_at is not None
+
+
+def test_expired_finance_is_marked_failed(native, settings):
+    from django.utils import timezone
+
+    from agione_ops.native_finance_refresh import recover_expired_finance
+    from agione_ops.native_sync_models import NativeFinanceProjection, NativeFinanceRun
+
+    settings.AGIONE_OPS_FINANCE_REFRESH_ON_SYNC = False
+    operator = SourceConnection.objects.create(
+        name="Operator", platform="pro", principal_kind="operator",
+        source_kind="native", endpoint="https://fake-native.example",
+        expected_tenant_id="101", enabled=True, created_by=native["user"],
+    )
+    ConnectionGrant.objects.create(connection=operator, user=native["user"], can_view=True)
+    run, _ = collect(native)
+    row = NativeFinanceProjection.objects.get(run=run)
+    NativeFinanceProjection.objects.filter(pk=row.pk).update(
+        status="running", updated_at=timezone.now() - timedelta(minutes=25),
+    )
+    recover_expired_finance()
+    row.refresh_from_db()
+    history = NativeFinanceRun.objects.get(run=run)
+    assert row.status == "failed"
+    assert history.status == "failed"
+    assert history.error_code == "FINANCE_REFRESH_TIMEOUT"
+    assert history.finished_at is not None
+
+
+def test_old_finance_failure_cannot_overwrite_new_generation(
+    native, settings, monkeypatch,
+):
+    from agione_ops.native_finance_refresh import execute_finance
+    from agione_ops.native_sync_models import NativeFinanceProjection, NativeFinanceRun
+
+    settings.AGIONE_OPS_FINANCE_REFRESH_ON_SYNC = False
+    operator = SourceConnection.objects.create(
+        name="Operator", platform="pro", principal_kind="operator",
+        source_kind="native", endpoint="https://fake-native.example",
+        expected_tenant_id="101", enabled=True, created_by=native["user"],
+    )
+    ConnectionGrant.objects.create(connection=operator, user=native["user"], can_view=True)
+    run, _ = collect(native)
+    row = NativeFinanceProjection.objects.get(run=run)
+    old = NativeFinanceRun.objects.get(run=run)
+
+    def replace_and_fail(*args, **kwargs):
+        NativeFinanceRun.objects.filter(pk=old.pk).update(status="interrupted")
+        NativeFinanceRun.objects.create(
+            connection=row.connection, user=row.user, run=run,
+            generation=uuid.uuid4().hex, status="running",
+        )
+        NativeFinanceProjection.objects.filter(pk=row.pk).update(
+            status="running", error_code="NEW_RUN",
+        )
+        raise AgioneOpsError("SOURCE_TIMEOUT", status_code=504)
+
+    monkeypatch.setattr("agione_ops.native_queries.collect_native_finance", replace_and_fail)
+    execute_finance(row.pk, str(run.pk), checkpoint_scope=old.generation)
+    row.refresh_from_db()
+    assert row.status == "running"
+    assert row.error_code == "NEW_RUN"
 
 
 def test_fast_balance_is_visible_then_previous_finance_is_restored_on_failure(

@@ -2,10 +2,11 @@
 
 import re
 from collections import defaultdict
-from datetime import timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from rest_framework import serializers
+from rest_framework.exceptions import ValidationError
 
 
 _SCHEDULED_RUN_PATTERN = re.compile(
@@ -13,6 +14,49 @@ _SCHEDULED_RUN_PATTERN = re.compile(
     r"(?:-retry-\d+)?$"
 )
 _AUTOMATIC_RUN_PATTERN = re.compile(r"^agione-(?:prefetch|auto)-")
+
+
+def acknowledge_inspection_gap(connection, user, start, end):
+    """Record an explicit decision to skip uninspected history until now."""
+    from django.db import transaction
+    from django.utils import timezone
+
+    from agione_ops.models import InspectionGapAcknowledgement, NotificationRules
+
+    with transaction.atomic():
+        rules = NotificationRules.objects.select_for_update().filter(
+            connection=connection, user=user,
+        ).first()
+        gap = rules.inspection_gap if rules else None
+        if (not gap or gap.get("status") == "acknowledged"
+                or gap.get("start") != start or gap.get("end") != end):
+            raise ValidationError("巡检缺口已变化，请刷新后重新确认。")
+        now = timezone.now().replace(microsecond=0)
+        InspectionGapAcknowledgement.objects.create(
+            rules=rules, acknowledged_by=user,
+            gap_start=datetime.fromisoformat(gap["start"]),
+            gap_end=datetime.fromisoformat(gap["end"]),
+            skipped_until=now, acknowledged_at=now,
+        )
+        rules.inspection_gap = {
+            **gap, "status": "acknowledged", "acknowledged_at": now.isoformat(),
+            "skipped_until": now.isoformat(), "acknowledged_by": user.pk,
+        }
+        rules.last_inspection_at = now
+        rules.last_auto_started_at = now
+        rules.last_auto_error_code = ""
+        rules.last_auto_status = (
+            "scheduled" if rules.config.get("auto_refresh_enabled")
+            else "disabled"
+        )
+        if rules.config.get("auto_refresh_enabled"):
+            rules.next_auto_refresh_at = now
+        rules.save(update_fields=[
+            "inspection_gap", "last_inspection_at", "last_auto_started_at",
+            "last_auto_error_code",
+            "last_auto_status", "next_auto_refresh_at",
+        ])
+        return rules.inspection_gap
 
 
 def scheduled_date_from_key(idempotency_key):
@@ -569,6 +613,11 @@ def analyze_completed_snapshot(scope_id, run_id):
             pk=config.pk,
         )
         prior = locked.last_analysis or {}
+        if (trigger == "automatic"
+                and (locked.last_inspection_at != config.last_inspection_at
+                     or (locked.last_inspection_at
+                         and end <= locked.last_inspection_at))):
+            return prior
         older = prior.get("window_end", "") > end.isoformat()
         if older and trigger != "scheduled":
             return prior

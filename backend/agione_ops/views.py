@@ -160,6 +160,7 @@ class NotificationRulesAPIView(LocalAPIView):
         from agione_ops.native_sync_models import (
             NativeAccountScope,
             NativeFinanceProjection,
+            NativeFinanceRun,
         )
 
         connection = get_connection_for(request.user, connection_id)
@@ -195,9 +196,37 @@ class NotificationRulesAPIView(LocalAPIView):
             connection=connection,
             user=request.user,
         ).first()
+        recent_runs = [
+            {**run_payload(run), "created_at": run.created_at,
+             "finished_at": run.finished_at,
+             "trigger": ("automatic" if run.idempotency_key.startswith("agione-auto-")
+                         else "scheduled" if run.idempotency_key.startswith("agione-scheduled-")
+                         else "manual")}
+            for run in SyncRun.objects.filter(
+                connection=connection, initiated_by=request.user,
+            ).order_by("-created_at")[:5]
+        ]
+        recent_runs.extend({
+            "run_id": f"finance-{item.pk}", "trigger": "finance",
+            "status": item.status, "phase": "finance",
+            "created_at": item.started_at or item.created_at,
+            "finished_at": item.finished_at, "heartbeat_at": None,
+            "attempt": item.attempt, "error_code": item.error_code,
+        } for item in NativeFinanceRun.objects.filter(
+            connection=connection, user=request.user,
+        ).order_by("-created_at")[:5])
+        recent_runs.sort(key=lambda item: item["created_at"], reverse=True)
         return Response({
             **serializer.validated_data,
+            "recent_runs": recent_runs[:5],
             "configured": row is not None,
+            "inspection_gap": row.inspection_gap if row else None,
+            "inspection_gap_history": list(
+                row.gap_acknowledgements.values(
+                    "gap_start", "gap_end", "acknowledged_at",
+                    "skipped_until", "acknowledged_by_id",
+                )[:20]
+            ) if row else [],
             "last_analysis": row.last_analysis if row else None,
             "delivery_status": {
                 "status": latest_delivery.status,
@@ -309,6 +338,20 @@ class NotificationRulesAPIView(LocalAPIView):
             defaults=defaults,
         )
         return Response(config)
+
+
+class InspectionGapAcknowledgeAPIView(LocalAPIView):
+    """Acknowledge the current gap only for its authorized owner."""
+
+    def post(self, request, connection_id):
+        from agione_ops.notification_rules import acknowledge_inspection_gap
+
+        connection = get_connection_for(request.user, connection_id, "run_sync")
+        gap = acknowledge_inspection_gap(
+            connection, request.user, request.data.get("start"),
+            request.data.get("end"),
+        )
+        return Response({"inspection_gap": gap})
 
 
 class ConnectionListCreateAPIView(LocalAPIView):

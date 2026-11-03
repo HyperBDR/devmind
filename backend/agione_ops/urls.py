@@ -26,6 +26,11 @@ urlpatterns = [
         name="agione-ops-notification-rules",
     ),
     path(
+        "connections/<uuid:connection_id>/inspection-gap/acknowledge/",
+        views.InspectionGapAcknowledgeAPIView.as_view(),
+        name="agione-ops-inspection-gap-acknowledge",
+    ),
+    path(
         "connections/<uuid:connection_id>/tenant-classifications/",
         views.TenantClassificationListAPIView.as_view(),
         name="agione-ops-tenant-classifications",

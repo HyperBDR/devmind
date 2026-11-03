@@ -345,6 +345,7 @@ class NotificationRules(models.Model):
     last_auto_success_at = models.DateTimeField(null=True, blank=True)
     next_auto_refresh_at = models.DateTimeField(null=True, blank=True)
     last_inspection_at = models.DateTimeField(null=True, blank=True)
+    inspection_gap = models.JSONField(null=True, blank=True)
     last_auto_status = models.CharField(max_length=24, default="idle")
     last_auto_error_code = models.CharField(max_length=64, blank=True, default="")
     updated_at = models.DateTimeField(auto_now=True)
@@ -477,6 +478,8 @@ class SyncRun(models.Model):
     error_code = models.CharField(max_length=80, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     finished_at = models.DateTimeField(null=True, blank=True)
+    recovery_handled = models.BooleanField(default=False)
+    recovery_next_check_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "devmind_agione_sync_run"
@@ -571,6 +574,26 @@ class ImmutableModel(models.Model):
 
     def delete(self, *args, **kwargs):
         raise ValidationError("Published data is immutable.")
+
+
+class InspectionGapAcknowledgement(ImmutableModel):
+    """Keep the actor and interval of each explicit gap acknowledgement."""
+
+    rules = models.ForeignKey(
+        NotificationRules, on_delete=models.CASCADE,
+        related_name="gap_acknowledgements",
+    )
+    acknowledged_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+    )
+    gap_start = models.DateTimeField()
+    gap_end = models.DateTimeField()
+    skipped_until = models.DateTimeField()
+    acknowledged_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "devmind_agione_gap_acknowledgement"
+        ordering = ["-acknowledged_at", "-id"]
 
 
 class DatasetVersion(ImmutableModel):
@@ -737,6 +760,7 @@ from agione_ops.snapshot_store_models import ImmutableDemoSnapshot
 from agione_ops.native_sync_models import (
     NativeAccountScope,
     NativeFinanceProjection,
+    NativeFinanceRun,
     NativePublishedSnapshot,
     NativeSnapshotLease,
     NativeStagedRecord,
