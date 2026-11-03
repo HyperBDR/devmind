@@ -1,6 +1,7 @@
 """Verify durable AGIOne notification delivery and recovery behavior."""
 
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
@@ -17,6 +18,8 @@ from agione_ops.models import (
     SourceConnection,
 )
 from agione_ops.notification_delivery import (
+    _card_details,
+    _notification_text,
     delivery_events,
     enqueue_analysis_notifications,
 )
@@ -31,6 +34,132 @@ ZONE = ZoneInfo("Asia/Shanghai")
 
 class NotificationDeliveryUnitTests(TestCase):
     """Cover alert and recovery event derivation without transport calls."""
+
+    def test_large_daily_card_stays_within_signed_webhook_limit(self):
+        import requests
+
+        rules = SimpleNamespace(
+            config={"analysis_days": 7, "inactivity_days": 7},
+            connection=SimpleNamespace(name="数据源"),
+        )
+        findings = []
+        for reason in ("continuous_failure", "balance_failure", "decline", "inactive"):
+            for index in range(3):
+                findings.append({
+                    "customer_id": str(index) * 40,
+                    "customer_name": "租" * 160,
+                    "reasons": [reason],
+                    "failure_count": 12,
+                    "balance_failure_count": 1,
+                    "event_request_count": 12,
+                    "current_request_count": 10,
+                    "previous_request_count": 100,
+                    "decline_percent": 90,
+                })
+        event = {"kind": "alert", "findings": findings}
+        current = {"window_end": "2026-11-03T00:00:00+08:00"}
+        text = _notification_text(rules, event, current, "scheduled")
+        details = _card_details(rules, event, current, "scheduled")
+        payload = _webhook_payload("feishu", text, details)
+        payload.update(timestamp=9999999999, sign="x" * 44)
+        request = requests.Request("POST", "https://example.com", json=payload)
+        self.assertLessEqual(len(request.prepare().body), 20000)
+        for finding in findings:
+            finding["customer_name"] = "租" * 500
+        text = _notification_text(rules, event, current, "scheduled")
+        details = _card_details(rules, event, current, "scheduled")
+        payload = _webhook_payload("feishu", text, details)
+        payload.update(timestamp=9999999999, sign="x" * 44)
+        request = requests.Request("POST", "https://example.com", json=payload)
+        self.assertLessEqual(len(request.prepare().body), 20000)
+        card = payload["card"]
+        self.assertEqual(card["schema"], "2.0")
+        self.assertIn("运营日报", card["header"]["title"]["content"])
+        elements = card["body"]["elements"]
+        content = "\n".join(item.get("content", "") for item in elements)
+        for label in ("持续调用失败", "余额不足失败", "使用下降", "长期无调用"):
+            self.assertIn(label, content)
+        self.assertIn("另有", content)
+        panels = [item for item in elements if item["tag"] == "column_set"]
+        self.assertIn("blue", [item["background_style"] for item in panels])
+        self.assertIn("grey", [item["background_style"] for item in panels])
+
+    def test_extremely_long_feishu_text_is_bounded(self):
+        import requests
+
+        payload = _webhook_payload("feishu", "异常提醒\n" + "租" * 30000)
+        payload.update(timestamp=9999999999, sign="x" * 44)
+        request = requests.Request("POST", "https://example.com", json=payload)
+        self.assertLessEqual(len(request.prepare().body), 20000)
+        self.assertIn("内容过长已精简", payload["card"]["elements"][0]["text"]["content"])
+
+    def test_daily_card_groups_findings_and_shows_range_once(self):
+        details = {
+            "window_label": "统计范围", "window": "11 月 2 日—11 月 2 日",
+            "collected": "11 月 3 日 11:48，北京时间", "source": "Provider",
+            "groups": [
+                {"label": "持续调用失败", "count": 1, "entries": [{
+                    "name": "a@example.com", "id": "1",
+                    "details": "失败 144 次，成功 0 次；已识别原因：余额不足。",
+                }]},
+                {"label": "长期无调用", "count": 118, "entries": [{
+                    "name": "b@example.com", "id": "2",
+                    "details": "连续 7 天无调用。",
+                }]},
+            ],
+        }
+        message = "【AGIOne 运营日报】发现 119 项需要关注"
+        card = _webhook_payload("feishu", message, details)["card"]
+        self.assertEqual(card["header"]["title"]["content"], message)
+        content = "\n".join(
+            item.get("content", "") for item in card["body"]["elements"]
+        )
+        self.assertIn("持续调用失败 · 1 位租户", content)
+        self.assertIn("长期无调用 · 118 位租户", content)
+        panels = [item for item in card["body"]["elements"]
+                  if item["tag"] == "column_set"]
+        self.assertEqual(panels[0]["background_style"], "grey")
+        self.assertEqual(panels[1]["background_style"], "blue")
+        self.assertIn("另有 117 位租户", content)
+        headings = [item for item in card["body"]["elements"]
+                    if item.get("text_size") == "heading"]
+        self.assertEqual(len(headings), 2)
+        self.assertEqual(content.count("统计范围"), 1)
+
+    def test_structured_card_groups_events_and_keeps_times_and_links(self):
+        details = {
+            "window_label": "事件观察", "window": "11 月 3 日 12:49—14:49",
+            "event_times": ["11 月 3 日 12:49", "11 月 3 日 14:49"],
+            "collected": "11 月 3 日 14:49，北京时间", "source": "Pro · Provider",
+            "groups": [{"label": "持续调用失败", "count": 1, "entries": [{
+                "name": "user@example.com", "id": "123", "reason": "余额不足",
+                "details": "失败 12 次，成功 0 次；已识别原因：余额不足。",
+                "metrics": [{"label": "失败次数", "value": "12 次", "highlight": True},
+                            {"label": "成功次数", "value": "0 次"}],
+            }]}],
+        }
+        message = "【AGIOne 实时异常提醒】\n查看全部线索 → https://example.com/agione"
+        card = _webhook_payload("feishu", message, details)["card"]
+        self.assertEqual(card["schema"], "2.0")
+        self.assertEqual(card["header"]["title"]["content"], "【重点关注】AGIOne 异常提醒")
+        self.assertEqual(card["header"]["template"], "blue")
+        elements = card["body"]["elements"]
+        content = "\n".join(e.get("content", "") for e in elements)
+        for value in ("持续调用失败", "user@example.com", "检查账户余额"):
+            self.assertIn(value, content)
+        self.assertLess(content.index("余额不足"), content.index("持续调用失败"))
+        self.assertEqual(elements[0]["text_size"], "heading")
+        panels = [e for e in elements if e["tag"] == "column_set"]
+        self.assertEqual([e["background_style"] for e in panels], ["grey", "grey"])
+        times = [c["elements"][1]["content"] for c in panels[0]["columns"]]
+        self.assertIn("12:49", times[0])
+        self.assertIn("14:49", times[1])
+        values = [c["elements"][1]["content"] for c in panels[1]["columns"]]
+        self.assertIn("<font color='red'>**12 次**</font>", values[0])
+        self.assertIn("0 次", values[1])
+        self.assertEqual(panels[1]["columns"][1]["elements"][1]["text_size"], "heading")
+        self.assertEqual(elements[-1]["behaviors"][0]["default_url"], "https://example.com/agione")
+        self.assertEqual(_webhook_payload("wecom", message, details)["markdown"]["content"], message)
 
     def test_feishu_card_keeps_detail_and_safe_dashboard_link(self):
         message = (
@@ -382,6 +511,9 @@ class NotificationDeliveryIntegrationTests(TestCase):
         self.assertEqual(len(created), 1)
         self.assertIn("实时异常提醒", created[0].payload["text"])
         self.assertNotIn("使用下降", created[0].payload["text"])
+        groups = created[0].payload["card_details"]["groups"]
+        self.assertEqual([group["label"] for group in groups], ["持续调用失败"])
+        self.assertEqual(groups[0]["entries"][0]["reason"], "余额不足")
         self.assertTrue(NotificationDelivery.objects.exists())
         self.assertTrue(NotificationIssue.objects.exists())
         delay.assert_called_once_with(created[0].pk)
