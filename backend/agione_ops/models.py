@@ -357,6 +357,23 @@ class NotificationRules(models.Model):
         )]
 
 
+class InspectionDecision(models.Model):
+    """Durable outcome of one automatic inspection."""
+
+    rules = models.ForeignKey(
+        NotificationRules, on_delete=models.CASCADE, related_name="inspections",
+    )
+    run = models.OneToOneField(
+        "SyncRun", on_delete=models.CASCADE, related_name="inspection_decision",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    details = models.JSONField(default=dict)
+
+    class Meta:
+        db_table = "devmind_agione_inspection_decision"
+        ordering = ["-created_at", "-pk"]
+
+
 class NotificationDelivery(models.Model):
     """Durable, deduplicated delivery state for one analysis event."""
 

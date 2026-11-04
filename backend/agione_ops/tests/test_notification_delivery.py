@@ -500,7 +500,40 @@ class NotificationDeliveryIntegrationTests(TestCase):
         delay.assert_called_once_with(created[0].pk)
 
     @patch("agione_ops.tasks.deliver_notification.delay")
+    def test_automatic_inspection_records_queued_and_suppressed_decisions(self, delay):
+        first = {}
+        created = enqueue_analysis_notifications(
+            self.rules, {}, self.analysis, trigger="automatic", decision=first,
+        )
+        self.assertEqual(first["outcome"], "queued")
+        self.assertEqual(first["deliveries"], [created[0].pk])
+        self.assertEqual(first["issue_count"], 2)
+        second = {}
+        enqueue_analysis_notifications(
+            self.rules, self.analysis, self.analysis,
+            trigger="automatic", decision=second,
+        )
+        self.assertEqual(second["outcome"], "repeat_interval")
+        self.assertTrue(all(item["decision"] == "repeat_interval"
+                            for item in second["issues"]))
+        self.assertFalse(second["deliveries"])
+        self.assertEqual(delay.call_count, 1)
+
+    def test_disabled_notifications_still_report_detected_issues(self):
+        self.rules.config["enabled"] = False
+        decision = {}
+        enqueue_analysis_notifications(
+            self.rules, {}, self.analysis, trigger="automatic", decision=decision,
+        )
+        self.assertEqual(decision["outcome"], "notifications_disabled")
+        self.assertEqual(decision["issue_count"], 2)
+        self.assertTrue(all(item["decision"] == "notifications_disabled"
+                            for item in decision["issues"]))
+
+    @patch("agione_ops.tasks.deliver_notification.delay")
     def test_automatic_refresh_sends_only_urgent_notification(self, delay):
+        self.analysis["inspection_start"] = "2026-10-28T18:00:00+08:00"
+        self.analysis["inspection_end"] = "2026-10-29T00:00:00+08:00"
         created = enqueue_analysis_notifications(
             self.rules,
             {},
@@ -514,6 +547,13 @@ class NotificationDeliveryIntegrationTests(TestCase):
         groups = created[0].payload["card_details"]["groups"]
         self.assertEqual([group["label"] for group in groups], ["持续调用失败"])
         self.assertEqual(groups[0]["entries"][0]["reason"], "余额不足")
+        details = created[0].payload["card_details"]
+        self.assertIn("10 月 28 日 18:00", details["inspection"])
+        self.assertIn("巡检覆盖：", created[0].payload["text"])
+        payload = _webhook_payload("feishu", created[0].payload["text"], details)
+        body = str(payload["card"]["body"]["elements"])
+        self.assertIn("巡检覆盖", body)
+        self.assertIn("18:00", body)
         self.assertTrue(NotificationDelivery.objects.exists())
         self.assertTrue(NotificationIssue.objects.exists())
         delay.assert_called_once_with(created[0].pk)

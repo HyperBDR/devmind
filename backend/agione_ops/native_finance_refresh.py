@@ -348,7 +348,11 @@ def execute_finance(row_id, run_id, *, can_retry=False, checkpoint_scope=None):
                 rules = NotificationRules.objects.select_related("connection").filter(
                     connection_id=row.connection_id, user_id=row.user_id,
                 ).first()
-                notify_collection_failure(rules, "finance", updates["error_code"])
+                notify_collection_failure(
+                    rules, "finance", code or updates["error_code"],
+                    diagnostic=getattr(error, "diagnostic", None),
+                    run_id=run_id,
+                )
             except Exception:
                 logger.exception("Finance failure notification could not be queued")
         if retrying and changed:

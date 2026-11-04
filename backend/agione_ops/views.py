@@ -216,10 +216,31 @@ class NotificationRulesAPIView(LocalAPIView):
             connection=connection, user=request.user,
         ).order_by("-created_at")[:5])
         recent_runs.sort(key=lambda item: item["created_at"], reverse=True)
+        inspections = list(row.inspections.all()[:20]) if row else []
+        delivery_ids = {
+            pk for inspection in inspections
+            for pk in inspection.details.get("deliveries", [])
+            if type(pk) is int
+        }
+        delivery_states = {
+            item.pk: {
+                "status": item.status, "attempts": item.attempts,
+                "sent_at": item.sent_at, "next_retry_at": item.next_retry_at,
+            }
+            for item in row.deliveries.filter(pk__in=delivery_ids)
+        } if row else {}
         return Response({
             **serializer.validated_data,
             "recent_runs": recent_runs[:5],
             "configured": row is not None,
+            "inspection_history": [{
+                "run_id": str(item.run_id), "created_at": item.created_at,
+                **item.details,
+                "deliveries": [
+                    delivery_states[pk] for pk in
+                    item.details.get("deliveries", []) if pk in delivery_states
+                ],
+            } for item in inspections],
             "inspection_gap": row.inspection_gap if row else None,
             "inspection_gap_history": list(
                 row.gap_acknowledgements.values(

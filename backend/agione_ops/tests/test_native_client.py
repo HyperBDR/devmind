@@ -1,7 +1,10 @@
 """Mock-only verification of DevMind's native upstream transport."""
 
 import base64
+import errno
 import hashlib
+import socket
+import ssl
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
 from types import SimpleNamespace
@@ -307,6 +310,18 @@ def test_non_json_body_is_not_emitted():
     assert "PRIVATE" not in str(error.value)
 
 
+@pytest.mark.parametrize("status", [404, 503])
+def test_http_status_survives_even_for_non_json_error(status):
+    with client(lambda request: httpx.Response(status, text="PRIVATE")) as source:
+        with pytest.raises(AgioneOpsError) as error:
+            source.identity()
+    assert error.value.code == "SOURCE_NON_JSON"
+    assert error.value.diagnostic == {
+        "http_status": status, "stage": "identity",
+    }
+    assert "PRIVATE" not in str(error.value.diagnostic)
+
+
 def test_stream_limit_applies_without_content_length(monkeypatch):
     monkeypatch.setattr("agione_ops.native_client.MAX_BYTES", 32)
 
@@ -341,7 +356,12 @@ def test_large_declared_response_is_rejected_without_reading():
         (httpx.ConnectError("PRIVATE"), "SOURCE_UNREACHABLE"),
     ],
 )
-def test_httpx_errors_are_sanitized(failure, code):
+def test_httpx_errors_are_sanitized(failure, code, monkeypatch):
+    logs = []
+    monkeypatch.setattr(
+        "agione_ops.native_client.logger.warning",
+        lambda *args: logs.append(args),
+    )
     def handler(request):
         raise failure
 
@@ -349,6 +369,80 @@ def test_httpx_errors_are_sanitized(failure, code):
         source.identity()
     assert error.value.code == code
     assert "PRIVATE" not in str(error.value)
+    assert error.value.diagnostic["stage"] == "identity"
+    assert error.value.diagnostic["network"] in {"read_timeout", "connection"}
+    assert type(failure).__name__ in str(logs)
+    assert "PRIVATE" not in str(logs)
+
+
+def test_dns_lookup_failure_is_retryable_and_sanitized(monkeypatch):
+    logs = []
+    monkeypatch.setattr(
+        "agione_ops.native_client.logger.warning",
+        lambda *args: logs.append(args),
+    )
+    def resolver(host):
+        raise OSError("PRIVATE DNS DETAILS")
+
+    with NativeClient(
+        connection(), transport=httpx.MockTransport(lambda request: response()),
+        resolver=resolver,
+    ) as source, pytest.raises(AgioneOpsError) as error:
+        source.identity()
+    assert error.value.code == "SOURCE_UNREACHABLE"
+    assert error.value.diagnostic == {"network": "dns", "stage": "identity"}
+    assert "OSError" in str(logs)
+    assert "PRIVATE" not in str(logs)
+
+
+@pytest.mark.parametrize(
+    "cause,network",
+    [
+        (ConnectionRefusedError(errno.ECONNREFUSED, "PRIVATE"),
+         "connection_refused"),
+        (ConnectionResetError(errno.ECONNRESET, "PRIVATE"),
+         "connection_reset"),
+        (OSError(errno.ENETUNREACH, "PRIVATE"), "network_unreachable"),
+        (OSError(errno.EHOSTUNREACH, "PRIVATE"), "host_unreachable"),
+        (ssl.SSLCertVerificationError("PRIVATE"), "tls_certificate"),
+        (ssl.SSLError("PRIVATE"), "tls"),
+    ],
+)
+def test_request_failure_classifies_nested_exceptions(cause, network):
+    def handler(request):
+        try:
+            raise cause
+        except Exception as inner:
+            raise httpx.ConnectError("PRIVATE") from inner
+
+    with client(handler) as source, pytest.raises(AgioneOpsError) as error:
+        source.identity()
+    assert error.value.diagnostic == {"network": network, "stage": "identity"}
+    assert "PRIVATE" not in str(error.value.diagnostic)
+
+
+@pytest.mark.parametrize(
+    "code,network",
+    [(socket.EAI_NONAME, "dns_not_found"), (socket.EAI_AGAIN, "dns_temporary")],
+)
+def test_dns_failure_distinguishes_structured_resolver_errors(code, network):
+    def resolver(host):
+        raise socket.gaierror(code, "PRIVATE")
+
+    with NativeClient(connection(), resolver=resolver) as source:
+        with pytest.raises(AgioneOpsError) as error:
+            source.identity()
+    assert error.value.diagnostic == {"network": network, "stage": "identity"}
+
+
+@pytest.mark.parametrize("code,network", [(10, "tls_cert_expired"),
+                                         (62, "tls_hostname")])
+def test_known_certificate_verification_codes(code, network):
+    from agione_ops.native_client import _network_failure
+
+    failure = ssl.SSLCertVerificationError("PRIVATE")
+    failure.verify_code = code
+    assert _network_failure(failure) == network
 
 
 def test_feature_disabled_and_missing_credentials(settings):

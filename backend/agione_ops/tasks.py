@@ -18,6 +18,10 @@ _RETRYABLE_SCHEDULE_ERRORS = frozenset({
     "DISPATCH_FAILED", "LEASE_EXPIRED",
 })
 _SCHEDULE_RETRY_DELAYS = {1: 5, 2: 15}
+_AUTO_TRANSIENT_ERRORS = frozenset({
+    "SOURCE_TIMEOUT", "SOURCE_UNREACHABLE", "SOURCE_UNAVAILABLE",
+    "SOURCE_RATE_LIMITED",
+})
 
 
 def _consumed_attempts(run):
@@ -122,6 +126,57 @@ def _webhook_payload(provider_type, text, card_details=None, _entry_limit=None):
                     continue
             body.append(line)
         content = "\n".join(body).strip()
+        if (isinstance(card_details, dict)
+                and card_details.get("type") == "collection_failure"):
+            def safe(value):
+                value = escape(str(value))
+                for char in "\\`*_{}[]()#+!|~":
+                    value = value.replace(char, "\\" + char)
+                return value
+
+            def columns(fields, background="default"):
+                return {
+                    "tag": "column_set", "flex_mode": "stretch",
+                    "background_style": background,
+                    "columns": [{
+                        "tag": "column", "width": "weighted", "weight": 1,
+                        "elements": [{"tag": "markdown", "content": (
+                            f"**{safe(label)}**\n{safe(value)}"
+                        )}],
+                    } for label, value in fields],
+                }
+
+            elements = [
+                columns([("数据源", card_details["source"]),
+                         ("发生时间", card_details["time"])]),
+                columns([("HTTP 状态码", card_details["status"]),
+                         ("故障阶段", card_details["stage"])], "grey"),
+            ]
+            for label, key in (("错误代码", "code"), ("错误信息", "message"),
+                               ("可能原因", "cause"),
+                               ("建议处理", "suggestion"), ("影响", "impact"),
+                               ("任务编号", "run_id")):
+                if card_details.get(key):
+                    elements.extend([
+                        {"tag": "hr"},
+                        {"tag": "markdown", "content": (
+                            f"**{label}**\n{safe(card_details[key])}"
+                        )},
+                    ])
+            if url:
+                elements.extend([
+                    {"tag": "hr"},
+                    {"tag": "button", "type": "default", "text": {
+                        "tag": "plain_text", "content": "查看经营看板 →",
+                    }, "behaviors": [{"type": "open_url", "default_url": url}]},
+                ])
+            payload = {"msg_type": "interactive", "card": {
+                "schema": "2.0", "header": {
+                    "title": {"tag": "plain_text", "content": title},
+                    "template": "red",
+                }, "body": {"elements": elements},
+            }}
+            return _fit_feishu_payload(payload, text)
         elements = [{"tag": "div", "text": {
             "tag": "plain_text", "content": content or title,
         }}]
@@ -258,6 +313,8 @@ def _webhook_payload(provider_type, text, card_details=None, _entry_limit=None):
                                      "content": f"另有 {remaining} 位租户。"}})
             elements.extend([{"tag": "div", "text": {
                 "tag": "plain_text", "content": (
+                    (f"巡检覆盖：{card_details['inspection']}\n"
+                     if card_details.get("inspection") else "") +
                     f"数据采集：{card_details['collected']}\n"
                     f"数据源：{card_details['source']}"),
             }}])
@@ -500,8 +557,10 @@ def _record_auto_run_result(run_id, result):
     ):
         from agione_ops.notification_delivery import notify_collection_failure
 
-        notify_collection_failure(rules.select_related("connection").first(),
-                                  "calls", run.error_code)
+        notify_collection_failure(
+            rules.select_related("connection").first(), "calls", run.error_code,
+            diagnostic=result.get("diagnostic"), run_id=run_id,
+        )
 
 
 @shared_task(bind=True, name="agione_ops.tasks.refresh_native_finance",
@@ -947,7 +1006,7 @@ def dispatch_scheduled_rule_syncs():
 
 
 def retry_abandoned_auto_sync(run_id):
-    """Retry the same automatic window at most three total attempts."""
+    """Recover interrupted runs or retry transient failures with a limit."""
     import re
     from datetime import timedelta
 
@@ -961,8 +1020,10 @@ def retry_abandoned_auto_sync(run_id):
     from agione_ops.sync import submit_sync
 
     candidate = SyncRun.objects.filter(pk=run_id).first()
-    if (candidate is None or candidate.status != "interrupted"
-            or candidate.error_code != "LEASE_EXPIRED"
+    eligible = Q(status="interrupted", error_code="LEASE_EXPIRED") | Q(
+        status="failed", error_code__in=_AUTO_TRANSIENT_ERRORS,
+    )
+    if (candidate is None
             or not candidate.idempotency_key.startswith("agione-auto-")):
         return False
     base = re.sub(r"-retry-\d+$", "", candidate.idempotency_key)
@@ -972,8 +1033,7 @@ def retry_abandoned_auto_sync(run_id):
             user_id=candidate.initiated_by_id,
         ).first()
         candidate = SyncRun.objects.filter(
-            pk=run_id, recovery_handled=False, status="interrupted",
-            error_code="LEASE_EXPIRED",
+            eligible, pk=run_id, recovery_handled=False,
         ).first()
         if candidate is None:
             return False
@@ -1007,9 +1067,20 @@ def retry_abandoned_auto_sync(run_id):
         prior_attempts = max(_consumed_attempts(run) for run in runs)
         numbers = [int(match.group(1)) for run in runs
                    if (match := re.search(r"-retry-(\d+)$", run.idempotency_key))]
-        key = f"{base}-retry-{max(numbers, default=0) + 1}"
+        next_retry = max(numbers, default=0) + 1
+        transient = candidate.status == "failed"
+        if transient and next_retry <= 2:
+            due = (candidate.finished_at or candidate.created_at) + timedelta(
+                minutes=_SCHEDULE_RETRY_DELAYS[next_retry],
+            )
+            if timezone.now() < due:
+                SyncRun.objects.filter(pk=run_id).update(
+                    recovery_next_check_at=due,
+                )
+                return False
+        key = f"{base}-retry-{next_retry}"
         started = timezone.now()
-        window_end = (started.replace(microsecond=0) if newer_snapshot
+        window_end = (started.replace(microsecond=0) if newer_snapshot or transient
                       else candidate.window_end)
         window_start = max(
             candidate.window_start, window_end - timedelta(days=31),
@@ -1046,10 +1117,12 @@ def retry_abandoned_auto_sync(run_id):
             SyncRun.objects.filter(pk=run_id).update(recovery_handled=True)
             notify_inspection_gap(rules, gap)
             return False
-        if prior_attempts >= 3:
+        if (transient and next_retry > 2) or (
+            not transient and prior_attempts >= 3
+        ):
             from agione_ops.notification_delivery import notify_collection_failure
 
-            notify_collection_failure(rules, "calls", "LEASE_EXPIRED")
+            notify_collection_failure(rules, "calls", candidate.error_code)
             SyncRun.objects.filter(pk=run_id).update(recovery_handled=True)
             return False
         try:
@@ -1063,7 +1136,9 @@ def retry_abandoned_auto_sync(run_id):
             )
             return False
         if created:
-            SyncRun.objects.filter(pk=next_run.pk).update(attempt=prior_attempts)
+            SyncRun.objects.filter(pk=next_run.pk).update(
+                attempt=2 if transient else prior_attempts,
+            )
             NotificationRules.objects.filter(pk=rules.pk).update(
                 last_auto_started_at=started, last_auto_status="queued",
                 last_auto_error_code="",
@@ -1091,8 +1166,9 @@ def recover_abandoned_native_syncs():
     recovered = sum(1 for connection_id, run_id in candidates
                     if recover_expired_run(connection_id, run_id))
     interrupted = SyncRun.objects.filter(
-        connection__source_kind="native", status="interrupted",
-        error_code="LEASE_EXPIRED", idempotency_key__startswith="agione-auto-",
+        Q(status="interrupted", error_code="LEASE_EXPIRED")
+        | Q(status="failed", error_code__in=_AUTO_TRANSIENT_ERRORS),
+        connection__source_kind="native", idempotency_key__startswith="agione-auto-",
         finished_at__gte=timezone.now() - timedelta(days=1),
         recovery_handled=False,
     ).filter(
@@ -1118,7 +1194,9 @@ def dispatch_auto_refresh_syncs():
     from django.utils import timezone
     from rest_framework.exceptions import APIException
 
-    from agione_ops.models import ConnectionGrant, NotificationRules
+    from agione_ops.models import (
+        ConnectionGrant, NotificationIssue, NotificationRules,
+    )
     from agione_ops.permissions import has_action
 
     if not getattr(settings, "AGIONE_OPS_NATIVE_ENABLED", False):
@@ -1143,8 +1221,25 @@ def dispatch_auto_refresh_syncs():
             ).get(pk=rule_id)
             if not rule.config.get("auto_refresh_enabled"):
                 continue
-            if rule.next_auto_refresh_at and rule.next_auto_refresh_at > now:
-                continue
+            early = bool(
+                rule.next_auto_refresh_at and rule.next_auto_refresh_at > now
+            )
+            if early:
+                if not (rule.config.get("enabled")
+                        and rule.config.get("channel_id")):
+                    continue
+                interval = timedelta(hours=rule.config.get("repeat_hours", 4))
+                due_issues = NotificationIssue.objects.filter(
+                    rules=rule, active=True,
+                    reason__in=("continuous_failure", "balance_failure"),
+                    last_alerted_at__lte=now - interval,
+                )
+                if rule.last_auto_started_at:
+                    due_issues = due_issues.filter(
+                        last_alerted_at__gt=rule.last_auto_started_at - interval,
+                    )
+                if not due_issues.exists():
+                    continue
             connection = rule.connection
             user = rule.user
             authorized = (
@@ -1186,7 +1281,8 @@ def dispatch_auto_refresh_syncs():
                 continue
             hours = int(rule.config.get("auto_refresh_hours", 3))
             rule.last_auto_started_at = now
-            rule.next_auto_refresh_at = now + timedelta(hours=hours)
+            if not early:
+                rule.next_auto_refresh_at = now + timedelta(hours=hours)
             rule.last_auto_status = "queued"
             rule.last_auto_error_code = ""
             rule.save(update_fields=[
@@ -1294,7 +1390,9 @@ def cleanup_notification_history():
 
     from django.utils import timezone
 
-    from agione_ops.models import NotificationDelivery, NotificationIssue
+    from agione_ops.models import (
+        InspectionDecision, NotificationDelivery, NotificationIssue,
+    )
 
     cutoff = timezone.now() - timedelta(days=90)
     deliveries, _ = NotificationDelivery.objects.filter(
@@ -1305,4 +1403,8 @@ def cleanup_notification_history():
         active=False,
         resolved_at__lt=cutoff,
     ).delete()
-    return {"deliveries": deliveries, "issues": issues}
+    inspections, _ = InspectionDecision.objects.filter(
+        created_at__lt=cutoff,
+    ).delete()
+    return {"deliveries": deliveries, "issues": issues,
+            "inspections": inspections}

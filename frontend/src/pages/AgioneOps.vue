@@ -15,7 +15,7 @@
     data-demo-origin="AGIone/static/index.html"
   >
     <div class="shell">
-      <aside class="sidebar">
+      <aside class="sidebar" :class="{ 'connection-menu-open': menuOpen }">
         <div class="brand">
           AGIOne<span>Ops</span><small>CUSTOMER OPERATIONS</small>
         </div>
@@ -1653,7 +1653,8 @@ async function toggleMenu(force = !menuOpen.value, focus = false) {
   if (bounds)
     menuPosition.value = {
       left: `${Math.max(8, Math.min(bounds.left, window.innerWidth - 248))}px`,
-      bottom: `${Math.max(8, window.innerHeight - bounds.top + 8)}px`
+      bottom: `${Math.max(8, window.innerHeight - bounds.top + 8)}px`,
+      maxHeight: `${Math.max(0, bounds.top - 16)}px`
     }
   if (focus)
     (

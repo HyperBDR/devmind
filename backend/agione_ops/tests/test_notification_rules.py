@@ -577,6 +577,9 @@ class NotificationRuleApiTests(TestCase):
                 "select_related"
             ))
             select.return_value.get.return_value = scope
+            inspection_save = stack.enter_context(patch(
+                "agione_ops.models.InspectionDecision.objects.update_or_create"
+            ))
             stack.enter_context(patch("agione_ops.native_sync.authorize_native_run"))
             stack.enter_context(patch("agione_ops.native_sync.validate_snapshot_data"))
             stack.enter_context(patch(
@@ -599,6 +602,11 @@ class NotificationRuleApiTests(TestCase):
                 with self.captureOnCommitCallbacks(execute=True):
                     analyze_completed_snapshot(1, "run")
             send.assert_called_once()
+            details = inspection_save.call_args.kwargs["defaults"]["details"]
+            self.assertEqual(details["outcome"], "queued")
+            self.assertEqual(datetime.fromisoformat(details["inspection_start"]), start)
+            self.assertEqual(datetime.fromisoformat(details["inspection_end"]), end)
+            self.assertEqual(len(details["deliveries"]), 1)
         rules.refresh_from_db()
         self.assertEqual(rules.last_inspection_at, end)
         self.assertEqual(rules.last_auto_status, "succeeded")
@@ -646,6 +654,9 @@ class NotificationRuleApiTests(TestCase):
                 "select_related"
             ))
             select.return_value.get.return_value = scope
+            stack.enter_context(patch(
+                "agione_ops.models.InspectionDecision.objects.update_or_create"
+            ))
             stack.enter_context(patch(
                 "agione_ops.native_sync.authorize_native_run"
             ))
@@ -720,6 +731,9 @@ class NotificationRuleApiTests(TestCase):
                 "select_related"
             ))
             select.return_value.get.return_value = scope
+            stack.enter_context(patch(
+                "agione_ops.models.InspectionDecision.objects.update_or_create"
+            ))
             stack.enter_context(patch(
                 "agione_ops.native_sync.authorize_native_run"
             ))
@@ -809,6 +823,45 @@ class NotificationRuleApiTests(TestCase):
         reread = self.client.get(self.url).data["data"]
         self.assertTrue(reread["configured"])
         self.assertEqual(reread["inactivityDays"], 9)
+
+    def test_inspection_history_exposes_current_delivery_status(self):
+        from django.utils import timezone
+
+        from agione_ops.models import InspectionDecision, SyncRun
+
+        now = timezone.now()
+        rules = NotificationRules.objects.create(
+            connection=self.connection, user=self.user,
+            config=notification_rule_config(),
+        )
+        run = SyncRun.objects.create(
+            connection=self.connection, initiated_by=self.user,
+            window_start=now - timedelta(hours=3), window_end=now,
+            idempotency_key="agione-auto-test", request_hash="a" * 64,
+            credential_version=self.connection.credential_version,
+            config_version=self.connection.config_version, grant_revision=1,
+            status="succeeded",
+        )
+        delivery = NotificationDelivery.objects.create(
+            rules=rules, event_key="b" * 64, issue_signature="c" * 64,
+            kind="alert", status="retrying", attempts=2,
+        )
+        InspectionDecision.objects.create(
+            rules=rules, run=run, details={
+                "outcome": "queued", "issue_count": 1, "issues": [],
+                "deliveries": [delivery.pk],
+                "inspection_start": run.window_start.isoformat(),
+                "inspection_end": run.window_end.isoformat(),
+            },
+        )
+        body = self.client.get(self.url).data["data"]
+        history = body["inspectionHistory"]
+        self.assertEqual(history[0]["runId"], str(run.pk))
+        self.assertEqual(history[0]["deliveries"][0]["status"], "retrying")
+        delivery.status = "sent"
+        delivery.save(update_fields=["status"])
+        history = self.client.get(self.url).data["data"]["inspectionHistory"]
+        self.assertEqual(history[0]["deliveries"][0]["status"], "sent")
 
     def test_foreign_channel_is_rejected(self):
         response = self.client.put(
@@ -1175,6 +1228,47 @@ class NotificationRuleApiTests(TestCase):
         self.assertEqual(submit.call_count, 1)
         self.assertEqual(rules.last_auto_status, "queued")
         self.assertEqual(rules.next_auto_refresh_at, now + timedelta(hours=4))
+
+    @override_settings(AGIONE_OPS_NATIVE_ENABLED=True)
+    def test_repeat_due_dispatches_fresh_inspection_without_moving_schedule(self):
+        from django.utils import timezone
+
+        from agione_ops.models import NotificationIssue
+        from agione_ops.tasks import dispatch_auto_refresh_syncs
+
+        SourceConnection.objects.filter(pk=self.connection.pk).update(
+            verified_at=timezone.now(), verified_tenant_id="rules-tenant",
+        )
+        now = datetime(2026, 10, 29, 12, 0, tzinfo=ZONE)
+        scheduled = now + timedelta(hours=2)
+        rules = NotificationRules.objects.create(
+            connection=self.connection, user=self.user,
+            config={**notification_rule_config(), "enabled": True,
+                    "auto_refresh_enabled": True, "auto_refresh_hours": 3,
+                    "repeat_hours": 4,
+                    "channel_id": str(self.own_channel.uuid)},
+            next_auto_refresh_at=scheduled,
+            last_auto_started_at=now - timedelta(hours=1),
+        )
+        issue = NotificationIssue.objects.create(
+            rules=rules, customer_id="200", reason="balance_failure",
+            first_seen_at=now - timedelta(hours=4),
+            last_seen_at=now - timedelta(hours=1),
+            last_alerted_at=now - timedelta(hours=4),
+        )
+        with (patch("django.utils.timezone.now") as clock,
+              patch("agione_ops.tasks.submit_auto_sync",
+                    return_value=(object(), True)) as submit):
+            clock.return_value = now - timedelta(minutes=1)
+            self.assertEqual(dispatch_auto_refresh_syncs(), 0)
+            clock.return_value = now
+            self.assertEqual(dispatch_auto_refresh_syncs(), 1)
+            self.assertEqual(dispatch_auto_refresh_syncs(), 0)
+        rules.refresh_from_db()
+        self.assertEqual(submit.call_count, 1)
+        self.assertEqual(rules.next_auto_refresh_at, scheduled)
+        self.assertEqual(rules.last_auto_started_at, now)
+        self.assertTrue(issue.active)
 
     @override_settings(AGIONE_OPS_NATIVE_ENABLED=True)
     def test_disabled_auto_refresh_is_not_dispatched(self):
