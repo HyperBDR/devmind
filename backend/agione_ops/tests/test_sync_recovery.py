@@ -58,6 +58,60 @@ class ProgressCountTests(TestCase):
 
 @override_settings(AGIONE_OPS_ALLOWED_ENDPOINT_HOSTS=["rules.example"])
 class RecoveryConcurrencyTests(TransactionTestCase):
+    @override_settings(AGIONE_OPS_NATIVE_ENABLED=True)
+    def test_concurrent_transient_recovery_creates_one_retry(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+
+        from django.db import close_old_connections, connection
+
+        from agione_ops.tasks import retry_abandoned_auto_sync
+
+        if connection.vendor != "postgresql":
+            self.skipTest("PostgreSQL row locking is required")
+        user = get_user_model().objects.create_user(username="retry-owner")
+        for action in ("view_business", "run_sync"):
+            user.user_permissions.add(Permission.objects.get(
+                content_type__app_label="agione_ops", codename=action,
+            ))
+        source = SourceConnection.objects.create(
+            name="Retry", platform="pro", principal_kind="provider",
+            source_kind="native", endpoint="https://rules.example",
+            expected_tenant_id="tenant", enabled=True, created_by=user,
+        )
+        grant = ConnectionGrant.objects.create(
+            connection=source, user=user, can_view=True, can_sync=True,
+        )
+        source.refresh_from_db()
+        now = timezone.now().replace(microsecond=0)
+        run = SyncRun.objects.create(
+            connection=source, initiated_by=user,
+            window_start=now - timedelta(days=7), window_end=now,
+            idempotency_key="agione-auto-20261103T004900Z-7",
+            request_hash="a" * 64, credential_version=source.credential_version,
+            config_version=source.config_version, grant_revision=grant.revision,
+            lease_epoch=1, status="failed", attempt=3,
+            error_code="SOURCE_UNREACHABLE",
+            finished_at=now - timedelta(minutes=6),
+        )
+        NotificationRules.objects.create(
+            connection=source, user=user,
+            config={"auto_refresh_enabled": True},
+        )
+        barrier = Barrier(2)
+
+        def retry():
+            close_old_connections()
+            try:
+                barrier.wait(timeout=5)
+                return retry_abandoned_auto_sync(run.pk)
+            finally:
+                close_old_connections()
+
+        with patch("agione_ops.sync._dispatch"), ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda _: retry(), range(2)))
+        self.assertEqual(sorted(results), [False, True])
+        self.assertEqual(SyncRun.objects.filter(connection=source).count(), 2)
     def test_celery_worker_processes_watchdog_against_database(self):
         from celery import Celery
         from celery.contrib.testing.worker import start_worker
@@ -201,6 +255,104 @@ class ExpiredSyncTests(TestCase):
         self.assertIn("财务数据更新失败", delivery.payload["text"])
         rules.config["enabled"] = False
         self.assertFalse(notify_collection_failure(rules, "calls", "TIMEOUT"))
+
+    @override_settings(AGIONE_OPS_PUBLIC_URL="https://example.com/agione")
+    def test_failure_card_shows_http_status_without_leaking_details(self):
+        from agione_ops.notification_delivery import notify_collection_failure
+        from agione_ops.tasks import _webhook_payload
+
+        rules = NotificationRules.objects.create(
+            connection=self.connection, user=self.user,
+            config={"enabled": True, "channel_id": str(uuid4())},
+        )
+        run_id = uuid4()
+        with patch("agione_ops.tasks.deliver_notification.delay"):
+            self.assertTrue(notify_collection_failure(
+                rules, "calls", "SOURCE_NON_JSON", run_id=run_id,
+                diagnostic={"http_status": 404, "stage": "calls",
+                            "secret": "PRIVATE"},
+            ))
+        delivery = NotificationDelivery.objects.get(rules=rules)
+        self.assertNotIn("PRIVATE", str(delivery.payload))
+        self.assertIn("HTTP 404", delivery.payload["text"])
+        card = _webhook_payload(
+            "feishu", delivery.payload["text"],
+            delivery.payload["card_details"],
+        )["card"]
+        self.assertEqual(card["schema"], "2.0")
+        self.assertEqual(card["header"]["template"], "red")
+        self.assertIn("404", str(card))
+        self.assertIn("请求调用记录接口", str(card))
+        self.assertIn("DevMind 管理员", str(card))
+        self.assertIn(str(run_id), str(card))
+        self.assertIn("查看经营看板", str(card))
+
+    def test_distinct_network_failures_each_get_one_alert(self):
+        from agione_ops.notification_delivery import notify_collection_failure
+        from agione_ops.tasks import _webhook_payload
+
+        rules = NotificationRules.objects.create(
+            connection=self.connection, user=self.user,
+            config={"enabled": True, "channel_id": str(uuid4())},
+        )
+        refused = {"network": "connection_refused", "stage": "calls"}
+        dns = {"network": "dns_not_found", "stage": "calls"}
+        self.assertTrue(notify_collection_failure(
+            rules, "calls", "SOURCE_UNREACHABLE", diagnostic=refused,
+        ))
+        self.assertFalse(notify_collection_failure(
+            rules, "calls", "SOURCE_UNREACHABLE", diagnostic=refused,
+        ))
+        self.assertTrue(notify_collection_failure(
+            rules, "calls", "SOURCE_UNREACHABLE", diagnostic=dns,
+        ))
+        texts = [row.payload["text"] for row in
+                 NotificationDelivery.objects.filter(rules=rules)]
+        self.assertTrue(any("连接被对端" in text for text in texts))
+        self.assertTrue(any("DNS 未找到" in text for text in texts))
+        delivery = next(
+            row for row in NotificationDelivery.objects.filter(rules=rules)
+            if row.payload["card_details"]["message"].startswith("连接被对端")
+        )
+        self.assertEqual(
+            delivery.payload["card_details"]["code"], "SOURCE_UNREACHABLE",
+        )
+        card = _webhook_payload(
+            "feishu", delivery.payload["text"],
+            delivery.payload["card_details"],
+        )["card"]
+        elements = card["body"]["elements"]
+        content = [item["content"] for item in elements
+                   if item["tag"] == "markdown"]
+        self.assertIn("**错误代码**\nSOURCE\\_UNREACHABLE", content)
+        self.assertIn("**错误信息**\n连接被对端或中间网络设备拒绝。", content)
+        self.assertIn(
+            "**可能原因**\n目标端口可能没有服务监听，或连接被中间网络设备拒绝。",
+            content,
+        )
+        self.assertIn(
+            "**建议处理**\n核对地址和端口，检查服务监听与网络策略。", content,
+        )
+
+    def test_auto_run_passes_safe_diagnostic_to_notification(self):
+        from agione_ops.tasks import _record_auto_run_result
+
+        run = self.make_active()
+        SyncRun.objects.filter(pk=run.pk).update(
+            status="failed", error_code="SOURCE_NON_JSON", attempt=3,
+        )
+        rules = NotificationRules.objects.create(
+            connection=self.connection, user=self.user,
+            last_auto_started_at=run.created_at - timedelta(seconds=1),
+            config={"enabled": True, "channel_id": str(uuid4())},
+        )
+        _record_auto_run_result(str(run.pk), {
+            "status": "failed", "errorCode": "SOURCE_NON_JSON",
+            "diagnostic": {"http_status": 503, "stage": "calls"},
+        })
+        delivery = NotificationDelivery.objects.get(rules=rules)
+        self.assertIn("HTTP 503", delivery.payload["text"])
+        self.assertIn(str(run.pk), delivery.payload["text"])
 
     def test_expired_run_is_interrupted_and_auto_status_updated(self):
         from agione_ops.sync import recover_expired_run
@@ -396,6 +548,65 @@ class ExpiredSyncTests(TestCase):
             self.assertTrue(retry_abandoned_auto_sync(run.pk))
         self.assertEqual(submit.call_args.args[2:4], (run.window_start, run.window_end))
         self.assertTrue(submit.call_args.args[-1].endswith("-retry-1"))
+
+    @override_settings(AGIONE_OPS_NATIVE_ENABLED=True)
+    def test_transient_failure_gets_bounded_delayed_retries(self):
+        from agione_ops.tasks import recover_abandoned_native_syncs
+
+        run = self.make_active()
+        SyncRun.objects.filter(pk=run.pk).update(
+            status="failed", error_code="SOURCE_UNREACHABLE", attempt=3,
+            finished_at=self.now,
+        )
+        NotificationRules.objects.create(
+            connection=self.connection, user=self.user,
+            config={"auto_refresh_enabled": True},
+            last_inspection_at=self.now - timedelta(hours=3),
+        )
+        with patch("django.utils.timezone.now", return_value=self.now):
+            recover_abandoned_native_syncs()
+        run.refresh_from_db()
+        self.assertEqual(run.recovery_next_check_at,
+                         self.now + timedelta(minutes=5))
+        self.assertEqual(SyncRun.objects.count(), 1)
+        for index, minutes in ((1, 5), (2, 20)):
+            now = self.now + timedelta(minutes=minutes)
+            with patch("django.utils.timezone.now", return_value=now):
+                recover_abandoned_native_syncs()
+                retry = SyncRun.objects.get(
+                    idempotency_key=f"{run.idempotency_key.split('-retry-')[0]}-retry-{index}",
+                )
+                self.assertEqual(retry.attempt, 2)
+                self.assertEqual(retry.window_end, now)
+                self.assertEqual(retry.window_start, run.window_start)
+                recover_abandoned_native_syncs()
+                self.assertEqual(SyncRun.objects.count(), index + 1)
+                SyncRun.objects.filter(pk=retry.pk).update(
+                    status="failed", error_code="SOURCE_UNREACHABLE",
+                    attempt=3, finished_at=now,
+                )
+                run = retry
+        with patch("django.utils.timezone.now", return_value=now):
+            recover_abandoned_native_syncs()
+        self.assertEqual(SyncRun.objects.count(), 3)
+        run.refresh_from_db()
+        self.assertTrue(run.recovery_handled)
+
+    def test_permanent_failure_is_not_retried(self):
+        from agione_ops.tasks import recover_abandoned_native_syncs
+
+        run = self.make_active()
+        SyncRun.objects.filter(pk=run.pk).update(
+            status="failed", error_code="SOURCE_AUTH_FAILED", attempt=3,
+            finished_at=self.now - timedelta(minutes=30),
+        )
+        NotificationRules.objects.create(
+            connection=self.connection, user=self.user,
+            config={"auto_refresh_enabled": True},
+        )
+        with patch("agione_ops.sync.submit_sync") as submit:
+            recover_abandoned_native_syncs()
+        submit.assert_not_called()
 
     def test_busy_connection_defers_recovery_without_losing_it(self):
         from agione_ops.client import AgioneOpsError

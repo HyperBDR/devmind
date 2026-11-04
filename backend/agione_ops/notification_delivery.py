@@ -39,21 +39,68 @@ def notify_inspection_gap(rules, gap):
     return created
 
 
-def notify_collection_failure(rules, domain, error_code):
-    """Notify once per local day and collection domain after final failure."""
+def notify_collection_failure(
+    rules, domain, error_code, *, diagnostic=None, run_id=None,
+):
+    """Notify once per day for each distinct collection failure."""
     if not rules or not rules.config.get("enabled") or not rules.config.get("channel_id"):
         return False
-    day = timezone.now().astimezone(ZoneInfo("Asia/Shanghai")).date()
-    identity = f"collection-failure:{rules.pk}:{domain}:{day}"
-    key = hashlib.sha256(identity.encode()).hexdigest()
+    import re
+    import uuid
+
+    from agione_ops.collection_diagnostics import (
+        STAGES, describe_failure, possible_cause, safe_diagnostic,
+    )
+
+    now = timezone.now().astimezone(ZoneInfo("Asia/Shanghai"))
+    day = now.date()
     label = "财务数据" if domain == "finance" else "调用数据"
+    code = str(error_code or "UNKNOWN")
+    if not re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", code):
+        code = "UNKNOWN"
+    diagnostic = safe_diagnostic(diagnostic)
+    identity = json.dumps([
+        "collection-failure", rules.pk, domain, str(day), code,
+        diagnostic.get("stage"), diagnostic.get("network"),
+        diagnostic.get("http_status"),
+    ], ensure_ascii=True, separators=(",", ":"))
+    key = hashlib.sha256(identity.encode()).hexdigest()
+    message, suggestion = describe_failure(code, diagnostic)
+    try:
+        task_id = str(uuid.UUID(str(run_id))) if run_id else ""
+    except ValueError:
+        task_id = ""
+    details = {
+        "type": "collection_failure",
+        "source": str(rules.connection.name)[:150],
+        "time": now.strftime("%Y-%m-%d %H:%M:%S") + " 北京时间",
+        "status": str(diagnostic.get("http_status", "未获取")),
+        "stage": STAGES.get(diagnostic.get("stage"), "采集过程"),
+        "code": code,
+        "message": message,
+        "cause": possible_cause(code, diagnostic),
+        "suggestion": suggestion,
+        "impact": "本次数据未更新；如有上次成功的数据，将继续保留。",
+        "run_id": task_id,
+    }
     text = (f"【AGIOne 采集异常】{label}更新失败\n"
-            f"数据源：{rules.connection.name}\n"
-            f"原因代码：{error_code or 'UNKNOWN'}\n"
-            "如有上次成功的数据，将继续保留；请检查连接并查看采集状态。")
+            f"数据源：{details['source']}\n"
+            f"发生时间：{details['time']}\n"
+            f"HTTP 状态码：{details['status']}\n"
+            f"故障阶段：{details['stage']}\n"
+            f"错误代码：{code}\n错误信息：{message}\n"
+            f"可能原因：{details['cause']}\n"
+            f"建议处理：{suggestion}\n影响：{details['impact']}")
+    if task_id:
+        text += f"\n任务编号：{task_id}"
+    public_url = getattr(settings, "AGIONE_OPS_PUBLIC_URL", "")
+    if public_url:
+        text += f"\n查看全部线索 → {public_url}"
     delivery, created = NotificationDelivery.objects.get_or_create(
         event_key=key, defaults={"rules": rules, "issue_signature": key,
-                                 "kind": "alert", "payload": {"text": text}},
+                                 "kind": "alert", "payload": {
+                                     "text": text, "card_details": details,
+                                 }},
     )
     if created:
         transaction.on_commit(lambda: dispatch_analysis_notifications([delivery]))
@@ -109,6 +156,16 @@ def _display_event_range(current):
             f"{end.month} 月 {end.day} 日 {end.strftime('%H:%M')}"
         )
     return f"{period}（{minutes} 分钟），北京时间"
+
+
+def _display_inspection_range(current, trigger):
+    if trigger != "automatic":
+        return ""
+    value = _display_event_range({
+        "event_start": current.get("inspection_start"),
+        "window_end": current.get("inspection_end"),
+    })
+    return "" if value == "-" else value
 
 
 def _identity(item):
@@ -298,6 +355,7 @@ def _card_details(rules, event, current, trigger):
     return {
         "groups": groups,
         "event_times": event_times,
+        "inspection": _display_inspection_range(current, trigger),
         "window": (_display_event_range(current) if trigger in {"manual", "automatic"}
                    else _display_range(current, int(rules.config.get("analysis_days", 7)))),
         "window_label": "事件观察" if trigger in {"manual", "automatic"} else "统计范围",
@@ -363,9 +421,11 @@ def _notification_text(rules, event, current, trigger):
             current,
             int(rules.config.get("analysis_days", 7)),
         )
+    inspection = _display_inspection_range(current, trigger)
     lines.extend([
         "",
         range_line,
+        *(["巡检覆盖：" + inspection] if inspection else []),
         "数据采集：" + _display_collected(current.get("collected_at")),
         f"数据源：{rules.connection.name}",
     ])
@@ -457,15 +517,35 @@ def enqueue_analysis_notifications(
     scheduled_date=None,
     preserve_issue_state=False,
     dispatch=True,
+    decision=None,
 ):
     """Persist new events and dispatch each event at most once."""
     config = rules.config
+    if decision is not None:
+        decision.update({"outcome": "not_ready", "issues": [],
+                         "deliveries": [], "issue_count": 0})
     if (
         trigger == "historical"
         or not config.get("enabled")
         or not config.get("channel_id")
         or current.get("status") != "ready"
     ):
+        if decision is not None:
+            if current.get("status") != "ready":
+                decision["outcome"] = "not_ready"
+            elif not config.get("enabled"):
+                decision["outcome"] = "notifications_disabled"
+            elif not config.get("channel_id"):
+                decision["outcome"] = "channel_missing"
+            if current.get("status") == "ready":
+                issues = _issue_map(current.get("alerts", []), {
+                    "continuous_failure", "balance_failure",
+                })
+                decision["issue_count"] = len(issues)
+                decision["issues"] = [{
+                    "customer_id": key[0], "reason": key[1],
+                    "decision": decision["outcome"],
+                } for key in list(issues)[:50]]
         return []
     urgent = {"continuous_failure", "balance_failure"}
     allowed = urgent if trigger in {"manual", "automatic"} else {
@@ -475,6 +555,8 @@ def enqueue_analysis_notifications(
         "inactive",
     }
     current_issues = _issue_map(current.get("alerts", []), allowed)
+    if decision is not None:
+        decision["issue_count"] = len(current_issues)
     if preserve_issue_state and trigger == "scheduled":
         if not current_issues:
             return []
@@ -526,6 +608,11 @@ def enqueue_analysis_notifications(
             if is_due:
                 issue.last_alerted_at = now
                 alert_items.append((key, finding))
+            if decision is not None and len(decision["issues"]) < 50:
+                decision["issues"].append({
+                    "customer_id": key[0], "reason": key[1],
+                    "decision": "eligible" if is_due else "repeat_interval",
+                })
             issue.save(
                 update_fields=[
                     "active",
@@ -625,6 +712,17 @@ def enqueue_analysis_notifications(
                 )
             )
         ]
+
+        if decision is not None:
+            decision["deliveries"] = [item.pk for item in created]
+            decision["outcome"] = (
+                "queued" if created else
+                "repeat_interval" if current_issues and not alert_items else
+                "duplicate" if events else
+                "history_disabled" if recovered_history and not config.get(
+                    "send_recovered_history", True,
+                ) else "no_qualifying_event"
+            )
 
     if dispatch:
         dispatch_analysis_notifications(created)

@@ -675,6 +675,11 @@ def _finish_failure(run, connection, token, epoch, error):
             status = "revoked" if revoked else "failed"
             _terminal(run, connection, status, code)
             result = {"status": status, "errorCode": code}
+            diagnostic = getattr(error, "diagnostic", None)
+            if diagnostic:
+                from agione_ops.collection_diagnostics import safe_diagnostic
+
+                result["diagnostic"] = safe_diagnostic(diagnostic)
     _project(run.pk)
     return result
 

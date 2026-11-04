@@ -10,7 +10,17 @@ test('rule settings show safe collection status and heartbeat', async ({ page })
   })
   await page.route('**/v1/agione-ops/connections/test/notification-rules/', route => route.fulfill({
     status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data: {
-      configured: true, channels: [], inspectionGap: {
+      configured: true, channels: [], lastAnalysis: {
+        trigger: 'automatic', inspectionStart: '2026-11-02T00:00:00Z',
+        inspectionEnd: '2026-11-02T03:00:00Z'
+      }, inspectionHistory: [{
+        runId: 'inspection-1', createdAt: '2026-11-02T03:01:00Z',
+        inspectionStart: '2026-11-02T00:00:00Z',
+        inspectionEnd: '2026-11-02T03:00:00Z', issueCount: 1,
+        outcome: 'repeat_interval', issues: [{ customerId: '200',
+          reason: 'balance_failure', decision: 'repeat_interval' }],
+        deliveries: [{ status: 'failed', attempts: 3 }]
+      }], inspectionGap: {
         start: '2026-11-02T00:00:00Z', end: '2026-11-02T00:10:00Z',
         ...(acknowledged ? { status: 'acknowledged' } : {})
       }, inspectionGapHistory: [{
@@ -48,6 +58,10 @@ test('rule settings show safe collection status and heartbeat', async ({ page })
     button.click()
   })
   const dialog = page.getByRole('dialog')
+  await expect(dialog.getByText('最近巡检覆盖：', { exact: false })).toContainText('2026/11/2 11:00:00')
+  await dialog.getByText('巡检与通知记录（最近 20 条）').click()
+  await expect(dialog.getByText('租户 200 · 余额不足 · 重复提醒间隔内')).toBeVisible()
+  await expect(dialog.getByText('通知发送： 发送失败 · 尝试 3')).toBeVisible()
   await expect(dialog.getByText('巡检存在缺口，请人工核查：')).toContainText('2026/11/2 08:00:00')
   page.once('dialog', prompt => prompt.accept())
   await dialog.getByRole('button', { name: '确认已人工核查' }).click()

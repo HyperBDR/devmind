@@ -387,6 +387,19 @@ def test_same_facts_are_reused_but_changed_content_is_a_new_revision(
     assert first_fact.input_tokens == 100
 
 
+def test_terminal_failure_returns_only_safe_diagnostic(prepared, monkeypatch):
+    error = AgioneOpsError("SOURCE_NON_JSON")
+    error.diagnostic = {
+        "http_status": 404, "stage": "calls", "secret": "PRIVATE",
+    }
+    monkeypatch.setattr(SyntheticClient, "page_calls", Mock(side_effect=error))
+    run, _ = submit(prepared)
+    result = execute_sync(run.pk)
+    assert result["status"] == "failed"
+    assert result["diagnostic"] == {"http_status": 404, "stage": "calls"}
+    assert "PRIVATE" not in str(result)
+
+
 def test_temporary_retries_are_bounded_and_permanent_errors_do_not_retry(
     prepared, monkeypatch
 ):

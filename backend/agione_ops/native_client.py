@@ -1,12 +1,15 @@
 """Bounded, read-only AGIOne HTTPS transport owned by DevMind."""
 
 import base64
+import errno
 import hashlib
 import ipaddress
 import json
+import logging
 import math
 import re
 import socket
+import ssl
 import time
 from datetime import datetime, timezone
 from threading import RLock
@@ -18,6 +21,8 @@ from django.conf import settings
 
 from agione_ops.client import AgioneOpsError
 from agione_ops.observability import add_counter
+
+logger = logging.getLogger(__name__)
 
 MAX_BYTES = 8 * 1024 * 1024
 MAX_PAGES = 100
@@ -35,6 +40,41 @@ READ_PATHS = re.compile(
 
 def _error(code, status=502):
     return AgioneOpsError(code, status_code=status)
+
+
+def _network_failure(error):
+    """Classify only structured exception evidence, never exception text."""
+    seen = set()
+    chain = []
+    while isinstance(error, BaseException) and id(error) not in seen:
+        seen.add(id(error))
+        chain.append(error)
+        error = error.__cause__ or error.__context__
+    for item in chain:
+        if isinstance(item, ssl.SSLCertVerificationError):
+            return {10: "tls_cert_expired", 62: "tls_hostname"}.get(
+                getattr(item, "verify_code", None), "tls_certificate",
+            )
+    for item in chain:
+        if isinstance(item, ssl.SSLError):
+            return "tls"
+        if isinstance(item, socket.gaierror):
+            return {
+                socket.EAI_NONAME: "dns_not_found",
+                socket.EAI_AGAIN: "dns_temporary",
+            }.get(item.errno, "dns")
+        if isinstance(item, OSError):
+            network = {
+                errno.ECONNREFUSED: "connection_refused",
+                errno.ECONNRESET: "connection_reset",
+                errno.ENETUNREACH: "network_unreachable",
+                errno.EHOSTUNREACH: "host_unreachable",
+            }.get(item.errno)
+            if network:
+                return network
+    if any(isinstance(item, httpx.RemoteProtocolError) for item in chain):
+        return "protocol"
+    return "connection"
 
 
 def _text(value, limit=4096, required=True):
@@ -191,7 +231,19 @@ class NativeClient:
                 for address in addresses
             ):
                 raise _error("SOURCE_ENDPOINT_FORBIDDEN", 400)
-        except (OSError, ValueError, TypeError):
+        except OSError as error:
+            network = _network_failure(error)
+            network = network if network.startswith("dns") else "dns"
+            logger.warning(
+                "AGIOne DNS lookup failed connection_id=%s error_type=%s "
+                "network=%s",
+                getattr(self.connection, "pk", None), type(error).__name__,
+                network,
+            )
+            failure = _error("SOURCE_UNREACHABLE")
+            failure.diagnostic = {"network": network}
+            raise failure from None
+        except (ValueError, TypeError):
             raise _error("SOURCE_ENDPOINT_FORBIDDEN", 400) from None
 
     def _params(self, params):
@@ -269,6 +321,7 @@ class NativeClient:
         guard = getattr(self, "io_guard", None)
         if guard is not None:
             guard()
+        status = None
         try:
             self._check_dns()
             add_counter("internal_http_requests", 1)
@@ -280,6 +333,7 @@ class NativeClient:
                 data=data,
                 auth=auth,
             ) as response:
+                status = response.status_code
                 if 300 <= response.status_code < 400:
                     raise _error("SOURCE_REDIRECT_BLOCKED")
                 length = response.headers.get("content-length")
@@ -298,13 +352,56 @@ class NativeClient:
                 result = self._decode(response.status_code, body)
                 self.fetched_at = datetime.now(timezone.utc).isoformat()
                 return result
-        except httpx.TimeoutException:
-            raise _error("SOURCE_TIMEOUT", 504) from None
-        except httpx.RequestError:
-            raise _error("SOURCE_UNREACHABLE") from None
+        except httpx.TimeoutException as error:
+            logger.warning(
+                "AGIOne upstream timeout connection_id=%s error_type=%s",
+                getattr(self.connection, "pk", None), type(error).__name__,
+            )
+            failure = _error("SOURCE_TIMEOUT", 504)
+            failure.diagnostic = {
+                "network": "connect_timeout" if isinstance(
+                    error, httpx.ConnectTimeout
+                ) else "read_timeout" if isinstance(
+                    error, httpx.ReadTimeout
+                ) else "timeout",
+            }
+            self._add_diagnostic(failure, path, status)
+            raise failure from None
+        except httpx.RequestError as error:
+            network = _network_failure(error)
+            logger.warning(
+                "AGIOne upstream request failed connection_id=%s error_type=%s "
+                "network=%s",
+                getattr(self.connection, "pk", None), type(error).__name__,
+                network,
+            )
+            failure = _error("SOURCE_UNREACHABLE")
+            failure.diagnostic = {"network": network}
+            self._add_diagnostic(failure, path, status)
+            raise failure from None
+        except AgioneOpsError as error:
+            self._add_diagnostic(error, path, status)
+            raise
         finally:
             if guard is not None:
                 guard()
+
+    @staticmethod
+    def _add_diagnostic(error, path, status):
+        diagnostic = dict(getattr(error, "diagnostic", {}))
+        if path == "/auth/oauth2/token":
+            diagnostic["stage"] = "authentication"
+        elif path == "/admin/user/info":
+            diagnostic["stage"] = "identity"
+        elif path == "/xapi/observability/call-logs":
+            diagnostic["stage"] = "calls"
+        elif path.startswith("/financial/"):
+            diagnostic["stage"] = "finance"
+        else:
+            diagnostic["stage"] = "source"
+        if type(status) is int and 100 <= status <= 599:
+            diagnostic["http_status"] = status
+        error.diagnostic = diagnostic
 
     def _decode(self, status, content):
         if status == 429:

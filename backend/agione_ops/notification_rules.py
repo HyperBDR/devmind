@@ -535,6 +535,9 @@ def analyze_completed_snapshot(scope_id, run_id):
             "alerts": [],
             "trigger": trigger,
         }
+        if trigger == "automatic":
+            result["inspection_start"] = inspection_start.isoformat()
+            result["inspection_end"] = end.isoformat()
     else:
         rows = external_rows(snapshot.data["rows"], types, overrides)
         customers = snapshot.data["customers"]
@@ -636,6 +639,7 @@ def analyze_completed_snapshot(scope_id, run_id):
                     "last_auto_error_code",
                 ])
             locked.save(update_fields=update_fields)
+        decision = {} if trigger == "automatic" else None
         created = enqueue_analysis_notifications(
             locked,
             prior,
@@ -646,7 +650,19 @@ def analyze_completed_snapshot(scope_id, run_id):
             ),
             preserve_issue_state=older and trigger == "scheduled",
             dispatch=False,
+            decision=decision,
         )
+        if decision is not None:
+            from agione_ops.models import InspectionDecision
+
+            decision.update({
+                "inspection_start": result.get("inspection_start"),
+                "inspection_end": result.get("inspection_end"),
+                "analysis_status": result.get("status"),
+            })
+            InspectionDecision.objects.update_or_create(
+                run=run, defaults={"rules": locked, "details": decision},
+            )
         transaction.on_commit(
             lambda: dispatch_analysis_notifications(created)
         )
