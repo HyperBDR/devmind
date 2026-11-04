@@ -5,6 +5,7 @@ import errno
 import hashlib
 import socket
 import ssl
+import time
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
 from types import SimpleNamespace
@@ -336,6 +337,47 @@ def test_stream_limit_applies_without_content_length(monkeypatch):
         with pytest.raises(AgioneOpsError) as error:
             source.identity()
     assert error.value.code == "SOURCE_RESPONSE_TOO_LARGE"
+
+
+def test_slow_stream_has_total_time_limit_and_safe_stage(monkeypatch):
+    monkeypatch.setattr("agione_ops.native_client.MAX_RESPONSE_SECONDS", .03,
+                        raising=False)
+
+    class SlowStream(httpx.SyncByteStream):
+        def __iter__(self):
+            for chunk in (b'{"status":', b'200,"result":', b'null}'):
+                time.sleep(.02)
+                yield chunk
+
+    def handler(request):
+        if request.url.path.endswith("/admin/user/info"):
+            return response()
+        return httpx.Response(200, stream=SlowStream())
+
+    with client(handler) as source:
+        source.identity()
+        with pytest.raises(AgioneOpsError) as error:
+            source.get("/xapi/observability/models/options")
+    assert error.value.code == "SOURCE_TIMEOUT"
+    assert error.value.diagnostic["stage"] == "models"
+    assert error.value.diagnostic["network"] == "response_deadline"
+
+
+def test_model_request_stage_logs_are_sanitized(monkeypatch):
+    logs = []
+    monkeypatch.setattr(
+        "agione_ops.native_client.logger.info", lambda *args: logs.append(args),
+    )
+    with client(lambda request: response(
+        INFO if request.url.path.endswith("/admin/user/info") else []
+    )) as source:
+        source.identity()
+        source.get("/xapi/observability/models/options")
+    assert any("model request started" in item[0] for item in logs)
+    assert any("model DNS checked" in item[0] for item in logs)
+    assert any("model response headers" in item[0] for item in logs)
+    assert any("model request finished" in item[0] for item in logs)
+    assert "PRIVATE" not in str(logs)
 
 
 def test_large_declared_response_is_rejected_without_reading():

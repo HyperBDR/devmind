@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 MAX_BYTES = 8 * 1024 * 1024
 MAX_PAGES = 100
+MAX_RESPONSE_SECONDS = 60
 READ_PATHS = re.compile(
     r"^(?:/admin/user/info|/admin/user/details/[0-9]{1,40}"
     r"|/coperation/tenant/(?:op-customers|provider-customers|"
@@ -36,6 +37,10 @@ READ_PATHS = re.compile(
     r"|/financial/api/finance/v1/admin/customers/[0-9]{1,40}/"
     r"(?:accounts|overview))$"
 )
+
+
+class ResponseDeadlineExceeded(httpx.TimeoutException):
+    """The total time budget for one upstream response was exhausted."""
 
 
 def _error(code, status=502):
@@ -322,8 +327,23 @@ class NativeClient:
         if guard is not None:
             guard()
         status = None
+        started = time.monotonic()
+        is_models = path == "/xapi/observability/models/options"
+        if is_models:
+            logger.info(
+                "AGIOne model request started connection_id=%s",
+                getattr(self.connection, "pk", None),
+            )
         try:
             self._check_dns()
+            if is_models:
+                logger.info(
+                    "AGIOne model DNS checked connection_id=%s elapsed_ms=%s",
+                    getattr(self.connection, "pk", None),
+                    round((time.monotonic() - started) * 1000),
+                )
+            if time.monotonic() - started >= MAX_RESPONSE_SECONDS:
+                raise ResponseDeadlineExceeded("response deadline exceeded")
             add_counter("internal_http_requests", 1)
             with self._http.stream(
                 method,
@@ -334,6 +354,13 @@ class NativeClient:
                 auth=auth,
             ) as response:
                 status = response.status_code
+                if is_models:
+                    logger.info(
+                        "AGIOne model response headers connection_id=%s "
+                        "elapsed_ms=%s status=%s",
+                        getattr(self.connection, "pk", None),
+                        round((time.monotonic() - started) * 1000), status,
+                    )
                 if 300 <= response.status_code < 400:
                     raise _error("SOURCE_REDIRECT_BLOCKED")
                 length = response.headers.get("content-length")
@@ -345,10 +372,14 @@ class NativeClient:
                         raise _error("SOURCE_SHAPE_CHANGED") from None
                 body = bytearray()
                 for chunk in response.iter_bytes():
+                    if time.monotonic() - started >= MAX_RESPONSE_SECONDS:
+                        raise ResponseDeadlineExceeded("response deadline exceeded")
                     add_counter("internal_download_bytes", len(chunk))
                     body.extend(chunk)
                     if len(body) > MAX_BYTES:
                         raise _error("SOURCE_RESPONSE_TOO_LARGE")
+                if time.monotonic() - started >= MAX_RESPONSE_SECONDS:
+                    raise ResponseDeadlineExceeded("response deadline exceeded")
                 result = self._decode(response.status_code, body)
                 self.fetched_at = datetime.now(timezone.utc).isoformat()
                 return result
@@ -359,13 +390,20 @@ class NativeClient:
             )
             failure = _error("SOURCE_TIMEOUT", 504)
             failure.diagnostic = {
-                "network": "connect_timeout" if isinstance(
+                "network": "response_deadline" if isinstance(
+                    error, ResponseDeadlineExceeded
+                ) else "connect_timeout" if isinstance(
                     error, httpx.ConnectTimeout
                 ) else "read_timeout" if isinstance(
                     error, httpx.ReadTimeout
                 ) else "timeout",
             }
             self._add_diagnostic(failure, path, status)
+            logger.warning(
+                "AGIOne upstream timeout detail connection_id=%s stage=%s "
+                "network=%s", getattr(self.connection, "pk", None),
+                failure.diagnostic["stage"], failure.diagnostic["network"],
+            )
             raise failure from None
         except httpx.RequestError as error:
             network = _network_failure(error)
@@ -383,6 +421,13 @@ class NativeClient:
             self._add_diagnostic(error, path, status)
             raise
         finally:
+            if is_models:
+                logger.info(
+                    "AGIOne model request finished connection_id=%s "
+                    "elapsed_ms=%s status=%s",
+                    getattr(self.connection, "pk", None),
+                    round((time.monotonic() - started) * 1000), status,
+                )
             if guard is not None:
                 guard()
 
@@ -395,6 +440,8 @@ class NativeClient:
             diagnostic["stage"] = "identity"
         elif path == "/xapi/observability/call-logs":
             diagnostic["stage"] = "calls"
+        elif path == "/xapi/observability/models/options":
+            diagnostic["stage"] = "models"
         elif path.startswith("/financial/"):
             diagnostic["stage"] = "finance"
         else:

@@ -58,6 +58,54 @@ class ProgressCountTests(TestCase):
 
 @override_settings(AGIONE_OPS_ALLOWED_ENDPOINT_HOSTS=["rules.example"])
 class RecoveryConcurrencyTests(TransactionTestCase):
+    def test_two_watchdogs_requeue_manual_run_once(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+
+        from django.db import close_old_connections, connection
+
+        from agione_ops.sync import recover_expired_run
+
+        if connection.vendor != "postgresql":
+            self.skipTest("PostgreSQL row locking is required")
+        user = get_user_model().objects.create_user(username="manual-race")
+        source = SourceConnection.objects.create(
+            name="Manual race", platform="pro", principal_kind="provider",
+            source_kind="native", endpoint="https://rules.example",
+            expected_tenant_id="tenant", enabled=True, created_by=user,
+        )
+        now = timezone.now()
+        run = SyncRun.objects.create(
+            connection=source, initiated_by=user,
+            window_start=now - timedelta(days=1), window_end=now,
+            idempotency_key=str(uuid4()), request_hash="a" * 64,
+            credential_version=source.credential_version,
+            config_version=source.config_version, grant_revision=1,
+            lease_epoch=1, status="running", phase="models", attempt=1,
+            heartbeat_at=now - timedelta(minutes=8),
+        )
+        SourceConnection.objects.filter(pk=source.pk).update(
+            active_run_id=run.pk, lease_token=uuid4(), lease_epoch=1,
+            lease_expires_at=now - timedelta(minutes=4),
+        )
+        barrier = Barrier(2)
+
+        def recover():
+            close_old_connections()
+            try:
+                barrier.wait(timeout=5)
+                return recover_expired_run(source.pk, run.pk)
+            finally:
+                close_old_connections()
+
+        with (patch("agione_ops.sync._dispatch") as dispatch,
+              ThreadPoolExecutor(max_workers=2) as pool):
+            results = list(pool.map(lambda _: recover(), range(2)))
+        self.assertEqual(sorted(results), [False, True])
+        dispatch.assert_called_once_with(run.pk)
+        run.refresh_from_db()
+        self.assertEqual(run.status, "retrying")
+
     @override_settings(AGIONE_OPS_NATIVE_ENABLED=True)
     def test_concurrent_transient_recovery_creates_one_retry(self):
         from concurrent.futures import ThreadPoolExecutor
@@ -379,6 +427,78 @@ class ExpiredSyncTests(TestCase):
             self.assertFalse(recover_expired_run(self.connection.pk))
         run.refresh_from_db()
         self.assertEqual(run.status, "running")
+
+    def test_expired_manual_run_retries_with_fenced_old_worker(self):
+        from agione_ops.client import AgioneOpsError
+        from agione_ops.sync import _assert_lease, _claim, recover_expired_run
+
+        run = self.make_active()
+        SyncRun.objects.filter(pk=run.pk).update(
+            idempotency_key=str(uuid4()), attempt=1,
+        )
+        self.connection.refresh_from_db()
+        token = self.connection.lease_token
+        with (patch("django.utils.timezone.now", return_value=self.now),
+              patch("agione_ops.sync._dispatch") as dispatch,
+              self.captureOnCommitCallbacks(execute=True)):
+            self.assertTrue(recover_expired_run(self.connection.pk, run.pk))
+            self.assertFalse(recover_expired_run(self.connection.pk, run.pk))
+        run.refresh_from_db()
+        self.connection.refresh_from_db()
+        self.assertEqual(run.status, "retrying")
+        self.assertEqual(run.error_code, "LEASE_EXPIRED")
+        self.assertEqual(self.connection.active_run_id, run.pk)
+        dispatch.assert_called_once_with(run.pk)
+        with (patch("django.utils.timezone.now", return_value=self.now),
+              self.assertRaises(AgioneOpsError)):
+            _assert_lease(self.connection, run, token, 1)
+        with (patch("django.utils.timezone.now", return_value=self.now),
+              patch("agione_ops.sync._authorize_run")):
+            claimed, connection, new_token, epoch = _claim(run.pk)
+        self.assertEqual(claimed.attempt, 2)
+        self.assertNotEqual(new_token, token)
+        self.assertGreater(epoch, 1)
+        with patch("django.utils.timezone.now", return_value=self.now):
+            _assert_lease(connection, claimed, new_token, epoch)
+            with self.assertRaises(AgioneOpsError):
+                _assert_lease(connection, claimed, token, 1)
+
+    def test_manual_expiry_stops_after_three_attempts(self):
+        from agione_ops.sync import recover_expired_run
+
+        run = self.make_active()
+        SyncRun.objects.filter(pk=run.pk).update(
+            idempotency_key=str(uuid4()), attempt=3,
+        )
+        with (patch("django.utils.timezone.now", return_value=self.now),
+              patch("agione_ops.sync._dispatch") as dispatch):
+            self.assertTrue(recover_expired_run(self.connection.pk, run.pk))
+        run.refresh_from_db()
+        self.assertEqual((run.status, run.error_code),
+                         ("interrupted", "LEASE_EXPIRED"))
+        dispatch.assert_not_called()
+
+    def test_unclaimed_manual_retries_are_bounded(self):
+        from agione_ops.sync import recover_expired_run
+
+        run = self.make_active()
+        SyncRun.objects.filter(pk=run.pk).update(
+            idempotency_key=str(uuid4()), attempt=1,
+        )
+        with (patch("django.utils.timezone.now", return_value=self.now),
+              patch("agione_ops.sync._dispatch") as dispatch):
+            for expected in ("retrying", "retrying", "interrupted"):
+                SourceConnection.objects.filter(pk=self.connection.pk).update(
+                    lease_expires_at=self.now - timedelta(minutes=4),
+                )
+                with self.captureOnCommitCallbacks(execute=True):
+                    self.assertTrue(
+                        recover_expired_run(self.connection.pk, run.pk)
+                    )
+                run.refresh_from_db()
+                self.assertEqual(run.status, expected)
+        self.assertEqual(dispatch.call_count, 2)
+        self.assertEqual(run.error_code, "LEASE_EXPIRED")
 
     def test_late_old_worker_cannot_overwrite_interrupted_status(self):
         from agione_ops.sync import recover_expired_run

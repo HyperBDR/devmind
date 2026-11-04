@@ -8,6 +8,7 @@ import re
 import time
 from bisect import bisect_left
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from contextlib import contextmanager
 from datetime import timedelta
 from threading import Lock
 from time import perf_counter
@@ -337,9 +338,25 @@ def _identity(client, connection):
     return value
 
 
+@contextmanager
+def _owned_run(run):
+    """Fence writes from workers that no longer own this run."""
+    from agione_ops.sync import _assert_lease
+
+    with transaction.atomic():
+        connection = SourceConnection.objects.select_for_update().get(
+            pk=run.connection_id,
+        )
+        current = SyncRun.objects.select_for_update().get(pk=run.pk)
+        _assert_lease(connection, current, run._token, run._epoch)
+        authorize_native_run(current, connection)
+        yield
+
+
 def _prepare(run, connection, client, checkpoint):
     """Persist directory/model versions before starting call-log shards."""
-    state, _ = NativeSyncState.objects.get_or_create(run=run)
+    with _owned_run(run):
+        state, _ = NativeSyncState.objects.get_or_create(run=run)
     if not state.directory_complete:
         checkpoint("directory")
         operator = connection.principal_kind == "operator"
@@ -410,19 +427,21 @@ def _prepare(run, connection, client, checkpoint):
         state.directory_count = count
         state.model_names = models
         state.directory_complete = True
-        state.save()
-    if not run.native_shards.exists():
-        zone = ZoneInfo("Asia/Shanghai")
-        at = run.window_start.astimezone(zone)
-        while at < run.window_end:
-            midnight = at.replace(
-                hour=0, minute=0, second=0, microsecond=0,
-            ) + timedelta(days=1)
-            stop = min(midnight, run.window_end)
-            NativeSyncShard.objects.get_or_create(
-                run=run, window_start=at, window_end=stop,
-            )
-            at = stop
+        with _owned_run(run):
+            state.save()
+    with _owned_run(run):
+        if not run.native_shards.exists():
+            zone = ZoneInfo("Asia/Shanghai")
+            at = run.window_start.astimezone(zone)
+            while at < run.window_end:
+                midnight = at.replace(
+                    hour=0, minute=0, second=0, microsecond=0,
+                ) + timedelta(days=1)
+                stop = min(midnight, run.window_end)
+                NativeSyncShard.objects.get_or_create(
+                    run=run, window_start=at, window_end=stop,
+                )
+                at = stop
     return state
 
 
@@ -493,7 +512,7 @@ def _seed_incremental(run, state, checkpoint):
         status="pending", window_start__lt=cutoff, window_end__gt=cutoff,
     ).first()
     if crossing is not None:
-        with transaction.atomic():
+        with _owned_run(run):
             NativeSyncShard.objects.get_or_create(
                 run=run,
                 window_start=crossing.window_start,
@@ -662,7 +681,7 @@ def _split(run, shard):
     if seconds <= 1:
         raise AgioneOpsError("SOURCE_SLICE_TOO_DENSE", status_code=409)
     step = 3600 if seconds > 3600 else max(1, seconds // 2)
-    with transaction.atomic():
+    with _owned_run(run):
         at = shard.window_start
         while at < shard.window_end:
             stop = min(at + timedelta(seconds=step), shard.window_end)
@@ -830,7 +849,7 @@ def _make_progress_counter(run):
 def execute_native_sync(run_id, *, client_factory=None):
     """Resume only pending/failed shards under the existing domain lease."""
     from agione_ops.sync import (
-        _checkpoint, _claim, _finish_failure, _project,
+        _checkpoint, _claim, _finish_failure, _project, is_manual_sync_key,
     )
 
     claimed = _claim(run_id)
@@ -842,7 +861,11 @@ def execute_native_sync(run_id, *, client_factory=None):
     run._token, run._epoch = lease_token, epoch
 
     duration = _setting("AGIONE_OPS_NATIVE_MAX_SECONDS", 600, 30, 1800)
-    elapsed = max(0, (timezone.now() - run.created_at).total_seconds())
+    started_at = (
+        run.heartbeat_at if run.attempt > 1 and
+        is_manual_sync_key(run.idempotency_key) else run.created_at
+    )
+    elapsed = max(0, (timezone.now() - started_at).total_seconds())
     deadline = time.monotonic() + max(0, duration - elapsed)
     progress_count = _make_progress_counter(run)
 
@@ -868,7 +891,8 @@ def execute_native_sync(run_id, *, client_factory=None):
         state.role_state = identity.get("role_state", "not_verified")
         if state.role_state not in {"verified", "not_verified"}:
             state.role_state = "not_verified"
-        state.save(update_fields=["role_state"])
+        with _owned_run(run):
+            state.save(update_fields=["role_state"])
         _seed_timed_out(run, state, checkpoint)
         _seed_incremental(run, state, checkpoint)
         timings["reuse_ms"] = (
@@ -901,10 +925,11 @@ def execute_native_sync(run_id, *, client_factory=None):
             if not shards:
                 break
             checkpoint("calls")
-            for shard in shards:
-                NativeSyncShard.objects.filter(pk=shard.pk).update(
-                    status="running", attempts=shard.attempts + 1,
-                )
+            with _owned_run(run):
+                for shard in shards:
+                    NativeSyncShard.objects.filter(pk=shard.pk).update(
+                        status="running", attempts=shard.attempts + 1,
+                    )
             if len(shards) == 1:
                 shard = shards[0]
                 try:
@@ -917,10 +942,11 @@ def execute_native_sync(run_id, *, client_factory=None):
                         checkpoint("splitting")
                         _split(run, shard)
                         continue
-                    NativeSyncShard.objects.filter(pk=shard.pk).update(
-                        status="failed",
-                        error_code=getattr(error, "code", "SOURCE_FAILED"),
-                    )
+                    with _owned_run(run):
+                        NativeSyncShard.objects.filter(pk=shard.pk).update(
+                            status="failed",
+                            error_code=getattr(error, "code", "SOURCE_FAILED"),
+                        )
                     raise
                 continue
             with ThreadPoolExecutor(max_workers=len(shards)) as executor:
@@ -943,10 +969,13 @@ def execute_native_sync(run_id, *, client_factory=None):
                                 checkpoint("splitting")
                                 _split(run, shard)
                                 continue
-                            NativeSyncShard.objects.filter(pk=shard.pk).update(
-                                status="failed",
-                                error_code=getattr(error, "code", "SOURCE_FAILED"),
-                            )
+                            with _owned_run(run):
+                                NativeSyncShard.objects.filter(pk=shard.pk).update(
+                                    status="failed",
+                                    error_code=getattr(
+                                        error, "code", "SOURCE_FAILED",
+                                    ),
+                                )
                             raise
         checkpoint("identity")
         timings["fetch_ms"] = (

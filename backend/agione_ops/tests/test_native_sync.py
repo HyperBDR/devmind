@@ -334,6 +334,78 @@ def test_two_daily_shards_are_fetched_concurrently(native, settings):
     )
     assert len(snapshot.data["rows"]) == 2
 
+
+def test_manual_worker_recovery_gets_a_fresh_bounded_attempt(native, settings):
+    from agione_ops.sync import recover_expired_run
+
+    settings.AGIONE_OPS_NATIVE_MAX_SECONDS = 120
+    run = submit(native)
+    now = timezone.now()
+    SyncRun.objects.filter(pk=run.pk).update(
+        created_at=now - timedelta(minutes=10), status="running",
+        attempt=1, heartbeat_at=now - timedelta(minutes=6),
+    )
+    SourceConnection.objects.filter(pk=run.connection_id).update(
+        lease_expires_at=now - timedelta(minutes=4),
+    )
+    assert recover_expired_run(run.connection_id, run.pk)
+    result = execute_native_sync(run.pk, client_factory=native["factory"])
+    assert result["status"] == "succeeded"
+    run.refresh_from_db()
+    assert run.attempt == 2
+    assert NativePublishedSnapshot.objects.filter(version__run=run).exists()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_old_worker_cannot_fail_shard_completed_by_replacement(native):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    from django.db import close_old_connections
+
+    from agione_ops.sync import recover_expired_run
+
+    native["end"] = native["start"] + timedelta(days=1)
+    run = submit(native)
+    entered, release = Event(), Event()
+    parent = native["factory"]
+
+    class OldClient(parent):
+        def get(self, path, params=None):
+            if path.endswith("call-logs"):
+                entered.set()
+                assert release.wait(15)
+                raise AgioneOpsError("SOURCE_TIMEOUT", status_code=504)
+            return super().get(path, params)
+
+    def old_worker():
+        try:
+            return execute_native_sync(run.pk, client_factory=OldClient)
+        finally:
+            close_old_connections()
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(old_worker)
+        try:
+            assert entered.wait(15)
+            SourceConnection.objects.filter(pk=run.connection_id).update(
+                lease_expires_at=timezone.now() - timedelta(minutes=4),
+            )
+            assert recover_expired_run(run.connection_id, run.pk)
+            result = execute_native_sync(
+                run.pk, client_factory=native["factory"],
+            )
+            assert result["status"] == "succeeded"
+        finally:
+            release.set()
+        assert future.result(timeout=15)["errorCode"] == "LEASE_LOST"
+
+    shard = NativeSyncShard.objects.get(run=run)
+    assert shard.status == "succeeded"
+    assert shard.error_code == ""
+    assert NativePublishedSnapshot.objects.filter(version__run=run).exists()
+
+
 @pytest.mark.parametrize("interrupted", [False, True])
 def test_deadline_allows_new_run_to_reuse_completed_shard(
     native,
