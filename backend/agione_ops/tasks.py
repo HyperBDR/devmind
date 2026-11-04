@@ -1195,7 +1195,7 @@ def dispatch_auto_refresh_syncs():
     from rest_framework.exceptions import APIException
 
     from agione_ops.models import (
-        ConnectionGrant, NotificationIssue, NotificationRules,
+        ConnectionGrant, NotificationIssue, NotificationRules, SyncRun,
     )
     from agione_ops.permissions import has_action
 
@@ -1234,12 +1234,39 @@ def dispatch_auto_refresh_syncs():
                     reason__in=("continuous_failure", "balance_failure"),
                     last_alerted_at__lte=now - interval,
                 )
-                if rule.last_auto_started_at:
+                if rule.last_auto_success_at:
                     due_issues = due_issues.filter(
-                        last_alerted_at__gt=rule.last_auto_started_at - interval,
+                        last_alerted_at__gt=rule.last_auto_success_at - interval,
                     )
                 if not due_issues.exists():
                     continue
+                if (rule.last_auto_started_at and
+                        now < rule.last_auto_started_at + timedelta(minutes=5)):
+                    continue
+                latest = SyncRun.objects.filter(
+                    connection_id=rule.connection_id,
+                    initiated_by_id=rule.user_id,
+                    idempotency_key__startswith="agione-auto-",
+                ).order_by("-created_at", "-pk").first()
+                if latest:
+                    if latest.status in {"queued", "running", "retrying"}:
+                        continue
+                    if latest.status in {"failed", "revoked", "dispatch_failed"}:
+                        if latest.error_code not in _AUTO_TRANSIENT_ERRORS:
+                            continue
+                    recoverable = (
+                        (latest.status == "failed" and
+                         latest.error_code in _AUTO_TRANSIENT_ERRORS)
+                        or (latest.status == "interrupted" and
+                            latest.error_code == "LEASE_EXPIRED")
+                    )
+                    if (recoverable and not latest.recovery_handled and
+                            latest.finished_at and
+                            latest.finished_at >= now - timedelta(days=1)):
+                        continue
+                    if (latest.finished_at and
+                            now < latest.finished_at + timedelta(minutes=5)):
+                        continue
             connection = rule.connection
             user = rule.user
             authorized = (

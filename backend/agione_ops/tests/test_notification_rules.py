@@ -1271,6 +1271,79 @@ class NotificationRuleApiTests(TestCase):
         self.assertTrue(issue.active)
 
     @override_settings(AGIONE_OPS_NATIVE_ENABLED=True)
+    def test_failed_early_inspection_retries_after_recovery_is_exhausted(self):
+        from django.utils import timezone
+
+        from agione_ops.models import NotificationIssue, SyncRun
+        from agione_ops.tasks import dispatch_auto_refresh_syncs
+
+        SourceConnection.objects.filter(pk=self.connection.pk).update(
+            verified_at=timezone.now(), verified_tenant_id="rules-tenant",
+        )
+        now = datetime(2026, 10, 29, 14, 13, tzinfo=ZONE)
+        scheduled = now + timedelta(hours=1)
+        rules = NotificationRules.objects.create(
+            connection=self.connection, user=self.user,
+            config={**notification_rule_config(), "enabled": True,
+                    "auto_refresh_enabled": True, "auto_refresh_hours": 3,
+                    "repeat_hours": 4,
+                    "channel_id": str(self.own_channel.uuid)},
+            next_auto_refresh_at=scheduled,
+            last_auto_started_at=now - timedelta(minutes=13),
+            last_auto_success_at=now - timedelta(hours=1),
+            last_auto_status="failed",
+        )
+        NotificationIssue.objects.create(
+            rules=rules, customer_id="200", reason="balance_failure",
+            first_seen_at=now - timedelta(hours=4, minutes=13),
+            last_seen_at=now - timedelta(hours=1),
+            last_alerted_at=now - timedelta(hours=4, minutes=13),
+        )
+        run = SyncRun.objects.create(
+            connection=self.connection, initiated_by=self.user,
+            window_start=now - timedelta(hours=3), window_end=now,
+            idempotency_key="agione-auto-test-retry-2", request_hash="a" * 64,
+            credential_version=self.connection.credential_version,
+            config_version=self.connection.config_version, grant_revision=1,
+            status="failed", error_code="SOURCE_UNREACHABLE",
+            finished_at=now - timedelta(minutes=5), recovery_handled=False,
+        )
+        with (patch("django.utils.timezone.now", return_value=now),
+              patch("agione_ops.tasks.submit_auto_sync",
+                    return_value=(object(), True)) as submit):
+            SyncRun.objects.filter(pk=run.pk).update(status="running")
+            self.assertEqual(dispatch_auto_refresh_syncs(), 0)
+            SyncRun.objects.filter(pk=run.pk).update(status="failed")
+            self.assertEqual(dispatch_auto_refresh_syncs(), 0)
+            SyncRun.objects.filter(pk=run.pk).update(recovery_handled=True)
+            SyncRun.objects.filter(pk=run.pk).update(
+                finished_at=now - timedelta(minutes=4),
+            )
+            self.assertEqual(dispatch_auto_refresh_syncs(), 0)
+            SyncRun.objects.filter(pk=run.pk).update(
+                finished_at=now - timedelta(minutes=5),
+            )
+            SyncRun.objects.filter(pk=run.pk).update(
+                error_code="SOURCE_AUTH_FAILED",
+            )
+            self.assertEqual(dispatch_auto_refresh_syncs(), 0)
+            SyncRun.objects.filter(pk=run.pk).update(
+                error_code="SOURCE_UNREACHABLE",
+            )
+            self.assertEqual(dispatch_auto_refresh_syncs(), 1)
+            self.assertEqual(dispatch_auto_refresh_syncs(), 0)
+            self.assertEqual(submit.call_count, 1)
+        rules.refresh_from_db()
+        self.assertEqual(rules.next_auto_refresh_at, scheduled)
+        rules.last_auto_success_at = now
+        rules.save(update_fields=["last_auto_success_at"])
+        later = now + timedelta(minutes=6)
+        with (patch("django.utils.timezone.now", return_value=later),
+              patch("agione_ops.tasks.submit_auto_sync") as submit):
+            self.assertEqual(dispatch_auto_refresh_syncs(), 0)
+            submit.assert_not_called()
+
+    @override_settings(AGIONE_OPS_NATIVE_ENABLED=True)
     def test_disabled_auto_refresh_is_not_dispatched(self):
         from agione_ops.tasks import dispatch_auto_refresh_syncs
 
