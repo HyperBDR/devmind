@@ -1240,18 +1240,29 @@ def dispatch_auto_refresh_syncs():
                     )
                 if not due_issues.exists():
                     continue
-                if (rule.last_auto_started_at and
-                        now < rule.last_auto_started_at + timedelta(minutes=5)):
-                    continue
                 latest = SyncRun.objects.filter(
                     connection_id=rule.connection_id,
                     initiated_by_id=rule.user_id,
                     idempotency_key__startswith="agione-auto-",
                 ).order_by("-created_at", "-pk").first()
+                stale_failure = bool(
+                    latest and latest.status in {
+                        "failed", "revoked", "dispatch_failed", "interrupted",
+                    } and (
+                        latest.config_version != rule.connection.config_version
+                        or latest.credential_version !=
+                        rule.connection.credential_version
+                    )
+                )
+                if (not stale_failure and rule.last_auto_started_at and
+                        now < rule.last_auto_started_at + timedelta(minutes=5)):
+                    continue
                 if latest:
                     if latest.status in {"queued", "running", "retrying"}:
                         continue
-                    if latest.status in {"failed", "revoked", "dispatch_failed"}:
+                    if (not stale_failure and latest.status in {
+                        "failed", "revoked", "dispatch_failed",
+                    }):
                         if latest.error_code not in _AUTO_TRANSIENT_ERRORS:
                             continue
                     recoverable = (
@@ -1260,11 +1271,12 @@ def dispatch_auto_refresh_syncs():
                         or (latest.status == "interrupted" and
                             latest.error_code == "LEASE_EXPIRED")
                     )
-                    if (recoverable and not latest.recovery_handled and
+                    if (not stale_failure and recoverable and
+                            not latest.recovery_handled and
                             latest.finished_at and
                             latest.finished_at >= now - timedelta(days=1)):
                         continue
-                    if (latest.finished_at and
+                    if (not stale_failure and latest.finished_at and
                             now < latest.finished_at + timedelta(minutes=5)):
                         continue
             connection = rule.connection

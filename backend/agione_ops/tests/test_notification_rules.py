@@ -1280,6 +1280,7 @@ class NotificationRuleApiTests(TestCase):
         SourceConnection.objects.filter(pk=self.connection.pk).update(
             verified_at=timezone.now(), verified_tenant_id="rules-tenant",
         )
+        self.connection.refresh_from_db()
         now = datetime(2026, 10, 29, 14, 13, tzinfo=ZONE)
         scheduled = now + timedelta(hours=1)
         rules = NotificationRules.objects.create(
@@ -1342,6 +1343,80 @@ class NotificationRuleApiTests(TestCase):
               patch("agione_ops.tasks.submit_auto_sync") as submit):
             self.assertEqual(dispatch_auto_refresh_syncs(), 0)
             submit.assert_not_called()
+
+    def _verify_changed_connection_recovers_due_inspection(self, credentials):
+        from django.utils import timezone
+
+        from agione_ops.models import NotificationIssue, SyncRun
+        from agione_ops.tasks import dispatch_auto_refresh_syncs
+
+        now = datetime(2026, 10, 29, 14, 13, tzinfo=ZONE)
+        SourceConnection.objects.filter(pk=self.connection.pk).update(
+            verified_at=now, verified_tenant_id="rules-tenant",
+        )
+        self.connection.refresh_from_db()
+        rules = NotificationRules.objects.create(
+            connection=self.connection, user=self.user,
+            config={**notification_rule_config(), "enabled": True,
+                    "auto_refresh_enabled": True, "auto_refresh_hours": 3,
+                    "repeat_hours": 4,
+                    "channel_id": str(self.own_channel.uuid)},
+            next_auto_refresh_at=now + timedelta(hours=1),
+            last_auto_started_at=now - timedelta(minutes=10),
+            last_auto_success_at=now - timedelta(hours=1),
+            last_auto_status="failed",
+        )
+        NotificationIssue.objects.create(
+            rules=rules, customer_id="200", reason="balance_failure",
+            first_seen_at=now - timedelta(hours=5),
+            last_seen_at=now - timedelta(hours=1),
+            last_alerted_at=now - timedelta(hours=4, minutes=30),
+        )
+        failed = SyncRun.objects.create(
+            connection=self.connection, initiated_by=self.user,
+            window_start=now - timedelta(hours=3), window_end=now,
+            idempotency_key="agione-auto-old", request_hash="a" * 64,
+            credential_version=self.connection.credential_version,
+            config_version=self.connection.config_version, grant_revision=1,
+            status="failed", error_code="SOURCE_AUTH_FAILED",
+            finished_at=now - timedelta(minutes=1),
+        )
+        SyncRun.objects.filter(pk=failed.pk).update(
+            created_at=now - timedelta(minutes=10),
+        )
+        with patch("django.utils.timezone.now", return_value=now):
+            self.assertEqual(dispatch_auto_refresh_syncs(), 0)
+            if credentials:
+                self.connection.set_credentials({"access_key": "new"})
+                self.connection.save()
+                self.assertEqual(dispatch_auto_refresh_syncs(), 0)
+                SourceConnection.objects.filter(pk=self.connection.pk).update(
+                    verified_at=now, verified_tenant_id="rules-tenant",
+                )
+            else:
+                SourceConnection.objects.filter(pk=self.connection.pk).update(
+                    name="Updated connection",
+                )
+            NotificationRules.objects.filter(pk=rules.pk).update(
+                last_auto_started_at=now - timedelta(minutes=1),
+            )
+            self.assertEqual(dispatch_auto_refresh_syncs(), 1)
+            self.assertEqual(dispatch_auto_refresh_syncs(), 0)
+        rules.refresh_from_db()
+        self.connection.refresh_from_db()
+        new_run = SyncRun.objects.exclude(pk=failed.pk).get()
+        self.assertEqual(new_run.credential_version,
+                         self.connection.credential_version)
+        self.assertEqual(new_run.config_version, self.connection.config_version)
+        self.assertEqual(rules.next_auto_refresh_at, now + timedelta(hours=1))
+
+    @override_settings(AGIONE_OPS_NATIVE_ENABLED=True)
+    def test_credential_rotation_restores_due_inspection_after_verification(self):
+        self._verify_changed_connection_recovers_due_inspection(True)
+
+    @override_settings(AGIONE_OPS_NATIVE_ENABLED=True)
+    def test_configuration_change_restores_due_inspection(self):
+        self._verify_changed_connection_recovers_due_inspection(False)
 
     @override_settings(AGIONE_OPS_NATIVE_ENABLED=True)
     def test_disabled_auto_refresh_is_not_dispatched(self):
