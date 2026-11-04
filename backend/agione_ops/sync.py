@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 import re
 import uuid
 from datetime import datetime, timedelta, timezone as datetime_timezone
@@ -32,6 +33,15 @@ from agione_ops.permissions import get_connection_for, require_action
 LEASE_SECONDS = 120
 MAX_ATTEMPTS = 3
 ACTIVE_STATUSES = frozenset({"queued", "running", "retrying"})
+logger = logging.getLogger(__name__)
+
+
+def is_manual_sync_key(value):
+    """Recognize the UUID idempotency keys used by the manual UI."""
+    try:
+        return str(uuid.UUID(value)) == value
+    except (ValueError, AttributeError, TypeError):
+        return False
 
 
 def validate_window(window_start, window_end, timezone):
@@ -178,7 +188,28 @@ def recover_expired_run(connection_id, run_id=None):
                 return False
         elif (run.heartbeat_at or run.created_at) > now - timedelta(minutes=5):
             return False
-        if owns_lease:
+        logger.warning(
+            "AGIOne lease expired run_id=%s phase=%s attempt=%s "
+            "heartbeat_at=%s",
+            run.pk, run.phase, run.attempt, run.heartbeat_at,
+        )
+        attempts = max(run.attempt, 1)
+        if run.status == "retrying":
+            attempts += 1
+        if (owns_lease and connection.source_kind == "native"
+                and is_manual_sync_key(run.idempotency_key)
+                and attempts < MAX_ATTEMPTS):
+            _update_connection(
+                connection, lease_token=None,
+                lease_expires_at=now + timedelta(seconds=LEASE_SECONDS),
+            )
+            _update_run(
+                run, status="retrying", phase="retrying",
+                error_code="LEASE_EXPIRED", heartbeat_at=now,
+                attempt=attempts, celery_id=str(uuid.uuid4()),
+            )
+            transaction.on_commit(lambda: _dispatch(run.pk))
+        elif owns_lease:
             _terminal(run, connection, "interrupted", "LEASE_EXPIRED")
         else:
             _update_run(run, status="interrupted", phase="interrupted",

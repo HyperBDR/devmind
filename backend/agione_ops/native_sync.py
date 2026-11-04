@@ -830,7 +830,7 @@ def _make_progress_counter(run):
 def execute_native_sync(run_id, *, client_factory=None):
     """Resume only pending/failed shards under the existing domain lease."""
     from agione_ops.sync import (
-        _checkpoint, _claim, _finish_failure, _project,
+        _checkpoint, _claim, _finish_failure, _project, is_manual_sync_key,
     )
 
     claimed = _claim(run_id)
@@ -842,7 +842,11 @@ def execute_native_sync(run_id, *, client_factory=None):
     run._token, run._epoch = lease_token, epoch
 
     duration = _setting("AGIONE_OPS_NATIVE_MAX_SECONDS", 600, 30, 1800)
-    elapsed = max(0, (timezone.now() - run.created_at).total_seconds())
+    started_at = (
+        run.heartbeat_at if run.attempt > 1 and
+        is_manual_sync_key(run.idempotency_key) else run.created_at
+    )
+    elapsed = max(0, (timezone.now() - started_at).total_seconds())
     deadline = time.monotonic() + max(0, duration - elapsed)
     progress_count = _make_progress_counter(run)
 

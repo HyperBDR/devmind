@@ -4,6 +4,7 @@ STAGES = {
     "authentication": "身份认证",
     "identity": "校验账号身份",
     "calls": "请求调用记录接口",
+    "models": "读取模型列表",
     "finance": "请求财务数据接口",
     "source": "请求 AGIOne 接口",
 }
@@ -12,6 +13,7 @@ NETWORKS = {
     "connection_refused", "connection_reset", "network_unreachable",
     "host_unreachable", "tls", "tls_certificate", "tls_cert_expired",
     "tls_hostname", "protocol", "connect_timeout", "read_timeout", "timeout",
+    "response_deadline",
 }
 
 
@@ -74,6 +76,8 @@ def describe_failure(code, diagnostic):
                             "检查网络链路，并联系 AGIOne 管理员检查服务。"),
         "read_timeout": ("等待 AGIOne 响应时超时。",
                          "检查网络链路，并联系 AGIOne 管理员检查服务负载。"),
+        "response_deadline": ("读取 AGIOne 响应超过总时限。",
+                              "检查网络传输及 AGIOne 接口响应速度。"),
         "timeout": ("请求 AGIOne 时超时。",
                     "检查网络链路，并联系 AGIOne 管理员检查服务。"),
     }
