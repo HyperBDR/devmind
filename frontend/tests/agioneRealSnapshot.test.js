@@ -214,6 +214,17 @@ test('a failed real request does not fall back to synthetic data', async () => {
   assert.deepEqual(calls, [['read', 'real']])
 })
 
+test('a busy query remains retryable without clearing the snapshot', async () => {
+  const h = setup()
+  await h.controller.load()
+  h.api.dashboard = async () => {
+    throw { response: { status: 503, data: { data: { errorCode: 'QUERY_IN_PROGRESS' } } } }
+  }
+  await h.controller.refresh()
+  assert.equal(h.controller.snapshot().error, 'queryBusy')
+  assert.notEqual(h.controller.snapshot().dashboard, null)
+})
+
 for (const status of [401, 403, 404]) {
   test(`real ${status} clears cached metrics, version and dates`, async () => {
     const h = setup()

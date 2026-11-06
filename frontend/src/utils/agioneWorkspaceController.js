@@ -52,7 +52,8 @@ const failure = (error) => {
     DATA_VERSION_EXPIRED: '指定快照已不可用，请显式刷新连接。',
     DEMO_SOURCE_CHANGED: '原 Demo 来源身份已变化，需要重新核验。',
     SOURCE_TIMEOUT: '上游读取超时，请稍后重试。',
-    SOURCE_UNREACHABLE: '暂时无法连接上游，请稍后重试。'
+    SOURCE_UNREACHABLE: '暂时无法连接上游，请稍后重试。',
+    QUERY_IN_PROGRESS: '查询繁忙，请稍后重试。'
   }
   if (typeof code === 'string' && /^[A-Z_0-9]{1,100}$/.test(code))
     return `${messages[code] || '当前页面读取失败，请重试。'} (${code})`

@@ -31,9 +31,9 @@ def _consumed_attempts(run):
 
 def _sync_hard_time_limit():
     """Bound a stuck worker even when an upstream call never returns."""
-    seconds = getattr(settings, "AGIONE_OPS_NATIVE_MAX_SECONDS", 600)
+    seconds = getattr(settings, "AGIONE_OPS_NATIVE_MAX_SECONDS", 1800)
     if type(seconds) is not int or not 30 <= seconds <= 1800:
-        seconds = 600
+        seconds = 1800
     return seconds + 90
 
 
@@ -152,6 +152,11 @@ def _webhook_payload(provider_type, text, card_details=None, _entry_limit=None):
                 columns([("HTTP 状态码", card_details["status"]),
                          ("故障阶段", card_details["stage"])], "grey"),
             ]
+            if card_details.get("heartbeat"):
+                elements.append(columns([
+                    ("最后心跳", card_details["heartbeat"]),
+                    ("尝试次数", card_details.get("attempt", "未知")),
+                ]))
             for label, key in (("错误代码", "code"), ("错误信息", "message"),
                                ("可能原因", "cause"),
                                ("建议处理", "suggestion"), ("影响", "impact"),
@@ -1122,7 +1127,10 @@ def retry_abandoned_auto_sync(run_id):
         ):
             from agione_ops.notification_delivery import notify_collection_failure
 
-            notify_collection_failure(rules, "calls", candidate.error_code)
+            notify_collection_failure(
+                rules, "calls", candidate.error_code,
+                diagnostic={"stage": candidate.phase}, run_id=candidate.pk,
+            )
             SyncRun.objects.filter(pk=run_id).update(recovery_handled=True)
             return False
         try:
@@ -1415,6 +1423,10 @@ def cleanup_native_snapshots():
             ).filter(pk=version_id).first()
             if snapshot is None or not candidates.filter(pk=version_id).exists():
                 continue
+            from agione_ops.native_sync_models import NativeSnapshotChunk
+            models.QuerySet(
+                model=NativeSnapshotChunk, using=connection.alias,
+            ).filter(version_id=version_id).delete()
             count, _ = models.QuerySet(
                 model=NativePublishedSnapshot, using=connection.alias,
             ).filter(pk=version_id).delete()

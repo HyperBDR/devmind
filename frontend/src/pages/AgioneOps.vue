@@ -497,7 +497,7 @@
               </button>
             </div>
             <div v-if="readOnly && work.error" class="callout" role="alert">
-              <p>{{ t(work.error.includes('(DATA_VERSION_EXPIRED)') ? 'agione.errors.snapshotExpired' : 'agione.errors.networkError') }}</p>
+              <p>{{ t(work.error.includes('(DATA_VERSION_EXPIRED)') ? 'agione.errors.snapshotExpired' : work.error.includes('(QUERY_IN_PROGRESS)') ? 'agione.errors.queryBusy' : 'agione.errors.networkError') }}</p>
               <button @click="work.error.includes('(DATA_VERSION_EXPIRED)') ? controller.loadWindow(state.startDate, state.endDate) : workspace.load()">{{ t('agione.retryPage') }}</button>
             </div>
             <div v-if="readOnly && work.loading" class="loading" role="status">

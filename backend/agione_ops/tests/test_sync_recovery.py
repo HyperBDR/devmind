@@ -18,14 +18,66 @@ from agione_ops.models import (
 
 
 class ProgressCountTests(TestCase):
+    def test_periodic_registration_preserves_disabled_existing_task(self):
+        import sys
+        from types import SimpleNamespace
+
+        from agione_ops.periodic_tasks import register_periodic_tasks
+        from core.periodic_registry import TaskRegistry
+
+        registry = TaskRegistry()
+        with patch("agione_ops.periodic_tasks.TASK_REGISTRY", registry):
+            register_periodic_tasks()
+        entry = registry._entries["agione_recover_abandoned_native_syncs"]
+        self.assertTrue(entry["enabled"])
+        existing = Mock(enabled=False, interval="operator-custom-interval")
+        periodic_task = Mock()
+        periodic_task.objects.get_or_create.return_value = existing, False
+        periodic_tasks = Mock()
+        models = SimpleNamespace(
+            PeriodicTask=periodic_task, PeriodicTasks=periodic_tasks,
+        )
+        with (patch.dict(sys.modules, {"django_celery_beat.models": models}),
+              patch("core.periodic_registry._get_or_create_interval_seconds",
+                    return_value="registry-default-interval")):
+            result = registry._apply_one(
+                "agione_recover_abandoned_native_syncs", entry,
+            )
+        self.assertEqual(result, "skipped")
+        self.assertFalse(existing.enabled)
+        self.assertEqual(existing.interval, "operator-custom-interval")
+        existing.save.assert_not_called()
+        periodic_tasks.update_changed.assert_not_called()
+
     def test_collection_workers_have_hard_time_limits(self):
         from agione_ops.tasks import refresh_native_finance, run_sync
 
-        self.assertIsNotNone(run_sync.time_limit)
+        self.assertEqual(run_sync.time_limit, 1890)
+        self.assertEqual(run_sync.soft_time_limit, 1860)
         self.assertEqual(refresh_native_finance.time_limit, 1260)
         self.assertLess(run_sync.soft_time_limit, run_sync.time_limit)
         self.assertLess(refresh_native_finance.soft_time_limit,
                         refresh_native_finance.time_limit)
+
+    def test_explicit_execution_budget_controls_hard_limit(self):
+        from agione_ops.tasks import _sync_hard_time_limit
+
+        for seconds in (30, 120, 600, 1800):
+            with (self.subTest(seconds=seconds),
+                  override_settings(AGIONE_OPS_NATIVE_MAX_SECONDS=seconds)):
+                self.assertEqual(_sync_hard_time_limit(), seconds + 90)
+        for invalid in (True, "600", 0, 1801):
+            with (self.subTest(invalid=invalid),
+                  override_settings(AGIONE_OPS_NATIVE_MAX_SECONDS=invalid)):
+                self.assertEqual(_sync_hard_time_limit(), 1890)
+
+    def test_deadline_message_explains_bounded_reuse_not_success(self):
+        from agione_ops.collection_diagnostics import describe_failure
+
+        message, suggestion = describe_failure("NATIVE_SYNC_DEADLINE", {})
+        self.assertIn("未发布", message)
+        self.assertIn("调整执行时限", suggestion)
+        self.assertIn("复用已完成分片", suggestion)
 
     def test_progress_count_is_reused_between_heartbeats(self):
         from types import SimpleNamespace
@@ -283,6 +335,27 @@ class ExpiredSyncTests(TestCase):
         )
         return run
 
+    def test_exhausted_expiry_alert_retains_stage_and_safe_cause(self):
+        from agione_ops.tasks import retry_abandoned_auto_sync
+
+        run = self.make_active()
+        SyncRun.objects.filter(pk=run.pk).update(
+            status="interrupted", phase="publishing", attempt=3,
+            error_code="LEASE_EXPIRED", finished_at=self.now,
+        )
+        NotificationRules.objects.create(
+            connection=self.connection, user=self.user,
+            config={"auto_refresh_enabled": True, "enabled": True,
+                    "channel_id": str(uuid4())},
+        )
+        self.assertFalse(retry_abandoned_auto_sync(run.pk))
+        details = NotificationDelivery.objects.get().payload["card_details"]
+        self.assertEqual(details["stage"], "发布采集结果")
+        self.assertEqual(details["run_id"], str(run.pk))
+        self.assertIn("未收到有效进展", details["message"])
+        self.assertIn("不能确认", details["cause"])
+        self.assertIn("日志", details["suggestion"])
+
     def test_collection_failure_alert_is_deduplicated_and_opt_in(self):
         from agione_ops.notification_delivery import notify_collection_failure
 
@@ -334,6 +407,29 @@ class ExpiredSyncTests(TestCase):
         self.assertIn("DevMind 管理员", str(card))
         self.assertIn(str(run_id), str(card))
         self.assertIn("查看经营看板", str(card))
+
+    def test_lease_failure_card_contains_last_observed_run_details(self):
+        from agione_ops.notification_delivery import notify_collection_failure
+        from agione_ops.tasks import _webhook_payload
+
+        rules = NotificationRules.objects.create(
+            connection=self.connection, user=self.user,
+            config={"enabled": True, "channel_id": str(uuid4())},
+        )
+        run = self.make_active()
+        heartbeat = timezone.now().replace(microsecond=0)
+        SyncRun.objects.filter(pk=run.pk).update(
+            phase="models", heartbeat_at=heartbeat, attempt=2,
+        )
+        notify_collection_failure(
+            rules, "calls", "LEASE_EXPIRED", run_id=run.pk,
+        )
+        payload = NotificationDelivery.objects.get(rules=rules).payload
+        card = _webhook_payload("feishu", payload["text"],
+                                payload["card_details"])["card"]
+        self.assertIn("读取模型列表", str(card))
+        self.assertIn("最后心跳", str(card))
+        self.assertIn("尝试次数", str(card))
 
     def test_distinct_network_failures_each_get_one_alert(self):
         from agione_ops.notification_delivery import notify_collection_failure
@@ -420,6 +516,63 @@ class ExpiredSyncTests(TestCase):
         self.assertEqual(rules.last_auto_status, "interrupted")
         self.assertEqual(rules.last_auto_error_code, "LEASE_EXPIRED")
 
+    def test_expiry_retains_last_real_phase_and_heartbeat(self):
+        from agione_ops.sync import recover_expired_run
+
+        run = self.make_active()
+        heartbeat = run.heartbeat_at
+        SyncRun.objects.filter(pk=run.pk).update(phase="publishing")
+        with patch("django.utils.timezone.now", return_value=self.now):
+            self.assertTrue(recover_expired_run(self.connection.pk))
+        run.refresh_from_db()
+        self.assertEqual(run.phase, "publishing")
+        self.assertEqual(run.heartbeat_at, heartbeat)
+        self.assertEqual(run.status, "interrupted")
+
+    def test_queued_manual_recovery_does_not_invent_a_heartbeat(self):
+        from agione_ops.sync import _claim, recover_expired_run
+
+        run = self.make_active()
+        SyncRun.objects.filter(pk=run.pk).update(
+            idempotency_key=str(uuid4()), status="queued", phase="queued",
+            heartbeat_at=None, attempt=0,
+            created_at=self.now - timedelta(minutes=8),
+        )
+        with (patch("django.utils.timezone.now", return_value=self.now),
+              patch("agione_ops.sync._dispatch") as dispatch,
+              self.captureOnCommitCallbacks(execute=True)):
+            self.assertTrue(recover_expired_run(self.connection.pk))
+            self.assertFalse(recover_expired_run(self.connection.pk))
+        run.refresh_from_db()
+        self.assertIsNone(run.heartbeat_at)
+        self.assertEqual((run.phase, run.attempt), ("queued", 1))
+        dispatch.assert_called_once_with(run.pk)
+        with (patch("django.utils.timezone.now", return_value=self.now),
+              patch("agione_ops.sync._authorize_run")):
+            claimed, _, _, _ = _claim(run.pk)
+        self.assertEqual(claimed.attempt, 2)
+        self.assertEqual(claimed.heartbeat_at, self.now)
+
+    def test_expired_lease_grace_protects_queued_and_running_runs(self):
+        from agione_ops.sync import recover_expired_run
+
+        run = self.make_active()
+        for status in ("queued", "running"):
+            with self.subTest(status=status):
+                SyncRun.objects.filter(pk=run.pk).update(status=status)
+                SourceConnection.objects.filter(
+                    pk=self.connection.pk,
+                ).update(
+                    lease_expires_at=self.now - timedelta(seconds=179),
+                )
+                with (patch("django.utils.timezone.now",
+                            return_value=self.now),
+                      patch("agione_ops.sync._dispatch") as dispatch):
+                    self.assertFalse(recover_expired_run(self.connection.pk))
+                run.refresh_from_db()
+                self.assertEqual(run.status, status)
+                dispatch.assert_not_called()
+
     def test_live_lease_is_never_interrupted(self):
         from agione_ops.sync import recover_expired_run
         run = self.make_active(expired=False)
@@ -447,6 +600,10 @@ class ExpiredSyncTests(TestCase):
         self.connection.refresh_from_db()
         self.assertEqual(run.status, "retrying")
         self.assertEqual(run.error_code, "LEASE_EXPIRED")
+        self.assertEqual(run.phase, "calls")
+        self.assertEqual(
+            run.heartbeat_at, self.now - timedelta(minutes=8),
+        )
         self.assertEqual(self.connection.active_run_id, run.pk)
         dispatch.assert_called_once_with(run.pk)
         with (patch("django.utils.timezone.now", return_value=self.now),

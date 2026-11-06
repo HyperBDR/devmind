@@ -10,6 +10,7 @@ from bisect import bisect_left
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from datetime import timedelta
+from itertools import islice
 from threading import Lock
 from time import perf_counter
 from zoneinfo import ZoneInfo
@@ -18,6 +19,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models.fields.json import KeyTransform
 from django.utils import timezone
 from rest_framework.exceptions import APIException
 
@@ -46,6 +48,7 @@ RETRY_CODES = frozenset({
     "SOURCE_TIMEOUT", "SOURCE_RATE_LIMITED", "SOURCE_UNAVAILABLE",
     "SOURCE_UNREACHABLE", "SOURCE_REJECTED",
     "SOURCE_CHANGED_DURING_PAGING", "SOURCE_INCOMPLETE_PAGING",
+    "NATIVE_SYNC_DEADLINE",
 })
 FINANCE_FIELDS = frozenset({
     "available", "readOnly", "mode", "independentOfFilters", "scopeLabel",
@@ -62,10 +65,47 @@ FINANCE_FIELDS = frozenset({
 
 def digest(data):
     """Digest only canonical normalized JSON, never transport payloads."""
-    return hashlib.sha256(json.dumps(
-        data, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+    encoder = json.JSONEncoder(
+        sort_keys=True, separators=(",", ":"), ensure_ascii=True,
         allow_nan=False,
-    ).encode("utf-8")).hexdigest()
+    )
+    result = hashlib.sha256()
+    for chunk in encoder.iterencode(data):
+        result.update(chunk.encode("utf-8"))
+    return result.hexdigest()
+
+
+def digest_snapshot_rows(metadata, rows):
+    """Hash canonical snapshot JSON without retaining all rows in memory."""
+    if "rows" in metadata:
+        raise ValueError("Snapshot metadata must not contain rows")
+    encoder = json.JSONEncoder(
+        sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+        allow_nan=False,
+    )
+    result = hashlib.sha256()
+
+    def write(value):
+        for chunk in encoder.iterencode(value):
+            result.update(chunk.encode("utf-8"))
+
+    result.update(b"{")
+    for index, key in enumerate(sorted((*metadata.keys(), "rows"))):
+        if index:
+            result.update(b",")
+        write(key)
+        result.update(b":")
+        if key != "rows":
+            write(metadata[key])
+            continue
+        result.update(b"[")
+        for row_index, row in enumerate(rows):
+            if row_index:
+                result.update(b",")
+            write(row)
+        result.update(b"]")
+    result.update(b"}")
+    return result.hexdigest()
 
 
 def validate_snapshot_data(data, content_digest):
@@ -73,6 +113,17 @@ def validate_snapshot_data(data, content_digest):
     def invalid():
         raise ValidationError("Invalid normalized native snapshot.")
 
+    if isinstance(data, dict) and "chunkDigests" in data:
+        from agione_ops.snapshot_chunks import valid_chunk_reference
+
+        hashes = data["chunkDigests"]
+        if (data.get("rows") != [] or not isinstance(hashes, list)
+                or not all(valid_chunk_reference(x) for x in hashes)
+                or digest(data) != content_digest):
+            invalid()
+        header = dict(data)
+        del header["chunkDigests"]
+        return validate_snapshot_data(header, digest(header))
     if not isinstance(data, dict) or set(data) not in ({
         "metadata", "rows", "customers", "models",
     }, {
@@ -497,6 +548,8 @@ def _seed_incremental(run, state, checkpoint):
         version__window_start__lt=run.window_end,
         version__window_end__gt=run.window_start,
         version__run__status="succeeded",
+    ).annotate(
+        reuse_directory=KeyTransform("customers", "data"),
     ).select_related("version").only(
         "version_id", "content_digest", "version__coverage",
         "version__window_start", "version__window_end",
@@ -526,34 +579,63 @@ def _seed_incremental(run, state, checkpoint):
             NativeSyncShard.objects.filter(pk=crossing.pk).update(
                 status="split", error_code="INCREMENTAL_CUTOFF",
             )
-    checked = {}
-    for shard in run.native_shards.filter(status="pending"):
-        previous = next((item for item in snapshots if (
-            item.version.coverage.get("pagingComplete")
-            and not item.version.coverage.get("partial")
-            and item.version.window_start <= shard.window_start
-            and shard.window_end <= item.version.window_end
-            and shard.window_end <= cutoff
-            and isinstance(item.data, dict)
-            and set(item.data.get("customers", {})) == set(state.directory)
-        )), None)
+    cached_id, times, indexed = None, [], []
+    directory_ids = set(state.directory)
+    for shard in run.native_shards.filter(status="pending").iterator():
+        checkpoint("incremental")
+        previous = None
+        candidates = snapshots.filter(
+            version__window_start__lte=shard.window_start,
+            version__window_end__gte=shard.window_end,
+        ) if shard.window_end <= cutoff else snapshots.none()
+        for item in candidates.iterator(chunk_size=8):
+            checkpoint("incremental")
+            if (
+                item.version.coverage.get("pagingComplete")
+                and not item.version.coverage.get("partial")
+                and isinstance(item.reuse_directory, dict)
+                and set(item.reuse_directory) == directory_ids
+            ):
+                previous = item
+                break
         if previous is None:
             continue
-        if previous.pk not in checked:
-            validate_snapshot_data(previous.data, previous.content_digest)
+        if previous.pk != cached_id and "chunkDigests" in previous.data:
+            from agione_ops.snapshot_chunks import snapshot_rows
+
+            selected = (
+                row for row in snapshot_rows(
+                    previous, shard.window_start, shard.window_end,
+                )
+                if shard.window_start <= parse_time(row["occurred_at"])
+                < shard.window_end and row["customer_id"] in directory_ids
+            )
+            _stage(run, shard, selected, 0, 0, checkpoint)
+            continue
+        if previous.pk != cached_id:
+            # Release the old row graph before loading a different snapshot.
+            cached_id, times, indexed = None, [], []
+            checkpoint("incremental")
+            data = previous.data
+            validate_snapshot_data(data, previous.content_digest)
+            checkpoint("incremental")
             indexed = sorted(
                 ((parse_time(row["occurred_at"]), row)
-                 for row in previous.data["rows"]),
+                 for row in data["rows"]),
                 key=lambda item: item[0],
             )
-            checked[previous.pk] = ([item[0] for item in indexed], indexed)
+            times = [item[0] for item in indexed]
+            cached_id = previous.pk
+            del data
+        # Keep only the selected row index, not the model's full JSON payload.
+        del previous, item
         checkpoint("incremental")
-        times, indexed = checked[previous.pk]
         first = bisect_left(times, shard.window_start)
         last = bisect_left(times, shard.window_end)
         rows = [row for _, row in indexed[first:last]
-                if row["customer_id"] in state.directory]
+                if row["customer_id"] in directory_ids]
         _stage(run, shard, rows, 0, 0, checkpoint)
+        del rows
 
 
 def _read_shard(client, shard, workers, checkpoint):
@@ -599,18 +681,28 @@ def _read_shard(client, shard, workers, checkpoint):
     pages = max(1, math.ceil(total / size))
     if pages > limit:
         raise AgioneOpsError("SOURCE_PAGE_LIMIT", status_code=409)
-    all_rows = list(rows)
+    page_rows = {1: rows}
     with ThreadPoolExecutor(max_workers=workers) as executor:
-        for at in range(2, pages + 1, workers):
+        pending = {}
+        next_page = 2
+        while next_page <= pages or pending:
             checkpoint("calls")
-            numbers = range(at, min(at + workers, pages + 1))
-            futures = [executor.submit(
-                client.get, path, {**params, "current": page},
-            ) for page in numbers]
-            for future in futures:
+            while next_page <= pages and len(pending) < workers:
+                future = executor.submit(
+                    client.get, path, {**params, "current": next_page},
+                )
+                pending[future] = next_page
+                next_page += 1
+            if not pending:
+                break
+            done, _ = wait(pending, timeout=2, return_when=FIRST_COMPLETED)
+            for future in done:
+                page = pending.pop(future)
                 batch, _ = validate(future.result(), total)
-                all_rows.extend(batch)
+                page_rows[page] = batch
             checkpoint("calls")
+    all_rows = [row for page in range(1, pages + 1)
+                for row in page_rows[page]]
     keys = set()
     for row in all_rows:
         if not isinstance(row, dict):
@@ -641,26 +733,26 @@ def _stage(run, shard, rows, pages, excluded, checkpoint):
         current = SyncRun.objects.select_for_update().get(pk=run.pk)
         _assert_lease(locked, current, run._token, run._epoch)
         authorize_native_run(current, locked)
-        records = [
-            NativeStagedRecord(
-                run=run,
-                shard=shard,
-                record_id=row["record_id"],
-                occurred_at=parse_time(row["occurred_at"]),
-                content_digest=digest(row),
-                data=row,
-            )
-            for row in rows
-        ]
-        NativeStagedRecord.objects.bulk_create(
-            records,
-            batch_size=500,
-            update_conflicts=True,
-            update_fields=["shard", "occurred_at", "content_digest", "data"],
-            unique_fields=["run", "record_id"],
-        )
+        NativeStagedRecord.objects.filter(run=run, shard=shard).delete()
+        stream = iter(rows)
+        count = 0
+        while batch := list(islice(stream, 500)):
+            ids = [row["record_id"] for row in batch]
+            if len(ids) != len(set(ids)) or NativeStagedRecord.objects.filter(
+                run=run, record_id__in=ids,
+            ).exists():
+                raise AgioneOpsError("SOURCE_DUPLICATE_PAGE", status_code=409)
+            NativeStagedRecord.objects.bulk_create([
+                NativeStagedRecord(
+                    run=run, shard=shard, record_id=row["record_id"],
+                    occurred_at=parse_time(row["occurred_at"]),
+                    content_digest=digest(row), data=row,
+                )
+                for row in batch
+            ])
+            count += len(batch)
         NativeSyncShard.objects.filter(pk=shard.pk).update(
-            status="succeeded", pages_read=pages, record_count=len(rows),
+            status="succeeded", pages_read=pages, record_count=count,
             excluded_count=excluded, error_code="",
             completed_at=timezone.now(),
         )
@@ -712,9 +804,12 @@ def _publish(run, connection, state, finance, checkpoint):
             status__in=["succeeded", "split"],
         ).exists():
             raise AgioneOpsError("SOURCE_SHARDS_INCOMPLETE")
-        rows = list(run.native_staging.order_by(
+        from agione_ops.snapshot_chunks import BATCH_SIZE, write_chunks
+
+        count = run.native_staging.count()
+        rows = run.native_staging.order_by(
             "occurred_at", "record_id",
-        ).values_list("data", flat=True))
+        ).values_list("data", flat=True).iterator(chunk_size=BATCH_SIZE)
         data = {
             "metadata": {
                 "configVersion": run.config_version,
@@ -722,7 +817,7 @@ def _publish(run, connection, state, finance, checkpoint):
                 "roleState": state.role_state,
                 "collectedAt": timezone.now().isoformat(),
             },
-            "rows": rows, "customers": state.directory,
+            "customers": state.directory,
             "models": state.model_names, "finance": finance,
         }
         shards = list(run.native_shards.exclude(status="split"))
@@ -740,7 +835,7 @@ def _publish(run, connection, state, finance, checkpoint):
             "pagingComplete": True, "partial": False,
             "directoryTotal": state.directory_count,
             "confirmedDirectoryCount": state.directory_count,
-            "sourceRecordCount": len(rows),
+            "sourceRecordCount": count,
             "pagesRead": sum(x.pages_read for x in shards),
             "quarantinedRecordCount": sum(x.excluded_count for x in shards),
             "shardsComplete": len(shards),
@@ -755,13 +850,17 @@ def _publish(run, connection, state, finance, checkpoint):
             window_start=run.window_start, window_end=run.window_end,
             timezone=run.timezone, coverage=coverage,
         )
+        if count > BATCH_SIZE:
+            data = write_chunks(version, data, rows)
+        else:
+            data["rows"] = list(rows)
         NativePublishedSnapshot.objects.create(
             version=version, data=data, content_digest=digest(data),
         )
         authorize_native_run(current, connection)
         _update_run(
             current, status="succeeded", phase="succeeded", error_code="",
-            processed_count=len(rows), total_count=len(rows),
+            processed_count=count, total_count=count,
             finished_at=timezone.now(), heartbeat_at=timezone.now(),
         )
         _release(connection)
@@ -849,7 +948,7 @@ def _make_progress_counter(run):
 def execute_native_sync(run_id, *, client_factory=None):
     """Resume only pending/failed shards under the existing domain lease."""
     from agione_ops.sync import (
-        _checkpoint, _claim, _finish_failure, _project, is_manual_sync_key,
+        _checkpoint, _claim, _finish_failure, _project,
     )
 
     claimed = _claim(run_id)
@@ -860,13 +959,13 @@ def execute_native_sync(run_id, *, client_factory=None):
     run, connection, lease_token, epoch = claimed
     run._token, run._epoch = lease_token, epoch
 
-    duration = _setting("AGIONE_OPS_NATIVE_MAX_SECONDS", 600, 30, 1800)
-    started_at = (
-        run.heartbeat_at if run.attempt > 1 and
-        is_manual_sync_key(run.idempotency_key) else run.created_at
-    )
-    elapsed = max(0, (timezone.now() - started_at).total_seconds())
+    duration = getattr(settings, "AGIONE_OPS_NATIVE_MAX_SECONDS", 1800)
+    if type(duration) is not int or not 30 <= duration <= 1800:
+        duration = 1800
+    # Claim time starts this attempt; queue/backoff wait is not execution.
+    elapsed = max(0, (timezone.now() - run.heartbeat_at).total_seconds())
     deadline = time.monotonic() + max(0, duration - elapsed)
+    completed_before = run.native_shards.filter(status="succeeded").count()
     progress_count = _make_progress_counter(run)
 
     def checkpoint(phase):
@@ -893,13 +992,14 @@ def execute_native_sync(run_id, *, client_factory=None):
             state.role_state = "not_verified"
         with _owned_run(run):
             state.save(update_fields=["role_state"])
+        checkpoint("incremental")
         _seed_timed_out(run, state, checkpoint)
         _seed_incremental(run, state, checkpoint)
         timings["reuse_ms"] = (
             round((perf_counter() - started) * 1000) - timings["prepare_ms"]
         )
         shard_workers = _setting(
-            "AGIONE_OPS_NATIVE_SHARD_CONCURRENCY", 2, 1, 3,
+            "AGIONE_OPS_NATIVE_SHARD_CONCURRENCY", 3, 1, 3,
         )
 
         def fetch_checkpoint(_phase):
@@ -1023,9 +1123,19 @@ def execute_native_sync(run_id, *, client_factory=None):
                 )
                 finance["mode"] = "snapshot"
         checkpoint("finance")
-        return _publish(run, connection, state, finance, checkpoint)
+        from agione_ops.publication_limits import publication_slot
+
+        with publication_slot(checkpoint):
+            return _publish(run, connection, state, finance, checkpoint)
     except APIException as error:
-        if getattr(error, "code", "") in RETRY_CODES:
+        code = getattr(error, "code", "")
+        if code == "NATIVE_SYNC_DEADLINE":
+            # Resume useful durable work, never loop on a stalled attempt.
+            error.retryable = (
+                run.native_shards.filter(status="succeeded").count()
+                > completed_before
+            )
+        elif code in RETRY_CODES:
             error.retryable = True
         return _finish_failure(
             run, connection, lease_token, epoch, error,

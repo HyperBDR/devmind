@@ -130,11 +130,13 @@ function safeError(error) {
   const status = error?.response?.status
   const code = error?.response?.data?.data?.errorCode || ''
   return {
-    error: [401, 403, 404].includes(status)
-      ? 'accessDenied'
-      : status === 409
-        ? 'conflict'
-        : 'networkError',
+    error: code === 'QUERY_IN_PROGRESS'
+      ? 'queryBusy'
+      : [401, 403, 404].includes(status)
+        ? 'accessDenied'
+        : status === 409
+          ? 'conflict'
+          : 'networkError',
     errorCode: /^[A-Z_0-9]{1,80}$/.test(code) ? code : ''
   }
 }

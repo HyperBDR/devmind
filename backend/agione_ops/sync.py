@@ -154,10 +154,10 @@ def _authorize_run(run, connection):
 
 
 def _terminal(run, connection, status, code):
+    """Release ownership while retaining the last observed work phase."""
     _update_run(
         run,
         status=status,
-        phase=status,
         error_code=code,
         finished_at=django_timezone.now(),
     )
@@ -204,15 +204,15 @@ def recover_expired_run(connection_id, run_id=None):
                 lease_expires_at=now + timedelta(seconds=LEASE_SECONDS),
             )
             _update_run(
-                run, status="retrying", phase="retrying",
-                error_code="LEASE_EXPIRED", heartbeat_at=now,
+                run, status="retrying",
+                error_code="LEASE_EXPIRED",
                 attempt=attempts, celery_id=str(uuid.uuid4()),
             )
             transaction.on_commit(lambda: _dispatch(run.pk))
         elif owns_lease:
             _terminal(run, connection, "interrupted", "LEASE_EXPIRED")
         else:
-            _update_run(run, status="interrupted", phase="interrupted",
+            _update_run(run, status="interrupted",
                         error_code="LEASE_EXPIRED", finished_at=now)
         recovered = run
     if recovered.idempotency_key.startswith("agione-auto-"):
@@ -684,7 +684,7 @@ def _finish_failure(run, connection, token, epoch, error):
         if retryable and run.attempt < MAX_ATTEMPTS:
             delay = min(2**run.attempt, 30)
             _update_run(
-                run, status="retrying", phase="retrying", error_code=code
+                run, status="retrying", error_code=code
             )
             _update_connection(
                 connection,
