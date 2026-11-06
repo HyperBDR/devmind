@@ -11,8 +11,10 @@ import re
 import socket
 import ssl
 import time
+from contextlib import contextmanager
+from contextvars import copy_context
 from datetime import datetime, timezone
-from threading import RLock
+from threading import BoundedSemaphore, Event, Lock, RLock, Thread
 from urllib.parse import urlsplit
 
 import httpx
@@ -27,6 +29,13 @@ logger = logging.getLogger(__name__)
 MAX_BYTES = 8 * 1024 * 1024
 MAX_PAGES = 100
 MAX_RESPONSE_SECONDS = 60
+# Retain a slot until the underlying operation really exits, even on timeout.
+# Python cannot kill a blocked resolver/transport thread safely. Fail closed
+# at this per-process ceiling instead of accumulating abandoned threads.
+_IO_SLOTS = BoundedSemaphore(8)
+# Every client owns a slot until its real close finishes, bounding blocked
+# cleanup threads. Celery recycles worker processes after a bounded task count.
+_CLIENT_SLOTS = BoundedSemaphore(32)
 READ_PATHS = re.compile(
     r"^(?:/admin/user/info|/admin/user/details/[0-9]{1,40}"
     r"|/coperation/tenant/(?:op-customers|provider-customers|"
@@ -117,6 +126,11 @@ class NativeClient:
         self._mock = isinstance(transport, httpx.MockTransport)
         self._clock = clock or time.time
         self._lock = RLock()
+        self._io_lock = Lock()
+        self._active_io = 0
+        self._http_closed = False
+        self._cleanup_queued = False
+        self._cleanup_done = Event()
         self._token = ""
         self._token_until = 0
         self._identity_cache = None
@@ -163,16 +177,25 @@ class NativeClient:
         self._expected_tenant = _text(connection.expected_tenant_id, 160)
         if connection.principal_kind not in {"provider", "operator"}:
             raise _error("SOURCE_IDENTITY_MISMATCH", 403)
-        self._http = httpx.Client(
-            base_url=self._origin,
-            timeout=httpx.Timeout(15.0),
-            follow_redirects=False,
-            trust_env=False,
-            transport=transport,
-            limits=httpx.Limits(
-                max_connections=3, max_keepalive_connections=3
-            ),
-        )
+        self._client_slots = _CLIENT_SLOTS
+        if not self._client_slots.acquire(blocking=False):
+            failure = _error("SOURCE_TIMEOUT", 504)
+            failure.diagnostic = {"network": "response_deadline"}
+            raise failure
+        try:
+            self._http = httpx.Client(
+                base_url=self._origin,
+                timeout=httpx.Timeout(15.0),
+                follow_redirects=False,
+                trust_env=False,
+                transport=transport,
+                limits=httpx.Limits(
+                    max_connections=3, max_keepalive_connections=3
+                ),
+            )
+        except BaseException:
+            self._client_slots.release()
+            raise
 
     def _validate_origin(self, endpoint):
         try:
@@ -301,6 +324,77 @@ class NativeClient:
             "x-request-sign": signature,
         }
 
+    @contextmanager
+    def _locked(self):
+        """Do not wait indefinitely behind authentication or identity IO."""
+        if not self._lock.acquire(timeout=MAX_RESPONSE_SECONDS):
+            failure = _error("SOURCE_TIMEOUT", 504)
+            failure.diagnostic = {"network": "response_deadline"}
+            raise failure
+        try:
+            yield
+        finally:
+            self._lock.release()
+
+    def _close_http(self):
+        with self._io_lock:
+            if self._http_closed:
+                return
+            self._http_closed = True
+        try:
+            self._http.close()
+        except Exception as error:
+            logger.warning(
+                "AGIOne transport cleanup failed error_type=%s",
+                type(error).__name__,
+            )
+        finally:
+            self._client_slots.release()
+            self._cleanup_done.set()
+
+    def _bounded_io(self, operation, deadline):
+        """Bound caller waiting without pretending blocked IO was cancelled."""
+        slots = _IO_SLOTS
+        if not slots.acquire(blocking=False):
+            raise ResponseDeadlineExceeded("IO capacity exhausted")
+        done = Event()
+        outcome = {}
+        context = copy_context()
+        with self._io_lock:
+            self._active_io += 1
+
+        def run():
+            try:
+                outcome["result"] = context.run(operation)
+            except BaseException as error:
+                outcome["error"] = error
+            finally:
+                try:
+                    with self._io_lock:
+                        self._active_io -= 1
+                        close = self._closed and not self._active_io
+                    if close:
+                        self._close_http()
+                finally:
+                    slots.release()
+                    done.set()
+
+        worker = Thread(target=run, name="agione-native-io", daemon=True)
+        try:
+            worker.start()
+        except BaseException:
+            with self._io_lock:
+                self._active_io -= 1
+            slots.release()
+            raise
+        if not done.wait(max(0, deadline - time.monotonic())):
+            # Never reuse a client while its timed-out request may still run.
+            self.close(_deadline=deadline)
+            raise ResponseDeadlineExceeded("response deadline exceeded")
+        if "error" in outcome:
+            raise outcome["error"]
+        return outcome.get("result")
+
     def _request(self, method, path, *, params=None, data=None, auth=None):
         if self._closed:
             raise _error("SOURCE_CLIENT_CLOSED", 503)
@@ -334,7 +428,15 @@ class NativeClient:
                 "AGIOne model request started connection_id=%s",
                 getattr(self.connection, "pk", None),
             )
-        try:
+        deadline = started + MAX_RESPONSE_SECONDS
+
+        def check_deadline():
+            if self._closed or time.monotonic() >= deadline:
+                raise ResponseDeadlineExceeded("response deadline exceeded")
+
+        def perform():
+            nonlocal status
+            check_deadline()
             self._check_dns()
             if is_models:
                 logger.info(
@@ -342,8 +444,7 @@ class NativeClient:
                     getattr(self.connection, "pk", None),
                     round((time.monotonic() - started) * 1000),
                 )
-            if time.monotonic() - started >= MAX_RESPONSE_SECONDS:
-                raise ResponseDeadlineExceeded("response deadline exceeded")
+            check_deadline()
             add_counter("internal_http_requests", 1)
             with self._http.stream(
                 method,
@@ -352,7 +453,11 @@ class NativeClient:
                 headers=headers,
                 data=data,
                 auth=auth,
+                timeout=httpx.Timeout(min(15.0, max(
+                    .001, deadline - time.monotonic(),
+                ))),
             ) as response:
+                check_deadline()
                 status = response.status_code
                 if is_models:
                     logger.info(
@@ -372,18 +477,22 @@ class NativeClient:
                         raise _error("SOURCE_SHAPE_CHANGED") from None
                 body = bytearray()
                 for chunk in response.iter_bytes():
-                    if time.monotonic() - started >= MAX_RESPONSE_SECONDS:
-                        raise ResponseDeadlineExceeded("response deadline exceeded")
+                    check_deadline()
                     add_counter("internal_download_bytes", len(chunk))
-                    body.extend(chunk)
-                    if len(body) > MAX_BYTES:
+                    if len(body) + len(chunk) > MAX_BYTES:
                         raise _error("SOURCE_RESPONSE_TOO_LARGE")
-                if time.monotonic() - started >= MAX_RESPONSE_SECONDS:
-                    raise ResponseDeadlineExceeded("response deadline exceeded")
-                result = self._decode(response.status_code, body)
-                self.fetched_at = datetime.now(timezone.utc).isoformat()
-                return result
+                    body.extend(chunk)
+                check_deadline()
+                return self._decode(response.status_code, body)
+
+        try:
+            result = self._bounded_io(perform, deadline)
+            check_deadline()
+            self.fetched_at = datetime.now(timezone.utc).isoformat()
+            return result
         except httpx.TimeoutException as error:
+            if isinstance(error, ResponseDeadlineExceeded):
+                self.close(_deadline=deadline)
             logger.warning(
                 "AGIOne upstream timeout connection_id=%s error_type=%s",
                 getattr(self.connection, "pk", None), type(error).__name__,
@@ -488,7 +597,7 @@ class NativeClient:
 
     def _login(self):
         """Share one login/token across concurrent read-only requests."""
-        with self._lock:
+        with self._locked():
             return self._login_locked()
 
     def _login_locked(self):
@@ -595,7 +704,7 @@ class NativeClient:
 
     def discover_identity(self, declared_role=None):
         """Discover a role or retain an explicit unverified selection."""
-        with self._lock:
+        with self._locked():
             tenant, observed, _user = self._identity_facts(
                 self._result("/admin/user/info")
             )
@@ -633,7 +742,7 @@ class NativeClient:
 
     def identity(self):
         """Check actual tenant, optional username and explicit role evidence."""
-        with self._lock:
+        with self._locked():
             try:
                 identity = self._validate_identity(
                     self._result("/admin/user/info")
@@ -650,12 +759,12 @@ class NativeClient:
         if not isinstance(path, str) or not READ_PATHS.fullmatch(path):
             raise _error("READ_ONLY_ROUTE_BLOCKED", 400)
         if path == "/admin/user/info":
-            with self._lock:
+            with self._locked():
                 info = self._result(path, params)
                 self._identity_cache = self._validate_identity(info)
                 return info
         if self._identity_cache is None:
-            with self._lock:
+            with self._locked():
                 if self._identity_cache is None:
                     self.identity()
         return self._result(path, params)
@@ -762,12 +871,38 @@ class NativeClient:
             **kwargs,
         )
 
-    def close(self):
-        self._http.close()
-        self._closed = True
+    def close(self, *, _deadline=None):
+        """Invalidate now; defer transport cleanup if IO is still running."""
+        cleanup = False
+        with self._io_lock:
+            self._closed = True
+            active = self._active_io
+            if not active and not (
+                self._http_closed or self._cleanup_queued
+            ):
+                self._cleanup_queued = True
+                cleanup = True
+        if cleanup:
+            # Client slots bound the number of potentially blocked closers.
+            worker = Thread(
+                target=self._close_http,
+                name="agione-native-close", daemon=True,
+            )
+            try:
+                worker.start()
+            except RuntimeError:
+                with self._io_lock:
+                    self._cleanup_queued = False
+                logger.warning("AGIOne transport cleanup could not start")
         self._token = ""
         self._credentials.clear()
         self._identity_cache = None
+        if not active:
+            deadline = (
+                time.monotonic() + MAX_RESPONSE_SECONDS
+                if _deadline is None else _deadline
+            )
+            self._cleanup_done.wait(max(0, deadline - time.monotonic()))
 
     def __enter__(self):
         return self

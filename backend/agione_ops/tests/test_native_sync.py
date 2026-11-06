@@ -1,6 +1,7 @@
 """Fake-only native collection, resumability and local-query regressions."""
 
 import json
+import hashlib
 import uuid
 from copy import deepcopy
 from datetime import datetime, timedelta
@@ -26,7 +27,7 @@ from agione_ops.native_sync_models import (
     NativePublishedSnapshot, NativeStagedRecord, NativeSyncShard,
 )
 from agione_ops.sync import LEASE_SECONDS, execute_sync, submit_sync
-from agione_ops.tasks import run_sync
+from agione_ops.tasks import refresh_native_accounts, run_sync
 
 pytestmark = pytest.mark.django_db
 ZONE = ZoneInfo("Asia/Shanghai")
@@ -40,8 +41,12 @@ def native(settings, monkeypatch):
     settings.AGIONE_OPS_NATIVE_CONCURRENCY = 3
     settings.AGIONE_OPS_NATIVE_SHARD_CONCURRENCY = 1
     settings.AGIONE_OPS_NATIVE_OVERLAP_SECONDS = 86400
-    monkeypatch.setattr(run_sync, "apply_async", Mock())
-    monkeypatch.setattr("agione_ops.tasks.refresh_native_accounts.delay", Mock())
+    monkeypatch.setattr(
+        run_sync._get_current_object(), "apply_async", Mock(),
+    )
+    monkeypatch.setattr(
+        refresh_native_accounts._get_current_object(), "delay", Mock(),
+    )
     user = get_user_model().objects.create_user(username=str(uuid.uuid4()))
     user.user_permissions.add(*Permission.objects.filter(
         content_type__app_label="agione_ops",
@@ -138,6 +143,140 @@ def collect(native, run=None):
     return run, execute_native_sync(run.pk, client_factory=native["factory"])
 
 
+def test_snapshot_digest_matches_canonical_json():
+    from agione_ops.native_sync import digest
+
+    data = {"rows": [{"id": "中", "value": 1}], "meta": {"b": 2, "a": 1}}
+    encoded = json.dumps(
+        data, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")
+    assert digest(data) == hashlib.sha256(encoded).hexdigest()
+
+
+def test_streamed_snapshot_digest_matches_existing_format():
+    from agione_ops.native_sync import digest, digest_snapshot_rows
+
+    data = {
+        "metadata": {"label": "中文", "version": 1},
+        "customers": {"1": {"name": "测试"}},
+        "models": {},
+        "finance": {"available": False},
+        "rows": [{"id": 1}, {"id": 2}],
+    }
+    metadata = {key: value for key, value in data.items() if key != "rows"}
+    assert digest_snapshot_rows(metadata, iter(data["rows"])) == digest(data)
+    data["rows"] = []
+    assert digest_snapshot_rows(metadata, iter(())) == digest(data)
+
+
+def test_composite_rows_loads_versions_once_and_preserves_slice_order(
+    monkeypatch,
+):
+    from types import SimpleNamespace
+
+    from agione_ops import native_snapshot_queries as queries
+
+    def row(record_id, day):
+        return {"record_id": record_id, "occurred_at": f"2026-01-0{day}T12:00:00+00:00"}
+
+    first = SimpleNamespace(data={
+        "customers": {"1": {}}, "rows": [row("a", 1), row("c", 3)],
+    })
+    second = SimpleNamespace(data={
+        "customers": {"1": {}}, "rows": [row("b", 2)],
+    })
+    fetch = Mock(return_value=second)
+    monkeypatch.setattr(
+        queries.NativePublishedSnapshot.objects, "select_related",
+        Mock(return_value=SimpleNamespace(get=fetch)),
+    )
+    monkeypatch.setattr(queries, "validate_snapshot_data", Mock())
+    parts = [{
+        "version": version, "digest": "digest",
+        "start": f"2026-01-0{day}T00:00:00+00:00",
+        "end": f"2026-01-0{day + 1}T00:00:00+00:00",
+    } for version, day in (("first", 1), ("second", 2), ("first", 3))]
+    rows = queries._composite_rows(parts, first, "first")
+    assert [item["record_id"] for item in rows] == ["a", "b", "c"]
+    fetch.assert_called_once_with(version_id="second")
+
+
+def test_composite_rows_rejects_conflicting_duplicate(monkeypatch):
+    from types import SimpleNamespace
+
+    from agione_ops import native_snapshot_queries as queries
+
+    first = SimpleNamespace(data={"customers": {"1": {}}, "rows": [{
+        "record_id": "1", "occurred_at": "2026-01-01T12:00:00+00:00",
+        "value": 1,
+    }]})
+    second = SimpleNamespace(data={"customers": {"1": {}}, "rows": [{
+        "record_id": "1", "occurred_at": "2026-01-01T12:00:00+00:00",
+        "value": 2,
+    }]})
+    monkeypatch.setattr(
+        queries.NativePublishedSnapshot.objects, "select_related",
+        Mock(return_value=SimpleNamespace(get=Mock(return_value=second))),
+    )
+    monkeypatch.setattr(queries, "validate_snapshot_data", Mock())
+    parts = [{"version": version, "digest": "digest",
+              "start": "2026-01-01T00:00:00+00:00",
+              "end": "2026-01-02T00:00:00+00:00"}
+             for version in ("first", "second")]
+    with pytest.raises(AgioneOpsError, match="SOURCE_DUPLICATE_PAGE"):
+        queries._composite_rows(parts, first, "first")
+
+
+def test_publish_large_snapshot_preserves_all_records(native):
+    from agione_ops.native_analytics import normalize_log
+    from agione_ops.native_finance import unavailable_finance
+    from agione_ops.native_sync import _prepare, _publish, digest
+    from agione_ops.snapshot_queries import query_operation
+    from agione_ops.sync import _checkpoint, _claim
+
+    native["end"] = native["start"] + timedelta(days=1)
+    run = submit(native)
+    run, connection, lease_token, epoch = _claim(run.pk)
+    run._token, run._epoch = lease_token, epoch
+
+    def checkpoint(phase):
+        _checkpoint(run.pk, lease_token, epoch, phase, 0, None)
+
+    source = native["factory"](connection)
+    state = _prepare(run, connection, source, checkpoint)
+    shard = run.native_shards.get()
+    row = normalize_log(native["rows"][0], shard.window_start, shard.window_end)
+    count = 65260
+    for start in range(0, count, 1000):
+        batch = []
+        for index in range(start, min(start + 1000, count)):
+            item = {**row, "record_id": str(index + 1)}
+            batch.append(NativeStagedRecord(
+                run=run, shard=shard, record_id=item["record_id"],
+                occurred_at=shard.window_start + timedelta(hours=1),
+                content_digest=digest(item), data=item,
+            ))
+        NativeStagedRecord.objects.bulk_create(batch, batch_size=1000)
+    NativeSyncShard.objects.filter(pk=shard.pk).update(
+        status="succeeded", record_count=count,
+    )
+    finance = unavailable_finance("NATIVE_FINANCE_DEFERRED")
+    finance["mode"] = "snapshot"
+    result = _publish(run, connection, state, finance, checkpoint)
+    assert result["status"] == "succeeded"
+    snapshot = NativePublishedSnapshot.objects.get(version__run=run)
+    from agione_ops.snapshot_chunks import snapshot_rows
+    assert snapshot.data["rows"] == []
+    assert sum(1 for _ in snapshot_rows(snapshot)) == count
+    assert snapshot.content_digest == digest(snapshot.data)
+    result = query_operation(connection, native["user"], {
+        "operation": "dashboard", "payload": {},
+        "data_version": result["dataVersion"],
+    })
+    assert result["state"] == "ready"
+
+
 def test_native_publish_is_atomic_normalized_and_redelivery_safe(native):
     run, result = collect(native)
     assert result["status"] == "succeeded"
@@ -151,6 +290,80 @@ def test_native_publish_is_atomic_normalized_and_redelivery_safe(native):
     assert DatasetVersion.objects.count() == 1
     native["connection"].refresh_from_db()
     assert native["connection"].active_run_id is None
+
+
+def test_staging_rejects_same_record_from_different_shards(native):
+    from agione_ops.native_analytics import normalize_log
+    from agione_ops.native_sync import _prepare, _stage
+    from agione_ops.sync import _checkpoint, _claim
+
+    run, connection, token, epoch = _claim(submit(native).pk)
+    run._token, run._epoch = token, epoch
+    checkpoint = lambda phase: _checkpoint(run.pk, token, epoch, phase)
+    source = native["factory"](connection)
+    _prepare(run, connection, source, checkpoint)
+    first, second = list(run.native_shards.all())
+    first_row = normalize_log(
+        native["rows"][0], first.window_start, first.window_end,
+    )
+    second_row = normalize_log(
+        native["rows"][1], second.window_start, second.window_end,
+    )
+    second_row["record_id"] = first_row["record_id"]
+    _stage(run, first, [first_row], 1, 0, checkpoint)
+    with pytest.raises(AgioneOpsError, match="SOURCE_DUPLICATE_PAGE"):
+        _stage(run, second, [second_row], 1, 0, checkpoint)
+    stored = NativeStagedRecord.objects.get(run=run)
+    assert stored.shard_id == first.pk
+    assert stored.data == first_row
+
+
+def test_restaging_same_shard_removes_obsolete_records(native):
+    from agione_ops.native_analytics import normalize_log
+    from agione_ops.native_sync import _prepare, _stage
+    from agione_ops.sync import _checkpoint, _claim
+
+    run, connection, token, epoch = _claim(submit(native).pk)
+    run._token, run._epoch = token, epoch
+    checkpoint = lambda phase: _checkpoint(run.pk, token, epoch, phase)
+    _prepare(run, connection, native["factory"](connection), checkpoint)
+    shard = run.native_shards.first()
+    row = normalize_log(native["rows"][0], shard.window_start, shard.window_end)
+    _stage(run, shard, [row, {**row, "record_id": "9999"}], 1, 0, checkpoint)
+    _stage(run, shard, [row], 1, 0, checkpoint)
+    assert list(run.native_staging.values_list("record_id", flat=True)) == [
+        row["record_id"],
+    ]
+
+
+def test_page_fetch_refills_available_slot_and_preserves_order():
+    from threading import Event
+    from types import SimpleNamespace
+
+    from agione_ops.native_sync import _read_shard
+
+    fourth_started = Event()
+    start = datetime(2026, 10, 1, tzinfo=ZONE)
+    shard = SimpleNamespace(
+        window_start=start, window_end=start + timedelta(days=1),
+    )
+
+    class Client:
+        def get(self, path, params):
+            page = params["current"]
+            if page == 2:
+                assert fourth_started.wait(2)
+            if page == 4:
+                fourth_started.set()
+            return {
+                "total": 800,
+                "records": [{"id": str((page - 1) * 200 + index)}
+                            for index in range(1, 201)],
+            }
+
+    rows, pages = _read_shard(Client(), shard, 2, lambda phase: None)
+    assert pages == 4
+    assert [int(row["id"]) for row in rows] == list(range(1, 801))
 
 
 def test_dashboard_selects_snapshot_covering_requested_dates(native):
@@ -335,6 +548,24 @@ def test_two_daily_shards_are_fetched_concurrently(native, settings):
     assert len(snapshot.data["rows"]) == 2
 
 
+def test_three_daily_shards_are_fetched_concurrently(
+    native, settings, monkeypatch,
+):
+    from threading import Barrier
+
+    settings.AGIONE_OPS_NATIVE_SHARD_CONCURRENCY = 3
+    native["end"] += timedelta(days=1)
+    monkeypatch.setattr("agione_ops.native_sync._seed_incremental", Mock())
+    barrier = Barrier(3, timeout=10)
+    native["mutation"] = barrier.wait
+    _, result = collect(native)
+    assert result["status"] == "succeeded"
+    snapshot = NativePublishedSnapshot.objects.get(
+        version_id=result["dataVersion"],
+    )
+    assert len(snapshot.data["rows"]) == 2
+
+
 def test_manual_worker_recovery_gets_a_fresh_bounded_attempt(native, settings):
     from agione_ops.sync import recover_expired_run
 
@@ -425,7 +656,9 @@ def test_deadline_allows_new_run_to_reuse_completed_shard(
         if calls[0] == 2:
             clock[0] = 121
     native["mutation"] = expire_on_second_day
-    run, result = collect(native)
+    run = submit(native)
+    SyncRun.objects.filter(pk=run.pk).update(attempt=2)
+    run, result = collect(native, run)
     assert result["status"] == "failed"
     run.refresh_from_db()
     assert run.error_code == "NATIVE_SYNC_DEADLINE"
@@ -448,6 +681,106 @@ def test_deadline_allows_new_run_to_reuse_completed_shard(
     assert len(NativePublishedSnapshot.objects.get(
         version_id=result["dataVersion"],
     ).data["rows"]) == 2
+
+def test_incremental_rejects_directory_without_loading_snapshot_rows(
+    native, monkeypatch,
+):
+    from types import SimpleNamespace
+
+    from agione_ops.native_sync import _seed_incremental
+
+    for _ in range(3):
+        assert collect(native)[1]["status"] == "succeeded"
+    run = submit(native)
+    NativeSyncShard.objects.create(
+        run=run, window_start=native["start"],
+        window_end=native["start"] + timedelta(days=1),
+    )
+    original = NativePublishedSnapshot.refresh_from_db
+
+    def reject_payload(instance, *args, **kwargs):
+        if "data" in (kwargs.get("fields") or []):
+            pytest.fail("Directory rejection must not load snapshot rows")
+        return original(instance, *args, **kwargs)
+
+    monkeypatch.setattr(
+        NativePublishedSnapshot, "refresh_from_db", reject_payload,
+    )
+    checkpoint = Mock()
+    _seed_incremental(
+        run, SimpleNamespace(directory={"100": {}, "200": {}, "999": {}}),
+        checkpoint,
+    )
+    assert checkpoint.called
+    assert run.native_staging.count() == 0
+
+
+def test_queue_wait_does_not_consume_native_execution_budget(native, settings):
+    settings.AGIONE_OPS_NATIVE_MAX_SECONDS = 120
+    run = submit(native)
+    SyncRun.objects.filter(pk=run.pk).update(
+        created_at=timezone.now() - timedelta(minutes=10),
+    )
+    result = execute_native_sync(run.pk, client_factory=native["factory"])
+    assert result["status"] == "succeeded"
+
+
+def test_progressing_deadline_resumes_same_run_without_refetching(native,
+                                                                monkeypatch,
+                                                                settings):
+    from types import SimpleNamespace
+
+    from agione_ops import native_sync
+
+    settings.AGIONE_OPS_NATIVE_MAX_SECONDS = 120
+    clock = [0]
+    monkeypatch.setattr(
+        native_sync, "time", SimpleNamespace(monotonic=lambda: clock[0]),
+    )
+    calls = [0]
+
+    def expire_second_shard():
+        calls[0] += 1
+        if calls[0] == 2:
+            clock[0] = 121
+
+    native["mutation"] = expire_second_shard
+    run, result = collect(native)
+    assert result["status"] == "retrying"
+    assert not NativePublishedSnapshot.objects.filter(version__run=run).exists()
+    run.refresh_from_db()
+    assert run.attempt == 1
+    assert run.native_shards.filter(status="succeeded").count() == 1
+    SourceConnection.objects.filter(pk=run.connection_id).update(
+        lease_expires_at=timezone.now(),
+    )
+    clock[0] = 0
+    native["mutation"] = None
+    before = len(native["calls"])
+    result = execute_native_sync(run.pk, client_factory=native["factory"])
+    assert result["status"] == "succeeded"
+    logs = [params for path, params in native["calls"][before:]
+            if path.endswith("call-logs")]
+    assert len(logs) == 1
+    run.refresh_from_db()
+    assert run.attempt == 2
+
+
+def test_deadline_without_progress_is_terminal(native, monkeypatch, settings):
+    from types import SimpleNamespace
+
+    from agione_ops import native_sync
+
+    settings.AGIONE_OPS_NATIVE_MAX_SECONDS = 120
+    clock = [0]
+    monkeypatch.setattr(
+        native_sync, "time", SimpleNamespace(monotonic=lambda: clock[0]),
+    )
+    native["mutation"] = lambda: clock.__setitem__(0, 121)
+    run, result = collect(native)
+    assert result == {"status": "failed", "errorCode": "NATIVE_SYNC_DEADLINE"}
+    assert run.native_shards.filter(status="succeeded").count() == 0
+
 
 def test_overlap_incremental_keeps_old_revision_and_deduplicates(native):
     _, first = collect(native)
@@ -1380,3 +1713,48 @@ def test_account_scope_invalidates_cached_queries_and_honors_grants(native):
     grant.can_view = False
     grant.save()
     assert query_operation(native["connection"], native["user"], query)["data"]["summary"]["requestCount"] == 2
+
+
+def test_interrupted_chunk_write_keeps_last_published_version(native, monkeypatch):
+    from agione_ops import snapshot_chunks
+    from agione_ops.native_sync_models import NativeSnapshotChunk
+
+    old_run, first = collect(native)
+    assert first["status"] == "succeeded"
+    monkeypatch.setattr(snapshot_chunks, "BATCH_SIZE", 1)
+    original = NativeSnapshotChunk.objects.create
+
+    def interrupt(**kwargs):
+        if kwargs["position"] == 1:
+            raise RuntimeError("test interruption")
+        return original(**kwargs)
+
+    monkeypatch.setattr(NativeSnapshotChunk.objects, "create", interrupt)
+    run, _ = collect(native)
+    assert not DatasetVersion.objects.filter(run=run).exists()
+    assert not NativeSnapshotChunk.objects.exists()
+    old = NativePublishedSnapshot.objects.get(version__run=old_run)
+    assert len(old.data["rows"]) == 2
+
+
+def test_chunk_window_and_corruption_detection(native, monkeypatch):
+    from agione_ops import snapshot_chunks
+    from agione_ops.native_sync_models import NativeSnapshotChunk
+
+    monkeypatch.setattr(snapshot_chunks, "BATCH_SIZE", 1)
+    run, result = collect(native)
+    assert result["status"] == "succeeded"
+    snapshot = NativePublishedSnapshot.objects.get(version__run=run)
+    start = native["start"]
+    end = start + timedelta(days=1)
+    first = list(snapshot_chunks.snapshot_rows(snapshot, start, end))
+    assert [row["record_id"] for row in first] == ["1000"]
+    from django.db.models import QuerySet
+
+    with pytest.raises(ValidationError, match="immutable"):
+        NativeSnapshotChunk.objects.filter(version=snapshot.version).delete()
+    QuerySet(model=NativeSnapshotChunk).filter(
+        version=snapshot.version, position=1,
+    ).delete()
+    with pytest.raises(ValidationError, match="Incomplete"):
+        list(snapshot_chunks.snapshot_rows(snapshot))

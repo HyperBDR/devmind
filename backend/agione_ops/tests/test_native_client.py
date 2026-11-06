@@ -3,11 +3,12 @@
 import base64
 import errno
 import hashlib
+import logging
 import socket
 import ssl
 import time
 from concurrent.futures import ThreadPoolExecutor
-from threading import Lock
+from threading import BoundedSemaphore, Event, Lock
 from types import SimpleNamespace
 from urllib.parse import parse_qs
 
@@ -361,6 +362,326 @@ def test_slow_stream_has_total_time_limit_and_safe_stage(monkeypatch):
     assert error.value.code == "SOURCE_TIMEOUT"
     assert error.value.diagnostic["stage"] == "models"
     assert error.value.diagnostic["network"] == "response_deadline"
+
+
+@pytest.mark.parametrize("blocked_stage", ["dns", "headers", "body"])
+def test_blocked_io_returns_by_deadline_and_invalidates_client(
+    monkeypatch, blocked_stage,
+):
+    monkeypatch.setattr("agione_ops.native_client.MAX_RESPONSE_SECONDS", .04)
+    release = Event()
+    finished = Event()
+    seen = []
+
+    def block():
+        try:
+            release.wait(.6)
+        finally:
+            finished.set()
+
+    def resolver(host):
+        if blocked_stage == "dns":
+            block()
+        return ["8.8.8.8"]
+
+    class Stream(httpx.SyncByteStream):
+        def __iter__(self):
+            block()
+            yield b'{"status":200,"result":{}}'
+
+    def handler(request):
+        seen.append(request)
+        if blocked_stage == "headers":
+            block()
+        if blocked_stage == "body":
+            return httpx.Response(200, stream=Stream())
+        return response()
+
+    source = client(handler, resolver=resolver)
+    cleaned = Event()
+    original_close = source._http.close
+
+    def closed():
+        original_close()
+        cleaned.set()
+
+    monkeypatch.setattr(source._http, "close", closed)
+    started = time.monotonic()
+    try:
+        with pytest.raises(AgioneOpsError, match="SOURCE_TIMEOUT") as error:
+            source.identity()
+        assert time.monotonic() - started < .3
+        assert error.value.diagnostic["network"] == "response_deadline"
+        assert error.value.diagnostic["stage"] == "identity"
+        if blocked_stage == "body":
+            assert error.value.diagnostic["http_status"] == 200
+        assert source.fetched_at is None
+        source.close()
+        assert time.monotonic() - started < .3
+        with pytest.raises(AgioneOpsError, match="SOURCE_CLIENT_CLOSED"):
+            source.identity()
+    finally:
+        release.set()
+        assert finished.wait(1)
+        assert cleaned.wait(1)
+        source.close()
+    assert source.fetched_at is None
+    assert source._identity_cache is None
+    if blocked_stage == "dns":
+        assert seen == []
+
+
+def test_system_getaddrinfo_is_inside_deadline(monkeypatch):
+    monkeypatch.setattr("agione_ops.native_client.MAX_RESPONSE_SECONDS", .04)
+    release = Event()
+    cleaned = Event()
+    seen = []
+
+    def getaddrinfo(*args, **kwargs):
+        release.wait(.6)
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
+    source = client(lambda request: seen.append(request))
+    source._mock = False
+    monkeypatch.setattr(source._http, "close", cleaned.set)
+    try:
+        started = time.monotonic()
+        with pytest.raises(AgioneOpsError, match="SOURCE_TIMEOUT"):
+            source.identity()
+        assert time.monotonic() - started < .3
+    finally:
+        release.set()
+        assert cleaned.wait(1)
+        source.close()
+    assert seen == []
+
+
+@pytest.mark.parametrize("blocked_close", ["response", "client"])
+def test_transport_cleanup_cannot_block_caller(monkeypatch, blocked_close):
+    monkeypatch.setattr("agione_ops.native_client.MAX_RESPONSE_SECONDS", .04)
+    release = Event()
+    finished = Event()
+
+    def block():
+        try:
+            release.wait(.6)
+        finally:
+            finished.set()
+
+    class Stream(httpx.SyncByteStream):
+        def __iter__(self):
+            yield b'{"status":200,"result":{}}'
+
+        def close(self):
+            block()
+
+    source = client(lambda request: httpx.Response(200, stream=Stream()))
+    if blocked_close == "client":
+        monkeypatch.setattr(source._http, "close", block)
+    started = time.monotonic()
+    try:
+        if blocked_close == "response":
+            with pytest.raises(AgioneOpsError, match="SOURCE_TIMEOUT"):
+                source.identity()
+        source.close()
+        assert time.monotonic() - started < .3
+    finally:
+        release.set()
+        assert finished.wait(1)
+        source.close()
+
+
+def test_stuck_io_has_global_capacity_and_no_unbounded_queue(monkeypatch):
+    monkeypatch.setattr("agione_ops.native_client.MAX_RESPONSE_SECONDS", .03)
+    monkeypatch.setattr(
+        "agione_ops.native_client._IO_SLOTS", BoundedSemaphore(2),
+        raising=False,
+    )
+    release = Event()
+    completed = Event()
+    count = 0
+    lock = Lock()
+
+    def handler(request):
+        nonlocal count
+        with lock:
+            count += 1
+        release.wait(1)
+        with lock:
+            count -= 1
+            if count == 0:
+                completed.set()
+        return response()
+
+    sources = [client(handler) for _ in range(6)]
+    try:
+        for source in sources:
+            with pytest.raises(AgioneOpsError, match="SOURCE_TIMEOUT"):
+                source.identity()
+        assert count == 2
+    finally:
+        release.set()
+        assert completed.wait(1)
+        for source in sources:
+            source.close()
+
+
+def test_idle_client_cleanup_survives_exhausted_io_slots(monkeypatch):
+    slots = BoundedSemaphore(1)
+    monkeypatch.setattr("agione_ops.native_client._IO_SLOTS", slots)
+    source = client()
+    source.identity()
+    cleaned = Event()
+    original_close = source._http.close
+
+    def close():
+        original_close()
+        cleaned.set()
+
+    monkeypatch.setattr(source._http, "close", close)
+    assert slots.acquire(blocking=False)
+    try:
+        source.close()
+    finally:
+        slots.release()
+    # No second close call or new request may be needed to finish cleanup.
+    assert cleaned.wait(.5)
+    assert source._http.is_closed
+
+
+def test_blocked_cleanup_has_bounded_ownership_and_eventual_drain(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "agione_ops.native_client._CLIENT_SLOTS", BoundedSemaphore(2),
+    )
+    release = Event()
+    entered = Event()
+    first = client()
+    second = client()
+
+    def close():
+        entered.set()
+        release.wait(1)
+
+    monkeypatch.setattr(first._http, "close", close)
+    try:
+        first.close(_deadline=time.monotonic())
+        assert entered.wait(.5)
+        with pytest.raises(AgioneOpsError, match="SOURCE_TIMEOUT"):
+            client()
+        second.close(_deadline=time.monotonic())
+        second.close(_deadline=time.monotonic())
+        assert second._cleanup_done.wait(1)
+    finally:
+        release.set()
+        assert first._cleanup_done.wait(1)
+        assert second._cleanup_done.wait(1)
+    assert second._http.is_closed
+    with client() as replacement:
+        assert replacement.identity()["tenant_id"] == "123"
+
+
+def test_blocked_cleanup_does_not_block_other_clients(monkeypatch):
+    monkeypatch.setattr(
+        "agione_ops.native_client._CLIENT_SLOTS", BoundedSemaphore(2),
+    )
+    release, entered = Event(), Event()
+    first, second = client(), client()
+
+    def blocked_close():
+        entered.set()
+        release.wait(3)
+
+    monkeypatch.setattr(first._http, "close", blocked_close)
+    try:
+        first.close(_deadline=time.monotonic())
+        assert entered.wait(1)
+        second.close(_deadline=time.monotonic() + 1)
+        assert second._cleanup_done.is_set()
+        with client() as third:
+            assert third.identity()["tenant_id"] == "123"
+    finally:
+        release.set()
+        assert first._cleanup_done.wait(2)
+
+
+def test_failed_http_construction_releases_client_ownership(monkeypatch):
+    slots = BoundedSemaphore(1)
+    monkeypatch.setattr("agione_ops.native_client._CLIENT_SLOTS", slots)
+
+    def fail(**kwargs):
+        raise RuntimeError("synthetic constructor failure")
+
+    with monkeypatch.context() as local:
+        local.setattr("agione_ops.native_client.httpx.Client", fail)
+        with pytest.raises(RuntimeError, match="synthetic constructor"):
+            client()
+    with client() as source:
+        assert source.identity()["tenant_id"] == "123"
+
+
+def test_cleanup_exception_is_sanitized(monkeypatch, caplog):
+    caplog.set_level(logging.WARNING, logger="agione_ops.native_client")
+    source = client()
+
+    def close():
+        raise OSError("PRIVATE-CLEANUP")
+
+    monkeypatch.setattr(source._http, "close", close)
+    source.close()
+    assert "OSError" in caplog.text
+    assert "PRIVATE" not in caplog.text
+
+
+def test_timed_out_client_does_not_mix_other_client_credentials(monkeypatch):
+    monkeypatch.setattr("agione_ops.native_client.MAX_RESPONSE_SECONDS", .04)
+    release = Event()
+    cleaned = Event()
+    seen = []
+
+    def handler(request):
+        seen.append(request.headers["x-request-access-key"])
+        release.wait(.6)
+        return response()
+
+    first = client(handler)
+    monkeypatch.setattr(first._http, "close", cleaned.set)
+    try:
+        with pytest.raises(AgioneOpsError, match="SOURCE_TIMEOUT"):
+            first.identity()
+        with NativeClient(
+            connection(credentials={
+                "access_key": "OTHER-AK", "secret_key": "OTHER-SK",
+            }),
+            transport=httpx.MockTransport(lambda request: (
+                seen.append(request.headers["x-request-access-key"])
+                or response()
+            )),
+        ) as second:
+            assert second.identity()["tenant_id"] == "123"
+            assert first._credentials == {}
+    finally:
+        release.set()
+        assert cleaned.wait(1)
+        first.close()
+    assert seen == ["PRIVATE-AK", "OTHER-AK"]
+    assert first.fetched_at is None
+
+
+def test_identity_lock_wait_is_bounded(monkeypatch):
+    monkeypatch.setattr("agione_ops.native_client.MAX_RESPONSE_SECONDS", .04)
+    with client() as source:
+        source._lock = Lock()
+        source._lock.acquire()
+        try:
+            started = time.monotonic()
+            with pytest.raises(AgioneOpsError, match="SOURCE_TIMEOUT"):
+                source.identity()
+            assert time.monotonic() - started < .3
+        finally:
+            source._lock.release()
 
 
 def test_model_request_stage_logs_are_sanitized(monkeypatch):

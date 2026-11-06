@@ -5,6 +5,7 @@ import re
 from django.db import transaction
 from rest_framework.exceptions import APIException
 
+from agione_ops.snapshot_chunks import snapshot_rows
 from agione_ops.models import SourceConnection, SyncRun
 from agione_ops.native_account_scope import (
     classify_rows, internal_tenant_types, merge_account_types,
@@ -148,7 +149,7 @@ def execute_account_scope(scope_id, run_id):
                 directory=True, key="tenantId",
             )
             tenant_types = internal_tenant_types(directory)
-            types = classify_rows(snapshot.data.get("rows", []), lookup)
+            types = classify_rows(snapshot_rows(snapshot), lookup)
         finally:
             source.close()
         with transaction.atomic():

@@ -133,6 +133,32 @@ class NativeFinanceProjection(models.Model):
         )]
 
 
+class NativeSnapshotChunk(ImmutableModel):
+    """Persist one ordered batch independently of staging retention."""
+
+    version = models.ForeignKey(
+        "agione_ops.DatasetVersion", on_delete=models.CASCADE,
+        related_name="native_chunks",
+    )
+    position = models.PositiveIntegerField()
+    rows = models.JSONField()
+
+    class Meta:
+        db_table = "devmind_agione_native_snapshot_chunk"
+        unique_together = [("version", "position")]
+
+    def _lock_for_insert(self, using):
+        """Only the owning running task may add unpublished chunks."""
+        from agione_ops.models import DatasetVersion
+
+        version = DatasetVersion.objects.using(using).get(pk=self.version_id)
+        _publication_run(version.run_id, using, lock=True)
+        if NativePublishedSnapshot.objects.using(using).filter(
+            pk=self.version_id,
+        ).exists():
+            raise ValidationError("Snapshot is already published.")
+
+
 class NativePublishedSnapshot(ImmutableModel):
     """Pin directory/models/analytics to one atomic DatasetVersion."""
 
@@ -163,6 +189,10 @@ class NativePublishedSnapshot(ImmutableModel):
         run = _publication_run(version.run_id, self._state.db or "default")
         if run.connection.source_kind != "native":
             raise ValidationError("Native publication requires native source.")
+        if "chunkDigests" in self.data:
+            from agione_ops.snapshot_chunks import validate_manifest
+            validate_manifest(self, run, version)
+            return
         validate_snapshot_data(self.data, self.content_digest)
         metadata = self.data["metadata"]
         if (

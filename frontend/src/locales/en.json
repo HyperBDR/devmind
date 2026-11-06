@@ -6673,6 +6673,7 @@
       "accessDenied": "You no longer have access to this connection. Sign in again or contact your administrator.",
       "conflict": "A collection task is already running or the configuration changed. The previous usable data remains visible; retry after the task completes.",
       "networkError": "Unable to fetch data. Try again. If the problem persists, contact your administrator.",
+      "queryBusy": "The query service is busy. Please try again shortly.",
       "invalidWindow": "Choose a date range of up to 31 complete days, excluding today.",
       "snapshotExpired": "This historical snapshot has expired. Reload the selected dates to collect any missing data.",
       "syncDeadline": "Collection reached its time limit. Completed data was retained; refresh to continue.",

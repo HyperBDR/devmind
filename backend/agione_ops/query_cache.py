@@ -232,7 +232,13 @@ def cached_operation(connection, user, query, compute, validate=None):
 
     def calculate():
         nonlocal computed
-        result = compute(current, actor, copy.deepcopy(query))
+        if current.source_kind == "native":
+            from agione_ops.snapshot_query_limits import snapshot_compute_slot
+
+            with snapshot_compute_slot():
+                result = compute(current, actor, copy.deepcopy(query))
+        else:
+            result = compute(current, actor, copy.deepcopy(query))
         if not isinstance(result, dict) or str(result.get("dataVersion")) != str(
             query.get("data_version")
         ):

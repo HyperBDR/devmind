@@ -7,6 +7,12 @@ STAGES = {
     "models": "读取模型列表",
     "finance": "请求财务数据接口",
     "source": "请求 AGIOne 接口",
+    "queued": "等待 worker 接收任务",
+    "directory": "读取租户目录",
+    "incremental": "准备增量调用数据",
+    "splitting": "拆分调用数据采集范围",
+    "staging": "暂存调用数据",
+    "publishing": "发布采集结果",
 }
 NETWORKS = {
     "dns", "dns_not_found", "dns_temporary", "connection",
@@ -118,10 +124,12 @@ def describe_failure(code, diagnostic):
                                   "请 DevMind 管理员确认配置后重新采集。"),
         "CONNECTION_NOT_VERIFIED": ("采集连接尚未通过身份验证。",
                                     "请 DevMind 管理员检查并验证连接。"),
-        "NATIVE_SYNC_DEADLINE": ("采集任务超过执行时间限制。",
-                                 "检查采集范围、worker 和 AGIOne 响应速度。"),
-        "LEASE_EXPIRED": ("采集任务心跳超时，任务已中断。",
-                          "请 DevMind 管理员检查 worker 和调度状态。"),
+        "NATIVE_SYNC_DEADLINE": ("采集任务超过本次执行时间限制，未发布新结果。",
+                                 "检查采集范围、worker 和 AGIOne 响应速度，"
+                                 "必要时调整执行时限；重试可复用已完成分片。"),
+        "LEASE_EXPIRED": ("采集租约已过期，未收到有效进展，旧执行已隔离。",
+                          "检查最后阶段、worker 日志和队列派发状态；"
+                          "任务可能正在有界重试，请以当前状态为准。"),
         "DISPATCH_FAILED": ("采集任务无法派发。",
                             "请 DevMind 管理员检查任务队列和 worker。"),
         "FINANCE_REFRESH_TIMEOUT": ("财务采集任务超时。",
@@ -153,6 +161,9 @@ def describe_failure(code, diagnostic):
 
 def possible_cause(code, diagnostic):
     status = diagnostic.get("http_status")
+    if code == "LEASE_EXPIRED":
+        return ("任务可能未被 worker 接收，或执行中停止上报进展；"
+                "租约过期本身不能确认进程退出、资源不足或上游故障。")
     if status == 404:
         return "连接地址不匹配，或 AGIOne 接口路径、版本发生变化。"
     if status == 401 or code == "SOURCE_AUTH_FAILED":

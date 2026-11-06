@@ -9,6 +9,9 @@ from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 
 
+from agione_ops.snapshot_chunks import snapshot_rows
+
+
 _SCHEDULED_RUN_PATTERN = re.compile(
     r"^agione-scheduled-(\d{4}-\d{2}-\d{2})-\d+"
     r"(?:-retry-\d+)?$"
@@ -539,7 +542,7 @@ def analyze_completed_snapshot(scope_id, run_id):
             result["inspection_start"] = inspection_start.isoformat()
             result["inspection_end"] = end.isoformat()
     else:
-        rows = external_rows(snapshot.data["rows"], types, overrides)
+        rows = external_rows(snapshot_rows(snapshot), types, overrides)
         customers = snapshot.data["customers"]
         customer_ids = {
             str(customer_id)

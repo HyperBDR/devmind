@@ -11,6 +11,7 @@ from django.core.exceptions import ValidationError
 from django.db.models import Q
 from rest_framework.exceptions import APIException
 
+from agione_ops.snapshot_chunks import snapshot_rows
 from agione_ops.client import AgioneOpsError
 from agione_ops.models import ConnectionGrant, DatasetVersion
 from agione_ops.native_account_scope import (
@@ -210,6 +211,49 @@ def _window(query, signature):
     return requested_start, requested_end
 
 
+def _composite_rows(parts, snapshot, snapshot_version):
+    """Load each version once and retain only rows in requested intervals."""
+    grouped = {}
+    for index, part in enumerate(parts):
+        version = part.get("version")
+        if version:
+            grouped.setdefault(version, []).append((index, part))
+    rows = {}
+    for version, slices in grouped.items():
+        source = snapshot if version == str(snapshot_version) else (
+            NativePublishedSnapshot.objects.select_related("version")
+            .get(version_id=version)
+        )
+        expected = {item["digest"] for _, item in slices}
+        if len(expected) != 1:
+            _fail("SNAPSHOT_CONTENT_INVALID")
+        try:
+            validate_snapshot_data(source.data, next(iter(expected)))
+        except (ValueError, APIException, ValidationError) as error:
+            raise AgioneOpsError(
+                "SNAPSHOT_CONTENT_INVALID", status_code=409,
+            ) from error
+        if set(source.data["customers"]) != set(snapshot.data["customers"]):
+            _fail("SNAPSHOT_DIRECTORY_CHANGED")
+        intervals = [
+            (index, parse_time(item["start"]), parse_time(item["end"]))
+            for index, item in slices
+        ]
+        for position, item in enumerate(snapshot_rows(source)):
+            at = parse_time(item["occurred_at"])
+            match = next((index for index, start, end in intervals
+                          if start <= at < end), None)
+            if match is None:
+                continue
+            existing = rows.get(item["record_id"])
+            if existing is not None and existing[2] != item:
+                _fail("SOURCE_DUPLICATE_PAGE")
+            if existing is None or (match, position) < existing[:2]:
+                rows[item["record_id"]] = (match, position, item)
+        del source
+    return [item for _, _, item in sorted(rows.values(), key=lambda x: x[:2])]
+
+
 def _base(connection, operation, signature):
     return {
         "operation": operation, "state": signature["state"],
@@ -316,35 +360,12 @@ def query_native_snapshot(connection, user, query):
 
     start, end = _window(query, signature)
     if signature.get("parts"):
-        sources = {}
-        rows_by_id = {}
-        for part in signature["parts"]:
-            if not part["version"]:
-                continue
-            if part["version"] not in sources:
-                source = NativePublishedSnapshot.objects.select_related(
-                    "version",
-                ).get(version_id=part["version"])
-                try:
-                    validate_snapshot_data(source.data, part["digest"])
-                except (ValueError, APIException, ValidationError) as error:
-                    raise AgioneOpsError(
-                        "SNAPSHOT_CONTENT_INVALID", status_code=409,
-                    ) from error
-                if set(source.data["customers"]) != set(snapshot.data["customers"]):
-                    _fail("SNAPSHOT_DIRECTORY_CHANGED")
-                sources[part["version"]] = source
-            source = sources[part["version"]]
-            part_start, part_end = parse_time(part["start"]), parse_time(part["end"])
-            for item in source.data["rows"]:
-                if part_start <= parse_time(item["occurred_at"]) < part_end:
-                    existing = rows_by_id.get(item["record_id"])
-                    if existing is not None and existing != item:
-                        _fail("SOURCE_DUPLICATE_PAGE")
-                    rows_by_id[item["record_id"]] = item
+        rows = _composite_rows(
+            signature["parts"], snapshot, signature["dataVersion"],
+        )
         missing = signature.get("missingDays", [])
         snapshot = SimpleNamespace(
-            data={**snapshot.data, "rows": list(rows_by_id.values())},
+            data={**{k: v for k, v in snapshot.data.items() if k != "chunkDigests"}, "rows": rows},
             version=SimpleNamespace(coverage={
                 **snapshot.version.coverage, "partial": bool(missing),
                 "missingDays": missing,
@@ -359,9 +380,11 @@ def query_native_snapshot(connection, user, query):
     customers = {key: value for key, value in snapshot.data["customers"].items()
                  if tenant_classification(key, account_types, overrides)[0]
                  != "internal"}
-    rows = [row for row in external_rows(snapshot.data["rows"], account_types, overrides) if (
-        start <= parse_time(row["occurred_at"]) < end
-    )]
+    rows = external_rows(
+        (row for row in snapshot_rows(snapshot, start, end)
+         if start <= parse_time(row["occurred_at"]) < end),
+        account_types, overrides,
+    )
     engine = LiveAnalytics(
         customers, snapshot.data["models"], rows,
         start, end, query,
@@ -411,39 +434,20 @@ def query_native_snapshot(connection, user, query):
                 ) from error
         previous = None
         if signature.get("previousParts"):
-            prior_rows_by_id = {}
-            sources = {}
-            for part in signature["previousParts"]:
-                if part["version"] not in sources:
-                    source = NativePublishedSnapshot.objects.select_related(
-                        "version",
-                    ).get(version_id=part["version"])
-                    try:
-                        validate_snapshot_data(source.data, part["digest"])
-                    except (ValueError, APIException, ValidationError) as error:
-                        raise AgioneOpsError(
-                            "SNAPSHOT_CONTENT_INVALID", status_code=409,
-                        ) from error
-                    if set(source.data["customers"]) != set(snapshot.data["customers"]):
-                        _fail("SNAPSHOT_DIRECTORY_CHANGED")
-                    sources[part["version"]] = source
-                for item in sources[part["version"]].data["rows"]:
-                    at = parse_time(item["occurred_at"])
-                    if parse_time(part["start"]) <= at < parse_time(part["end"]):
-                        old = prior_rows_by_id.get(item["record_id"])
-                        if old is not None and old != item:
-                            _fail("SOURCE_DUPLICATE_PAGE")
-                        prior_rows_by_id[item["record_id"]] = item
+            prior_rows = _composite_rows(
+                signature["previousParts"], snapshot,
+                None if signature.get("parts") else signature["dataVersion"],
+            )
             previous = LiveAnalytics(
                 customers, snapshot.data["models"],
-                external_rows(list(prior_rows_by_id.values()), account_types, overrides),
+                external_rows(prior_rows, account_types, overrides),
                 prior_start, start, query,
             )
         elif prior_snapshot and prior_snapshot.version.coverage.get(
             "pagingComplete"
         ) and not prior_snapshot.version.coverage.get("partial"):
             prior_rows = [row for row in external_rows(
-                prior_snapshot.data["rows"], account_types, overrides
+                snapshot_rows(prior_snapshot, prior_start, start), account_types, overrides
             ) if (
                 prior_start <= parse_time(row["occurred_at"]) < start
             )]

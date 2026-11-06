@@ -67,6 +67,14 @@ test('new snapshot retains selected range and queries that range', async () => {
     .at(-1).body.window.start, selected.start)
 })
 
+test('busy snapshot query reports a retryable busy state', async () => {
+  const { c } = setup(async () => {
+    throw { response: { status: 503, data: { data: { errorCode: 'QUERY_IN_PROGRESS' } } } }
+  })
+  await c.attach(frame, 'a')
+  assert.match(c.snapshot().error, /QUERY_IN_PROGRESS/)
+})
+
 test('default scope omits empty customer ids instead of sending a forbidden empty array', async () => {
   const { c, calls } = setup()
   await c.attach(frame, 'a')

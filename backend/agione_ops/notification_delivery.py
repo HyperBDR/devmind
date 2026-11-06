@@ -59,6 +59,20 @@ def notify_collection_failure(
     if not re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", code):
         code = "UNKNOWN"
     diagnostic = safe_diagnostic(diagnostic)
+    try:
+        task_id = str(uuid.UUID(str(run_id))) if run_id else ""
+    except (TypeError, ValueError):
+        task_id = ""
+    run = None
+    if task_id and domain == "calls":
+        from agione_ops.models import SyncRun
+
+        run = SyncRun.objects.filter(
+            pk=task_id, connection_id=rules.connection_id,
+            initiated_by_id=rules.user_id,
+        ).only("phase", "heartbeat_at", "attempt").first()
+        if run and "stage" not in diagnostic and run.phase in STAGES:
+            diagnostic["stage"] = run.phase
     identity = json.dumps([
         "collection-failure", rules.pk, domain, str(day), code,
         diagnostic.get("stage"), diagnostic.get("network"),
@@ -66,10 +80,6 @@ def notify_collection_failure(
     ], ensure_ascii=True, separators=(",", ":"))
     key = hashlib.sha256(identity.encode()).hexdigest()
     message, suggestion = describe_failure(code, diagnostic)
-    try:
-        task_id = str(uuid.UUID(str(run_id))) if run_id else ""
-    except ValueError:
-        task_id = ""
     details = {
         "type": "collection_failure",
         "source": str(rules.connection.name)[:150],
@@ -83,6 +93,13 @@ def notify_collection_failure(
         "impact": "本次数据未更新；如有上次成功的数据，将继续保留。",
         "run_id": task_id,
     }
+    if run and code == "LEASE_EXPIRED":
+        details["heartbeat"] = (
+            run.heartbeat_at.astimezone(ZoneInfo("Asia/Shanghai"))
+            .strftime("%Y-%m-%d %H:%M:%S") + " 北京时间"
+            if run.heartbeat_at else "未收到心跳"
+        )
+        details["attempt"] = str(run.attempt)
     text = (f"【AGIOne 采集异常】{label}更新失败\n"
             f"数据源：{details['source']}\n"
             f"发生时间：{details['time']}\n"
@@ -93,6 +110,9 @@ def notify_collection_failure(
             f"建议处理：{suggestion}\n影响：{details['impact']}")
     if task_id:
         text += f"\n任务编号：{task_id}"
+    if details.get("heartbeat"):
+        text += f"\n最后心跳：{details['heartbeat']}"
+        text += f"\n尝试次数：{details['attempt']}"
     public_url = getattr(settings, "AGIONE_OPS_PUBLIC_URL", "")
     if public_url:
         text += f"\n查看全部线索 → {public_url}"
