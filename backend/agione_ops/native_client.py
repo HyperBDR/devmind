@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 MAX_BYTES = 8 * 1024 * 1024
 MAX_PAGES = 100
 MAX_RESPONSE_SECONDS = 60
+IDENTITY_TIMEOUT_SECONDS = 90
 # Retain a slot until the underlying operation really exits, even on timeout.
 # Python cannot kill a blocked resolver/transport thread safely. Fail closed
 # at this per-process ceiling instead of accumulating abandoned threads.
@@ -398,6 +399,11 @@ class NativeClient:
     def _request(self, method, path, *, params=None, data=None, auth=None):
         if self._closed:
             raise _error("SOURCE_CLIENT_CLOSED", 503)
+        identity_deadline = getattr(self, "_identity_deadline", None)
+        if identity_deadline is not None and time.monotonic() >= identity_deadline:
+            failure = _error("SOURCE_TIMEOUT", 504)
+            failure.diagnostic = {"stage": "identity", "network": "response_deadline"}
+            raise failure
         login = (
             method == "POST"
             and path == "/auth/oauth2/token"
@@ -428,7 +434,9 @@ class NativeClient:
                 "AGIOne model request started connection_id=%s",
                 getattr(self.connection, "pk", None),
             )
-        deadline = started + MAX_RESPONSE_SECONDS
+        deadline = min(started + MAX_RESPONSE_SECONDS, identity_deadline) if (
+            identity_deadline is not None
+        ) else started + MAX_RESPONSE_SECONDS
 
         def check_deadline():
             if self._closed or time.monotonic() >= deadline:
@@ -743,6 +751,7 @@ class NativeClient:
     def identity(self):
         """Check actual tenant, optional username and explicit role evidence."""
         with self._locked():
+            self._identity_deadline = time.monotonic() + IDENTITY_TIMEOUT_SECONDS
             try:
                 identity = self._validate_identity(
                     self._result("/admin/user/info")
@@ -751,6 +760,8 @@ class NativeClient:
                 self._identity_cache = None
                 self._token = ""
                 raise
+            finally:
+                self._identity_deadline = None
             self._identity_cache = identity
             return dict(identity)
 

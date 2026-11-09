@@ -154,6 +154,27 @@ def test_snapshot_digest_matches_canonical_json():
     assert digest(data) == hashlib.sha256(encoded).hexdigest()
 
 
+def test_identity_renews_between_requests_and_restores_guard(native):
+    from agione_ops.native_sync import _identity
+
+    calls = []
+    client = native["factory"](native["connection"])
+    old_guard = lambda: calls.append("original")
+    client.io_guard = old_guard
+    original_identity = client.identity
+
+    def identity():
+        client.io_guard()
+        client.io_guard()
+        return original_identity()
+
+    client.identity = identity
+    _identity(client, native["connection"],
+              lambda phase: calls.append(phase))
+    assert calls == ["identity", "identity"]
+    assert client.io_guard is old_guard
+
+
 def test_streamed_snapshot_digest_matches_existing_format():
     from agione_ops.native_sync import digest, digest_snapshot_rows
 

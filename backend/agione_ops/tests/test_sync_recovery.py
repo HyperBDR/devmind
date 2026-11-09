@@ -827,6 +827,26 @@ class ExpiredSyncTests(TestCase):
         self.assertTrue(submit.call_args.args[-1].endswith("-retry-1"))
 
     @override_settings(AGIONE_OPS_NATIVE_ENABLED=True)
+    def test_failed_lease_lost_auto_run_is_scheduled_for_retry(self):
+        from agione_ops.tasks import recover_abandoned_native_syncs
+
+        run = self.make_active()
+        SyncRun.objects.filter(pk=run.pk).update(
+            status="failed", error_code="LEASE_LOST", attempt=1,
+            finished_at=self.now,
+        )
+        NotificationRules.objects.create(
+            connection=self.connection, user=self.user,
+            config={"auto_refresh_enabled": True},
+            last_inspection_at=self.now - timedelta(hours=3),
+        )
+        with patch("django.utils.timezone.now", return_value=self.now):
+            recover_abandoned_native_syncs()
+        run.refresh_from_db()
+        self.assertEqual(run.recovery_next_check_at,
+                         self.now + timedelta(minutes=5))
+
+    @override_settings(AGIONE_OPS_NATIVE_ENABLED=True)
     def test_transient_failure_gets_bounded_delayed_retries(self):
         from agione_ops.tasks import recover_abandoned_native_syncs
 
