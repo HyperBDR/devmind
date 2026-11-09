@@ -375,8 +375,15 @@ def _setting(name, default, minimum, maximum):
     return value
 
 
-def _identity(client, connection):
-    value = client.identity()
+def _identity(client, connection, checkpoint=None):
+    previous_guard = getattr(client, "io_guard", None)
+    if checkpoint is not None:
+        client.io_guard = lambda: checkpoint("identity")
+    try:
+        value = client.identity()
+    finally:
+        if checkpoint is not None:
+            client.io_guard = previous_guard
     if not isinstance(value, dict) or any(
         value.get(key) != getattr(connection, field)
         for key, field in (
@@ -983,7 +990,7 @@ def execute_native_sync(run_id, *, client_factory=None):
         workers = _setting("AGIONE_OPS_NATIVE_CONCURRENCY", 3, 1, 8)
         client = (client_factory or NativeClient)(connection)
         checkpoint("identity")
-        identity = _identity(client, connection)
+        identity = _identity(client, connection, checkpoint)
         checkpoint("identity")
         state = _prepare(run, connection, client, checkpoint)
         timings["prepare_ms"] = round((perf_counter() - started) * 1000)
@@ -1081,7 +1088,7 @@ def execute_native_sync(run_id, *, client_factory=None):
         timings["fetch_ms"] = (
             round((perf_counter() - started) * 1000) - sum(timings.values())
         )
-        _identity(client, connection)
+        _identity(client, connection, checkpoint)
         checkpoint("identity")
         state.refresh_from_db()
         checkpoint("finance")

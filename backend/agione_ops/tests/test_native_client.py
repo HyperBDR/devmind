@@ -70,6 +70,28 @@ def client(handler=lambda request: response(), **kwargs):
     )
 
 
+def test_identity_has_one_deadline_across_multiple_requests(monkeypatch):
+    from agione_ops import native_client
+
+    monkeypatch.setattr(native_client, "IDENTITY_TIMEOUT_SECONDS", 0.05,
+                        raising=False)
+    credentials = {"auth_mode": "password", "username": "provider-user",
+                   "password": "test-password", "client_id": "test",
+                   "client_secret": "test", "password_aes_key": "0123456789abcdef"}
+
+    def handler(request):
+        time.sleep(0.035)
+        if request.url.path.endswith("/auth/oauth2/token"):
+            return httpx.Response(200, json={"access_token": "test"})
+        return response()
+
+    source = NativeClient(connection(credentials=credentials),
+                          transport=httpx.MockTransport(handler))
+    with pytest.raises(AgioneOpsError, match="SOURCE_TIMEOUT"):
+        source.identity()
+    source.close()
+
+
 def test_aksk_signs_decoded_sorted_wire_values_and_has_no_proxy(monkeypatch):
     monkeypatch.setenv("HTTPS_PROXY", "http://invalid-private-proxy:99")
     seen = []

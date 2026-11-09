@@ -50,6 +50,7 @@
        <div class="recent-sync-detail">
         <span>{{ locale.startsWith('en') ? 'Started:' : '开始：' }} {{ displayTime(run.createdAt) }} · {{ locale.startsWith('en') ? 'Stage:' : '阶段：' }} {{ runPhase(run.phase) }}</span>
         <span>{{ locale.startsWith('en') ? 'Last heartbeat:' : '最后心跳：' }} {{ displayTime(run.heartbeatAt) }} · {{ locale.startsWith('en') ? 'Attempts:' : '尝试：' }} {{ run.attempt }}</span>
+        <span v-if="run.status === 'queued' && !run.heartbeatAt">{{ locale.startsWith('en') ? 'Waiting for a worker to start this task. If it remains queued, check the worker and scheduler.' : '等待后台 worker 接收任务。如果长时间排队，请检查 worker 和调度器。' }}</span>
         <span v-if="run.finishedAt">{{ locale.startsWith('en') ? 'Duration:' : '耗时：' }} {{ runDuration(run.createdAt, run.finishedAt) }}</span>
         <span v-if="run.errorCode">{{ locale.startsWith('en') ? 'Reason:' : '原因：' }} {{ runError(run.errorCode) }} ({{ run.errorCode }})</span>
        </div>
