@@ -7,6 +7,7 @@ import binascii
 import re
 import textwrap
 from decimal import Decimal
+from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
 
@@ -16,6 +17,21 @@ from PIL import Image, UnidentifiedImageError
 ITEMS_PER_PAGE = 7
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 LOGO_PATH = BACKEND_ROOT / "quotation" / "assets" / "onepro-logo.png"
+FONT_DIR = BACKEND_ROOT / "invoice" / "assets" / "fonts"
+# Built-in PDF fonts only cover Latin-1, so typographic quotes, dashes and
+# the euro sign would print as "?". Embed Liberation Sans instead.
+FONT_FILES = {
+    "regular": ("libsans", "LiberationSans-Regular.ttf"),
+    "bold": ("libsansb", "LiberationSans-Bold.ttf"),
+    "italic": ("libsansi", "LiberationSans-Italic.ttf"),
+    "bold_italic": ("libsansbi", "LiberationSans-BoldItalic.ttf"),
+}
+PAGE_BOTTOM = 800
+ITEMS_TOP = 357
+ITEMS_HEADER_HEIGHT = 18
+BANK_ROW_HEIGHTS = (14, 14, 24, 14, 14, 14, 14)
+BILL_TO_BOTTOM = 252
+BILL_TO_TEXT_WIDTH = 231
 SIGNATURE_PATTERN = re.compile(
     r"^data:image/(?P<format>png|jpeg);base64,(?P<data>[A-Za-z0-9+/=]+)$"
 )
@@ -94,6 +110,43 @@ def _amount(value: Decimal, currency: str) -> str:
     return f"{prefix} {value:,.2f}"
 
 
+def _font(*, bold: bool = False, italic: bool = False) -> tuple[str, str]:
+    """Return the embedded font name and file for a text style."""
+    style = (
+        "bold_italic"
+        if bold and italic
+        else "bold" if bold else "italic" if italic else "regular"
+    )
+    fontname, filename = FONT_FILES[style]
+    return fontname, str(FONT_DIR / filename)
+
+
+@lru_cache(maxsize=None)
+def _measuring_font(bold: bool = False) -> pymupdf.Font:
+    return pymupdf.Font(fontfile=_font(bold=bold)[1])
+
+
+def _text_width(text: str, size: float, *, bold: bool = False) -> float:
+    return _measuring_font(bold).text_length(text, fontsize=size)
+
+
+def _line_count(value, width: float, size: float) -> int:
+    """Estimate wrapped lines for text drawn in a box of the given width."""
+    count = 0
+    for paragraph in _plain(value, "").splitlines() or [""]:
+        lines = 1
+        current = ""
+        for word in paragraph.split():
+            candidate = f"{current} {word}".strip()
+            if current and _text_width(candidate, size) > width:
+                lines += 1
+                current = word
+            else:
+                current = candidate
+        count += lines
+    return count
+
+
 def _text(
     page,
     rect,
@@ -106,9 +159,7 @@ def _text(
     align: int = pymupdf.TEXT_ALIGN_LEFT,
     color=BLACK,
 ) -> None:
-    fontname = "hebi" if bold and italic else "hebo" if bold else "heit"
-    if not italic and not bold:
-        fontname = "helv"
+    fontname, fontfile = _font(bold=bold, italic=italic)
     text = _plain(value, "")
     current_size = size
     while current_size >= minimum_size:
@@ -116,6 +167,7 @@ def _text(
             rect,
             text,
             fontname=fontname,
+            fontfile=fontfile,
             fontsize=current_size,
             lineheight=1.15,
             color=color,
@@ -170,17 +222,31 @@ def _underlined_text(page, x: float, y: float, width: float, value) -> None:
         size=7.5,
     )
     if text:
-        text_width = pymupdf.get_text_length(
-            text,
-            fontname="helv",
-            fontsize=7.5,
-        )
+        text_width = _text_width(text, 7.5)
         page.draw_line(
             (x, y + 10),
             (x + min(text_width, width), y + 10),
             color=BLACK,
             width=0.4,
         )
+
+
+def _is_proforma(invoice) -> bool:
+    return getattr(invoice, "document_kind", "") == "proforma_invoice"
+
+
+def _document_title(invoice) -> str:
+    return (
+        "Proforma Invoice" if _is_proforma(invoice) else "Commercial Invoice"
+    )
+
+
+def _number_label(invoice) -> str:
+    return (
+        "Proforma Invoice Number"
+        if _is_proforma(invoice)
+        else "Invoice Number"
+    )
 
 
 def _draw_header(page, invoice) -> None:
@@ -200,7 +266,7 @@ def _draw_header(page, invoice) -> None:
     _text(
         page,
         pymupdf.Rect(210, 67, 425, 87),
-        "Commercial Invoice",
+        _document_title(invoice),
         size=12.5,
         minimum_size=10,
         align=pymupdf.TEXT_ALIGN_CENTER,
@@ -216,19 +282,21 @@ def _draw_header(page, invoice) -> None:
     _text(
         page,
         pymupdf.Rect(38, 123, 335, 159),
-        _plain(invoice.seller_address),
+        _plain(invoice.seller_address, ""),
         size=7.5,
     )
     _underlined_text(page, 38, 157, 297, invoice.seller_website)
     _underlined_text(page, 38, 169, 297, invoice.seller_email)
 
     labels = [("Date:", _date(invoice.invoice_date))]
-    labels.append(("Invoice Number:", _plain(invoice.invoice_no)))
+    labels.append(
+        (f"{_number_label(invoice)}:", _plain(invoice.invoice_no))
+    )
     for index, (label, value) in enumerate(labels):
         top = 111 + index * 24
         _text(
             page,
-            pymupdf.Rect(350, top, 430, top + 14),
+            pymupdf.Rect(338, top, 430, top + 14),
             label,
             bold=True,
             align=pymupdf.TEXT_ALIGN_RIGHT,
@@ -242,8 +310,45 @@ def _draw_header(page, invoice) -> None:
         page.draw_line((436, top + 14), (557, top + 14), color=BORDER)
 
 
+def _bill_to_rows(invoice) -> list[tuple[str, str, float]]:
+    """Return the Bill to rows shown by the invoice preview."""
+    optional = [
+        (
+            "Name:",
+            invoice.customer_contact_person or invoice.contact_person,
+        ),
+        ("VAT NO:", invoice.customer_tax_id),
+        ("Address:", invoice.customer_address),
+        (
+            "Email:",
+            invoice.customer_contact_email or invoice.contact_email,
+        ),
+        ("Contact:", invoice.customer_contact_phone),
+    ]
+    rows = [("Company:", _plain(invoice.customer_name))]
+    rows.extend(
+        (label, _plain(value, ""))
+        for label, value in optional
+        if _plain(value, "")
+    )
+    result = []
+    for label, value in rows:
+        lines = min(_line_count(value, BILL_TO_TEXT_WIDTH, 7.5), 3)
+        height = 14 if lines == 1 else 6 + lines * 9
+        result.append((label, value, height))
+    return result
+
+
+def _bill_to_shift(invoice) -> float:
+    """Return how far the Bill to box pushes the content below it."""
+    bottom = 208 + sum(row[2] for row in _bill_to_rows(invoice)) + 2
+    return max(0.0, bottom - BILL_TO_BOTTOM)
+
+
 def _draw_bill_to(page, invoice) -> None:
-    box = pymupdf.Rect(38, 190, 340, 252)
+    rows = _bill_to_rows(invoice)
+    bottom = BILL_TO_BOTTOM + _bill_to_shift(invoice)
+    box = pymupdf.Rect(38, 190, 340, bottom)
     page.draw_rect(box, color=BORDER, width=0.6)
     header = pymupdf.Rect(box.x0, box.y0, box.x1, box.y0 + 15)
     page.draw_rect(header, color=BORDER, fill=GRAY, width=0.6)
@@ -254,26 +359,21 @@ def _draw_bill_to(page, invoice) -> None:
         color=WHITE,
         align=pymupdf.TEXT_ALIGN_CENTER,
     )
-    values = [
-        ("Company:", invoice.customer_name, 14),
-        ("VAT NO:", invoice.customer_tax_id, 14),
-        ("Address:", invoice.customer_address, 28),
-    ]
     top = 208
-    for label, value, height in values:
+    for label, value, height in rows:
         _text(page, pymupdf.Rect(43, top, 100, top + height), label)
         _text(
             page,
             pymupdf.Rect(104, top, 335, top + height),
-            _plain(value),
+            value,
             size=7.5,
         )
         top += height
 
 
-def _draw_contact(page, invoice) -> None:
+def _draw_contact(page, invoice, shift: float) -> None:
     left = 38
-    top = 273
+    top = 273 + shift
     header_height = 17
     row_height = 20
     widths = [104, 125, 78, 52, 160]
@@ -306,7 +406,12 @@ def _draw_contact(page, invoice) -> None:
             align=pymupdf.TEXT_ALIGN_CENTER,
         )
         cursor += width
-    page.draw_line((38, 335), (557, 335), color=(0.33, 0.33, 0.33), width=1.5)
+    page.draw_line(
+        (38, 335 + shift),
+        (557, 335 + shift),
+        color=(0.33, 0.33, 0.33),
+        width=1.5,
+    )
 
 
 def _item_row_height(item) -> float:
@@ -318,10 +423,10 @@ def _item_row_height(item) -> float:
     return max(21, 7 + line_count * 9)
 
 
-def _draw_items(page, invoice, items, start: int) -> float:
+def _draw_items(page, invoice, items, start: int, shift: float) -> float:
     left = 38
-    top = 357
-    header_height = 18
+    top = ITEMS_TOP + shift
+    header_height = ITEMS_HEADER_HEIGHT
     widths = [36, 301, 36, 67, 79]
     headers = ["Item", "Description", "Qty", "Price", "Extended Price"]
     cursor = left
@@ -389,10 +494,31 @@ def _draw_notes(page, invoice, top: float) -> float:
     return box.y1
 
 
+def _remarks_height(invoice) -> float:
+    if not _plain(invoice.remarks, ""):
+        return 0
+    return 4 + _line_count(invoice.remarks, 304, 7.2) * 8.5
+
+
+def _footer_height(invoice) -> float:
+    """Return the space the totals, notes and footer need below items."""
+    bank = 15 + _remarks_height(invoice) + sum(BANK_ROW_HEIGHTS) + 21
+    return 8 + 27 + 48 + 17 + max(bank, 123)
+
+
 def _draw_bank_details(page, invoice, top: float) -> float:
     _text(page, pymupdf.Rect(38, top, 350, top + 14), "Remarks:", bold=True)
     box_top = top + 15
-    heights = [14, 14, 24, 14, 14, 14, 14]
+    remarks_height = _remarks_height(invoice)
+    if remarks_height:
+        _text(
+            page,
+            pymupdf.Rect(38, box_top, 352, box_top + remarks_height),
+            _plain(invoice.remarks, ""),
+            size=7.2,
+        )
+        box_top += remarks_height
+    heights = BANK_ROW_HEIGHTS
     rows = [
         ("Account Name:", invoice.bank_account_name),
         ("Bank Name:", invoice.bank_name),
@@ -494,34 +620,77 @@ def _draw_final_page(page, invoice, item_bottom: float) -> None:
     footer_top = notes_bottom + 17
     bank_bottom = _draw_bank_details(page, invoice, footer_top)
     signature_bottom = _draw_signature(page, invoice, footer_top)
-    if max(bank_bottom, signature_bottom) > 800:
+    if max(bank_bottom, signature_bottom) > PAGE_BOTTOM:
         raise InvoicePdfRenderError(
             "Invoice content is too long for the approved A4 template."
         )
+
+
+def _paginate(items, items_top: float, footer_height: float) -> list:
+    """
+    Split items into pages that fit the A4 template.
+
+    Each page holds at most ITEMS_PER_PAGE rows, continuation pages keep
+    room for the "continued" note, and trailing rows move to a new page
+    when the last page cannot also hold the totals and footer.
+    """
+    if not items:
+        return [[]]
+    continued_limit = PAGE_BOTTOM - 30
+    pages = [[]]
+    bottom = items_top
+    for item in items:
+        height = _item_row_height(item)
+        if pages[-1] and (
+            len(pages[-1]) == ITEMS_PER_PAGE
+            or bottom + height > continued_limit
+        ):
+            pages.append([])
+            bottom = items_top
+        pages[-1].append(item)
+        bottom += height
+
+    def overflows(page_items) -> bool:
+        rows = sum(_item_row_height(item) for item in page_items)
+        return items_top + rows + footer_height > PAGE_BOTTOM
+
+    while len(pages[-1]) > 1 and overflows(pages[-1]):
+        moved = []
+        while len(pages[-1]) > 1 and overflows(pages[-1]):
+            moved.insert(0, pages[-1].pop())
+        pages.append(moved)
+    return pages
 
 
 def render_invoice_pdf(invoice) -> bytes:
     """Return an English, A4 Commercial Invoice PDF."""
     if not LOGO_PATH.is_file():
         raise InvoicePdfRenderError("Invoice logo is unavailable.")
+    if not all((FONT_DIR / name).is_file() for _, name in FONT_FILES.values()):
+        raise InvoicePdfRenderError("Invoice fonts are unavailable.")
     items = list(invoice.items.all())
-    pages = [
-        items[index : index + ITEMS_PER_PAGE]
-        for index in range(0, len(items), ITEMS_PER_PAGE)
-    ] or [[]]
+    shift = _bill_to_shift(invoice)
+    pages = _paginate(
+        items,
+        ITEMS_TOP + shift + ITEMS_HEADER_HEIGHT,
+        _footer_height(invoice),
+    )
     document = pymupdf.open()
     try:
+        start = 0
         for page_index, page_items in enumerate(pages):
             page = document.new_page(width=595, height=842)
             _draw_header(page, invoice)
             _draw_bill_to(page, invoice)
-            _draw_contact(page, invoice)
+            _draw_contact(page, invoice, shift)
             item_bottom = _draw_items(
                 page,
                 invoice,
                 page_items,
-                page_index * ITEMS_PER_PAGE,
+                start,
+                shift,
             )
+            start += len(page_items)
             if page_index == len(pages) - 1:
                 _draw_final_page(page, invoice, item_bottom)
             else:
@@ -542,13 +711,15 @@ def render_invoice_pdf(invoice) -> bytes:
                     align=pymupdf.TEXT_ALIGN_RIGHT,
                     color=(0.33, 0.33, 0.33),
                 )
+        title = _document_title(invoice)
         document.set_metadata(
             {
-                "title": f"Commercial Invoice {invoice.invoice_no}",
+                "title": f"{title} {invoice.invoice_no}",
                 "author": invoice.seller_name or "OnePro Cloud Limited",
-                "subject": "Commercial Invoice",
+                "subject": title,
             }
         )
+        document.subset_fonts()
         return document.tobytes(garbage=4, deflate=True)
     finally:
         document.close()
