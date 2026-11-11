@@ -20,6 +20,7 @@ from quotation.models import (
     QuotationVersion,
     QuoteStatus,
 )
+from quotation.services.line_item_text import strip_description_label
 
 
 QUOTATION_BUSINESS_FIELDS = (
@@ -158,6 +159,8 @@ def quotation_business_signature(
             )
             if field == "type":
                 value = coerce_item_type(str(value or ""))
+            elif field == "description":
+                value = strip_description_label(value)
             values.append(_normalized_business_value(field, value))
         item_signatures.append(tuple(values))
     return fields, tuple(item_signatures)
@@ -363,7 +366,7 @@ def build_quotation(
             item_id=item.get("item_id"),
             currency=item.get("currency") or data.get("currency") or "USD",
             name=item.get("name"),
-            description=item.get("description"),
+            description=strip_description_label(item.get("description")),
             qty=item.get("qty") or 0,
             list_price=item.get("list_price") or 0,
             discount_percent=item.get("discount_percent") or 0,
@@ -598,7 +601,7 @@ def replace_items(
             item_id=item.get("item_id"),
             currency=item.get("currency") or quotation.currency or "USD",
             name=item.get("name"),
-            description=item.get("description"),
+            description=strip_description_label(item.get("description")),
             qty=item.get("qty") or 0,
             list_price=item.get("list_price") or 0,
             discount_percent=item.get("discount_percent") or 0,

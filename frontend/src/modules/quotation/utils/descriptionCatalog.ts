@@ -39,6 +39,17 @@ export interface LineItemDescriptionHistory {
   currency: Quotation['currency']
 }
 
+const DESCRIPTION_LABEL_PATTERN = /^\s*(?:license\s+type|description)\s*[:：]\s*/i
+
+/**
+ * Drop a leading price-list label such as "License Type:".
+ * The rest of the text is kept exactly as written.
+ */
+export function stripDescriptionLabel(value: string): string {
+  const stripped = value.replace(DESCRIPTION_LABEL_PATTERN, '')
+  return stripped.trim() ? stripped : value
+}
+
 function normalize(value: string): string {
   return value.trim().toLowerCase()
 }
@@ -47,7 +58,7 @@ function descriptionText(item: {
   description?: string
   name?: string
 }): string {
-  return (item.description || item.name || '').trim()
+  return stripDescriptionLabel((item.description || item.name || '').trim())
 }
 
 function isSoftwareType(type: ItemType): boolean {
@@ -74,7 +85,7 @@ export function buildDescriptionHistoryOptions(
     meta: DescriptionHistoryOption['meta'],
     label?: string,
   ) => {
-    const trimmed = text.trim()
+    const trimmed = stripDescriptionLabel(text.trim())
     const key = normalize(trimmed)
     if (!key || seen.has(key)) return
     seen.add(key)

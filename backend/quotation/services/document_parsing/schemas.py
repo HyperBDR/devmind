@@ -3,7 +3,9 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from quotation.services.line_item_text import strip_description_label
 
 
 class ParsedQuotationItem(BaseModel):
@@ -17,6 +19,11 @@ class ParsedQuotationItem(BaseModel):
     discount_percent: Decimal = Decimal("0")
     net_unit_price: Decimal = Decimal("0")
     extended_price: Decimal = Decimal("0")
+
+    @field_validator("description")
+    @classmethod
+    def _strip_label(cls, value: str | None) -> str | None:
+        return strip_description_label(value)
 
 
 class ParsedQuotation(BaseModel):
