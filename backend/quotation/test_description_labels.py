@@ -1,4 +1,5 @@
 import importlib
+from contextlib import redirect_stdout
 from decimal import Decimal
 from io import StringIO
 
@@ -54,6 +55,21 @@ class StripDescriptionLabelTests(SimpleTestCase):
             "License Type:",
         ):
             self.assertEqual(strip_description_label(value), value)
+
+    def test_migration_uses_the_same_rule(self):
+        for value in (
+            None,
+            "",
+            YEARLY,
+            SERVICE,
+            "license type : HyperBDR",
+            "  Description：HyperBDR",
+            "Extended Description: kept in the middle",
+            "License Type:",
+        ):
+            self.assertEqual(
+                migration._strip(value), strip_description_label(value)
+            )
 
     def test_parsed_items_drop_the_label(self):
         item = ParsedQuotationItem(
@@ -226,8 +242,14 @@ class StripQuoteDescriptionLabelsCommandTests(TestCase):
         other = self._quote("BDR999999")
         before = Quotation.objects.get(pk=listed.pk)
 
-        migration.strip_labels(django_apps, None)
-        migration.strip_labels(django_apps, None)
+        with redirect_stdout(StringIO()) as log:
+            migration.strip_labels(django_apps, None)
+            migration.strip_labels(django_apps, None)
+
+        self.assertIn(
+            "BDR051126_R1: items=1 new_version=yes", log.getvalue()
+        )
+        self.assertIn("BDR111126: not found, skipped", log.getvalue())
 
         self.assertEqual(
             listed.items.get(line_no=1).description,
