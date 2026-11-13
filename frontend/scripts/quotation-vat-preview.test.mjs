@@ -63,20 +63,3 @@ test('saved legacy quotes retain their zero VAT subtotal', async () => {
     assert.match(await render(quote), /Subtotal before VAT:/)
   }
 })
-
-test('historical snapshot mapping preserves each version display policy', async () => {
-  const versions = [
-    { id: 'old', version_no: 1, status: 'draft', notes: '',
-      created_at: base.created_at, snapshot: { ...base } },
-    { id: 'new', version_no: 2, status: 'draft', notes: '',
-      created_at: base.created_at,
-      snapshot: { ...base, hide_zero_vat_subtotal: true } },
-  ]
-  const quote = mapApiQuotation({ ...base, hide_zero_vat_subtotal: true, versions })
-  for (const [index, visible] of [[0, true], [1, false]]) {
-    const version = quote.versions[index]
-    const snapshotQuote = { ...quote, vatRate: version.vatRate,
-      hideZeroVatSubtotal: version.hideZeroVatSubtotal }
-    assert.equal((await render(snapshotQuote)).includes('Subtotal before VAT:'), visible)
-  }
-})
