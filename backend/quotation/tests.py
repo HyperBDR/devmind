@@ -157,6 +157,38 @@ class QuotationVersionHistoryTests(TestCase):
             legacy, {**legacy, "hide_zero_vat_subtotal": True},
         )
 
+    def test_created_quote_and_snapshot_keep_zero_vat_policy(self):
+        user = User.objects.create_user(
+            username="vat-policy", email="alice.chen@oneprocloud.com",
+            password="password",
+        )
+        api = APIClient()
+        api.force_authenticate(user=user)
+        for index, rate in enumerate((None, "0", "10")):
+            data = self._base_quote_data(f"VAT-{index}")
+            data.pop("created_by_email")
+            if rate is None:
+                data.pop("vat_rate")
+            else:
+                data["vat_rate"] = rate
+            data["items"] = []
+            response = api.post(
+                "/api/v1/quotation/quotations", data, format="json",
+            )
+            assert response.status_code == 201, response.data
+            quote_id = response.data["id"]
+            loaded = api.get(f"/api/v1/quotation/quotations/{quote_id}")
+            assert loaded.status_code == 200, loaded.data
+            assert loaded.data["hide_zero_vat_subtotal"] is True
+            quotation = Quotation.objects.get(pk=quote_id)
+            version = create_version_snapshot(
+                quotation, operator_email=user.email, notes="test",
+            )
+            assert version.snapshot_json["hide_zero_vat_subtotal"] is True
+            assert Decimal(version.snapshot_json["vat_rate"]) == Decimal(
+                rate or "0"
+            )
+
     def test_status_update_appends_version_and_exposes_via_api(self):
         user = User.objects.create_user(
             username="alice-version",
