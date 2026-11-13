@@ -1253,6 +1253,7 @@ const previewQuote = computed<Quotation>(() => ({
   taxLabel: resolveTaxLabel(taxLabel.value),
   taxCalculationMode: taxCalculationMode.value,
   vatRate: quotationTotals.value.vatRate,
+  hideZeroVatSubtotal: props.editingQuote?.hideZeroVatSubtotal ?? true,
   vatAmount: vatAmount.value,
   deductionAmount: quotationTotals.value.deductionAmount,
   grandTotal: grandTotal.value,

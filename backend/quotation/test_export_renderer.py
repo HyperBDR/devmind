@@ -680,6 +680,7 @@ class QuotationTemplateRendererTests(TestCase):
             {
                 "tax_label": "VAT",
                 "vat_rate": "0",
+                "hide_zero_vat_subtotal": True,
                 "vat_amount": "0",
                 "deduction_amount": "25",
                 "subtotal_before_vat": "100",
@@ -694,8 +695,50 @@ class QuotationTemplateRendererTests(TestCase):
             for cell in row
         ]
         self.assertNotIn("VAT Amount (0%):", values)
+        self.assertNotIn("Subtotal before VAT:", values)
         self.assertIn("Deduction Amount:", values)
         self.assertIn(25, values)
+        workbook.close()
+
+    def test_nonzero_vat_keeps_subtotal_even_when_tax_rounds_to_zero(self):
+        template = ensure_default_template()
+        content = render_quotation_xlsx(template, {
+            "hide_zero_vat_subtotal": True,
+            "tax_label": "VAT", "vat_rate": "0.01", "vat_amount": "0",
+            "subtotal_before_vat": "0.01", "grand_total": "0.01",
+        })
+        workbook = load_workbook(io.BytesIO(content))
+        values = [cell.value for row in workbook["Quotation"] for cell in row]
+        self.assertIn("Subtotal before VAT:", values)
+        workbook.close()
+
+    def test_legacy_zero_vat_snapshot_keeps_subtotal(self):
+        template = ensure_default_template()
+        content = render_quotation_xlsx(template, {
+            "tax_label": "VAT", "vat_rate": "0", "vat_amount": "0",
+            "subtotal_before_vat": "100", "grand_total": "100",
+        })
+        workbook = load_workbook(io.BytesIO(content))
+        values = [cell.value for row in workbook["Quotation"] for cell in row]
+        self.assertIn("Subtotal before VAT:", values)
+        workbook.close()
+
+    def test_new_quote_without_discount_gives_subtotal_label_more_space(self):
+        content = render_quotation_xlsx(None, {
+            "hide_zero_vat_subtotal": True,
+            "items": [{"type": "Software", "description": "License",
+                       "qty": "1", "list_price": "100",
+                       "net_unit_price": "100", "extended_price": "100"},
+                      {"type": "Other", "description": "Service",
+                       "qty": "1", "list_price": "20",
+                       "net_unit_price": "20", "extended_price": "20"}],
+        })
+        workbook = load_workbook(io.BytesIO(content))
+        sheet = workbook["Quotation"]
+        labels = [cell for row in sheet for cell in row
+                  if cell.value == "Software subscription subtotal:"]
+        self.assertEqual(len(labels), 1)
+        self.assertEqual(labels[0].column, 3)
         workbook.close()
 
     def test_subtract_vat_is_rendered_without_negative_sign(self):

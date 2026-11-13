@@ -848,6 +848,7 @@ class QuotationSerializer(serializers.ModelSerializer):
             "tax_label",
             "tax_calculation_mode",
             "vat_rate",
+            "hide_zero_vat_subtotal",
             "vat_amount",
             "deduction_amount",
             "software_subtotal",

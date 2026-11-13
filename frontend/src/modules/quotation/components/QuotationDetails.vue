@@ -175,6 +175,7 @@ const snapshotQuote = computed((): Quotation | null => {
     subtotalBeforeVat: ver.subtotalBeforeVat,
     taxLabel: ver.taxLabel || props.quote.taxLabel,
     vatRate: ver.vatRate,
+    hideZeroVatSubtotal: ver.hideZeroVatSubtotal,
     vatAmount: ver.vatAmount,
     deductionAmount: ver.deductionAmount,
     grandTotal: ver.grandTotal,

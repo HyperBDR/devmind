@@ -430,7 +430,7 @@ const moneyTotalCellClass =
         <tr class="h-[13px]">
           <td colspan="7" class="px-1.5 py-1 align-middle" />
         </tr>
-        <tr>
+        <tr v-if="!model.hideZeroVatSubtotal || model.vatRate !== 0">
           <td :colspan="totalsSpacerSpan" class="px-1.5 py-1 align-middle" />
           <td
             :colspan="totalsLabelSpan"

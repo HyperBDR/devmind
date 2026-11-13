@@ -1273,6 +1273,8 @@ def render_quotation_xlsx(
         "Others Subtotal:",
     )
     subtotal_label_start = _label_start_column(list(subtotal_labels))
+    if snapshot.get("hide_zero_vat_subtotal") and not show_discount:
+        subtotal_label_start = min(subtotal_label_start, 3)
     row = 21
     headers = (
         "Item",
@@ -1415,12 +1417,16 @@ def render_quotation_xlsx(
     deduction_amount = Decimal(
         str(snapshot.get("deduction_amount") or 0)
     )
-    totals = [
-        (
+    totals = []
+    if (
+        renderer_version != CURRENT_RENDERER_VERSION
+        or not snapshot.get("hide_zero_vat_subtotal", False)
+        or Decimal(str(snapshot.get("vat_rate") or 0))
+    ):
+        totals.append((
             f"Subtotal before {value('tax_label')}:",
             snapshot.get("subtotal_before_vat"),
-        ),
-    ]
+        ))
     if vat_amount:
         totals.append(
             (
