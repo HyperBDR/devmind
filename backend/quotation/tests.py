@@ -145,6 +145,17 @@ class QuotationVersionHistoryTests(TestCase):
         )
         assert quotation.versions.count() == 0
         assert quotation.version_current == 0
+        assert quotation.hide_zero_vat_subtotal is True
+
+    def test_legacy_snapshot_matches_default_flag(self):
+        from quotation.services.quotation_service import _snapshots_match
+
+        legacy = {"vat_rate": "0.00", "items": []}
+        current = {**legacy, "hide_zero_vat_subtotal": False}
+        assert _snapshots_match(legacy, current)
+        assert not _snapshots_match(
+            legacy, {**legacy, "hide_zero_vat_subtotal": True},
+        )
 
     def test_status_update_appends_version_and_exposes_via_api(self):
         user = User.objects.create_user(

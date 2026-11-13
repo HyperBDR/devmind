@@ -254,6 +254,7 @@ def build_quotation_snapshot(
         "tax_label": quotation.tax_label,
         "tax_calculation_mode": quotation.tax_calculation_mode,
         "vat_rate": _decimal_str(quotation.vat_rate),
+        "hide_zero_vat_subtotal": quotation.hide_zero_vat_subtotal,
         "deduction_amount": _decimal_str(quotation.deduction_amount),
         "custom_total_label": quotation.custom_total_label,
         "custom_total_amount": _decimal_str(quotation.custom_total_amount),
@@ -336,6 +337,7 @@ def build_quotation(
         tax_label=data.get("tax_label") or "VAT",
         tax_calculation_mode=data.get("tax_calculation_mode") or "add",
         vat_rate=data.get("vat_rate") or 0,
+        hide_zero_vat_subtotal=(data.get("source_type") or "manual") == "manual",
         custom_total_label=data.get("custom_total_label") or "",
         custom_total_amount=data.get("custom_total_amount") or 0,
         custom_total_currency=data.get("custom_total_currency") or "USD",
@@ -543,6 +545,7 @@ def copy_quotation(
         tax_label=quotation.tax_label,
         tax_calculation_mode=quotation.tax_calculation_mode,
         vat_rate=quotation.vat_rate,
+        hide_zero_vat_subtotal=True,
         deduction_amount=quotation.deduction_amount,
         vat_amount=quotation.vat_amount,
         software_subtotal=quotation.software_subtotal,
@@ -781,6 +784,8 @@ def _snapshots_match(left: Any, right: Any) -> bool:
     left_without_version.pop("version_no", None)
     right_without_version.pop("version_no", None)
     for snapshot in (left_without_version, right_without_version):
+        if snapshot.get("hide_zero_vat_subtotal") is False:
+            snapshot.pop("hide_zero_vat_subtotal")
         items = snapshot.get("items")
         if isinstance(items, list):
             snapshot["items"] = [

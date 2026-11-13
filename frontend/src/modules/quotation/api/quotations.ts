@@ -51,6 +51,7 @@ interface ApiQuotation {
   tax_label: string;
   tax_calculation_mode?: 'add' | 'subtract';
   vat_rate: number | string;
+  hide_zero_vat_subtotal?: boolean;
   vat_amount: number | string;
   deduction_amount: number | string;
   software_subtotal: number | string;
@@ -421,6 +422,7 @@ function mapApiVersion(version: ApiQuotationVersion): QuoteVersion {
     issuerSignature: snapText(snap, 'issuer_signature', 'issuerSignature'),
     taxLabel: snapText(snap, 'tax_label', 'taxLabel'),
     vatRate,
+    hideZeroVatSubtotal: snap.hide_zero_vat_subtotal === true,
     ...totals,
     snapshotLoaded: Boolean(version.snapshot),
   };
@@ -482,6 +484,7 @@ export function mapApiQuotation(api: ApiQuotation): Quotation {
     taxLabel: api.tax_label,
     taxCalculationMode: api.tax_calculation_mode || 'add',
     vatRate: toNumber(api.vat_rate),
+    hideZeroVatSubtotal: api.hide_zero_vat_subtotal === true,
     vatAmount: toNumber(api.vat_amount),
     deductionAmount: toNumber(api.deduction_amount),
     grandTotal: toNumber(api.grand_total),

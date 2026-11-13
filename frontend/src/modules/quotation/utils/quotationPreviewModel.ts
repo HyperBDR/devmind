@@ -50,6 +50,7 @@ export interface QuotationPreviewModel {
   taxLabel: string;
   taxCalculationMode: 'add' | 'subtract';
   vatRate: number;
+  hideZeroVatSubtotal: boolean;
   vatAmount: number;
   deductionAmount: number;
   grandTotal: number;
@@ -210,6 +211,7 @@ export function buildQuotationPreviewModel(quote: Quotation, options: BuildOptio
     taxLabel: resolveTaxLabel(quote.taxLabel),
     taxCalculationMode: quote.taxCalculationMode || 'add',
     vatRate: quote.vatRate ?? 0,
+    hideZeroVatSubtotal: quote.hideZeroVatSubtotal === true,
     vatAmount: quote.vatAmount ?? 0,
     deductionAmount: quote.deductionAmount ?? 0,
     grandTotal: quote.grandTotal,

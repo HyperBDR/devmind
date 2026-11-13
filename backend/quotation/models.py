@@ -536,6 +536,7 @@ class Quotation(TimeStampedModel):
         default="add",
     )
     vat_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    hide_zero_vat_subtotal = models.BooleanField(default=False)
     vat_amount = models.DecimalField(
         max_digits=18, decimal_places=2, default=0
     )
