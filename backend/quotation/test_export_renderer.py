@@ -703,6 +703,7 @@ class QuotationTemplateRendererTests(TestCase):
     def test_nonzero_vat_keeps_subtotal_even_when_tax_rounds_to_zero(self):
         template = ensure_default_template()
         content = render_quotation_xlsx(template, {
+            "hide_zero_vat_subtotal": True,
             "tax_label": "VAT", "vat_rate": "0.01", "vat_amount": "0",
             "subtotal_before_vat": "0.01", "grand_total": "0.01",
         })
