@@ -81,6 +81,22 @@ class InvoiceApiTests(TestCase):
                 self.assertIn("Digital Service Tax (DST) (8%)", text)
                 self.assertIn("61,896.42", text)
 
+    def test_tax_label_rejects_unsupported_characters_and_length(self):
+        invoice = Invoice.objects.create(
+            invoice_no="INV-LABEL", invoice_date=date(2026, 9, 4),
+            customer_name="Acme",
+        )
+        for label in ("增值税", "W" * 41, "VAT\nGST"):
+            with self.subTest(label=label):
+                response = self.client.patch(
+                    f"/api/v1/invoice/invoices/{invoice.id}",
+                    {"tax_label": label}, format="json",
+                )
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("tax_label", response.data)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.tax_label, "")
+
     def test_invoice_api_requires_invoice_access_grant(self):
         outsider = User.objects.create_user(
             username="invoice-outsider",

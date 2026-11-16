@@ -1411,6 +1411,8 @@
         "totalAmount": "Total amount",
         "invoiceTaxSettings": "Tax settings",
         "invoiceTaxLabel": "Tax type",
+        "invoiceTaxLabelHelp": "Up to 40 English characters, numbers or standard symbols.",
+        "invoiceTaxLabelInvalid": "Use up to 40 English characters, numbers or standard symbols for the tax name.",
         "invoiceTaxRate": "Tax rate (%)",
         "invoiceSubtotal": "Subtotal before tax",
         "invoiceTaxAmount": "Tax amount",

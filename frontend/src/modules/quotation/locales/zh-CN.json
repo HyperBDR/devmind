@@ -1411,6 +1411,8 @@
         "totalAmount": "总金额",
         "invoiceTaxSettings": "税费设置",
         "invoiceTaxLabel": "税种",
+        "invoiceTaxLabelHelp": "最多 40 个英文字符、数字或常用英文符号。",
+        "invoiceTaxLabelInvalid": "税种名称请使用最多 40 个英文字符、数字或常用英文符号。",
         "invoiceTaxRate": "税率（%）",
         "invoiceSubtotal": "税前小计",
         "invoiceTaxAmount": "税额",

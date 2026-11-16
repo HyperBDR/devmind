@@ -95,6 +95,20 @@ def _pages(invoice) -> list[str]:
 
 
 class InvoicePdfRendererTests(SimpleTestCase):
+    def test_longest_allowed_tax_label_renders_at_maximum_rate(self):
+        for char, rate, shown in (
+            ("W", "100.0000", "100"),
+            ("@", "99.9999", "99.9999"),
+        ):
+            label = char * 40
+            with self.subTest(rate=rate, char=char):
+                invoice = _invoice(
+                    tax_label=label, tax_rate=Decimal(rate),
+                    subtotal_amount=Decimal("100"), tax_amount=Decimal("100"),
+                    total_amount=Decimal("200"),
+                )
+                self.assertIn(f"{label} ({shown}%):", "\n".join(_pages(invoice)))
+
     def test_taxed_long_item_can_use_a_footer_only_page(self):
         invoice = _invoice(
             tax_label="VAT", tax_rate=Decimal("8"),

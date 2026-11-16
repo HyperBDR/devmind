@@ -665,6 +665,10 @@ function payload(status: WritableInvoiceStatus): InvoiceCreatePayload {
 }
 
 function validateForm(status: WritableInvoiceStatus): boolean {
+  if (!/^[\x20-\x7e]{0,40}$/.test(form.taxLabel.trim())) {
+    error.value = t('quotation.sales.create.invoiceTaxLabelInvalid')
+    return false
+  }
   if (Number(form.taxRate) < 0 || Number(form.taxRate) > 100 ||
       (Number(form.taxRate) > 0 && !form.taxLabel.trim())) {
     error.value = t('quotation.sales.create.invoiceTaxInvalid')
@@ -1316,7 +1320,8 @@ onMounted(initializeForm)
           <div class="grid grid-cols-2 gap-4">
             <label class="invoice-field">
               <span>{{ t('quotation.sales.create.invoiceTaxLabel') }}</span>
-              <input v-model="form.taxLabel" class="dm-input" list="invoice-tax-labels" maxlength="120" />
+              <input v-model="form.taxLabel" class="dm-input" list="invoice-tax-labels" maxlength="40" />
+              <small class="text-dm-text-tertiary">{{ t('quotation.sales.create.invoiceTaxLabelHelp') }}</small>
               <datalist id="invoice-tax-labels">
                 <option value="Digital Service Tax (DST)" />
                 <option value="VAT" />
