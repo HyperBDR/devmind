@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 
 import oneProLogo from '../../assets/onepro-logo.png'
+import { calculateInvoiceTotals } from '../../utils/invoiceTotals'
 
 export interface InvoicePreviewItem {
   id: string
@@ -29,6 +30,11 @@ export interface InvoicePreviewData {
   contactEmail: string
   purchaseOrderNo: string
   paymentTerms: string
+  taxLabel?: string
+  taxRate?: number
+  subtotalAmount?: number
+  taxAmount?: number
+  totalAmount?: number
   additionalNotes: string
   remarks: string
   bankAccountName: string
@@ -59,12 +65,14 @@ const pages = computed(() => {
   return chunks.length ? chunks : [[]]
 })
 
-const totalAmount = computed(() =>
-  props.invoice.items.reduce(
-    (total, item) => total + item.quantity * item.unitPrice,
-    0,
-  ),
-)
+const totals = computed(() => calculateInvoiceTotals(
+  props.invoice.items.filter((item) => item.description.trim()), props.invoice.taxRate || 0,
+))
+const subtotal = computed(() => props.invoice.subtotalAmount ?? totals.value.subtotal)
+const taxAmount = computed(() => props.invoice.taxAmount ?? totals.value.tax)
+const totalAmount = computed(() => props.invoice.taxLabel && props.invoice.taxRate
+  ? props.invoice.totalAmount ?? totals.value.total
+  : props.invoice.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0))
 
 function displayDate(value: string): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
@@ -324,6 +332,14 @@ function formatAmount(value: number): string {
       </table>
 
       <template v-if="pageIndex === pages.length - 1">
+        <div v-if="invoice.taxLabel && invoice.taxRate" class="invoice-total-row">
+          <span>Subtotal before tax:</span>
+          <strong>{{ formatAmount(subtotal) }}</strong>
+        </div>
+        <div v-if="invoice.taxLabel && invoice.taxRate" class="invoice-total-row">
+          <span>{{ invoice.taxLabel }} ({{ invoice.taxRate }}%):</span>
+          <strong>{{ formatAmount(taxAmount) }}</strong>
+        </div>
         <div class="invoice-total-row">
           <strong>Total:</strong>
           <strong>{{ formatAmount(totalAmount) }}</strong>
@@ -334,7 +350,7 @@ function formatAmount(value: number): string {
           <p>{{ invoice.additionalNotes || '—' }}</p>
         </section>
 
-        <section class="invoice-footer">
+        <section class="invoice-footer" :class="{ 'invoice-footer-taxed': invoice.taxLabel && invoice.taxRate }">
           <div class="invoice-bank-details">
             <h3>Remarks:</h3>
             <p v-if="invoice.remarks">{{ invoice.remarks }}</p>
@@ -605,6 +621,8 @@ function formatAmount(value: number): string {
   border-bottom: 1px solid #333;
 }
 
+.invoice-total-row + .invoice-total-row { margin-top: 2px; }
+
 .invoice-notes-block {
   min-height: 60px;
   margin-top: 16px;
@@ -630,6 +648,19 @@ function formatAmount(value: number): string {
   gap: 5%;
   margin-top: 25px;
 }
+
+.invoice-footer-taxed { display: block; margin-top: 12px; }
+.invoice-footer-taxed .invoice-bank-details dl {
+  width: max-content;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.invoice-footer-taxed .invoice-bank-details dt { text-align: right; }
+.invoice-footer-taxed .invoice-signature-block {
+  width: 35%; margin-left: auto; padding-top: 8px;
+}
+.invoice-footer-taxed .invoice-signature-image-wrap { height: 28px; }
+.invoice-footer-taxed .invoice-signature-image-wrap img { max-height: 28px; }
 
 .invoice-bank-details h3 {
   margin: 0 0 7px;

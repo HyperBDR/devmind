@@ -423,7 +423,8 @@ def _item_row_height(item) -> float:
     return max(21, 7 + line_count * 9)
 
 
-def _draw_items(page, invoice, items, start: int, shift: float) -> float:
+def _draw_items(page, invoice, items, start: int, shift: float,
+                *, show_empty: bool = True) -> float:
     left = 38
     top = ITEMS_TOP + shift
     header_height = ITEMS_HEADER_HEIGHT
@@ -439,7 +440,7 @@ def _draw_items(page, invoice, items, start: int, shift: float) -> float:
         )
         cursor += width
     top += header_height
-    if not items:
+    if not items and show_empty:
         items = [None]
     for offset, item in enumerate(items):
         row_height = _item_row_height(item) if item else 21
@@ -502,8 +503,78 @@ def _remarks_height(invoice) -> float:
 
 def _footer_height(invoice) -> float:
     """Return the space the totals, notes and footer need below items."""
+    if getattr(invoice, "tax_label", "") and invoice.tax_rate:
+        return 8 + 57 + 48 + 10 + _taxed_bank_height(invoice) + 84
     bank = 15 + _remarks_height(invoice) + sum(BANK_ROW_HEIGHTS) + 21
     return 8 + 27 + 48 + 17 + max(bank, 123)
+
+
+def _taxed_bank_rows(invoice):
+    return [
+        ("Account Name:", invoice.bank_account_name),
+        ("Bank Name:", invoice.bank_name),
+        ("Bank Address:", invoice.bank_address),
+        ("Account Number:", invoice.bank_account_number),
+        ("Bank Code:", invoice.bank_code),
+        ("Branch Code:", invoice.bank_branch_code),
+        ("SWIFT CODE:", invoice.bank_swift_code),
+    ]
+
+
+def _taxed_bank_label_width(invoice):
+    return max(_text_width(label, 7.2) for label, _ in _taxed_bank_rows(invoice)) + 1
+
+
+def _taxed_bank_width(invoice):
+    longest = max(
+        (_text_width(_plain(value), 7.2)
+         for _, value in _taxed_bank_rows(invoice)),
+        default=0,
+    )
+    return min(519, max(260, 20 + _taxed_bank_label_width(invoice) + longest))
+
+
+def _taxed_bank_height(invoice):
+    value_width = _taxed_bank_width(invoice) - 15 - _taxed_bank_label_width(invoice)
+    rows = sum(
+        max(13, 4 + _line_count(value, value_width, 7.2) * 9)
+        for _, value in _taxed_bank_rows(invoice)
+    )
+    remarks = 0 if not invoice.remarks else (
+        4 + _line_count(invoice.remarks, 519, 7.2) * 9
+    )
+    remittance = max(
+        12, 4 + _line_count(invoice.remittance_instruction, 519, 6.8) * 8
+    )
+    return 15 + remarks + rows + remittance
+
+
+def _draw_taxed_bank_details(page, invoice, top):
+    _text(page, pymupdf.Rect(38, top, 557, top + 14), "Remarks:", bold=True)
+    top += 15
+    if invoice.remarks:
+        height = 4 + _line_count(invoice.remarks, 519, 7.2) * 9
+        _text(page, pymupdf.Rect(38, top, 557, top + height), invoice.remarks, size=7.2)
+        top += height
+    rows = _taxed_bank_rows(invoice)
+    box_right = 38 + _taxed_bank_width(invoice)
+    label_right = 43 + _taxed_bank_label_width(invoice)
+    value_left = label_right + 5
+    heights = [max(13, 4 + _line_count(value, box_right - 5 - value_left, 7.2) * 9)
+               for _, value in rows]
+    bottom = top + sum(heights)
+    page.draw_rect(pymupdf.Rect(38, top, box_right, bottom), color=BORDER, width=0.6)
+    cursor = top + 2
+    for (label, value), height in zip(rows, heights):
+        _text(page, pymupdf.Rect(43, cursor, label_right, cursor + height - 2),
+              label, size=7.2, align=pymupdf.TEXT_ALIGN_RIGHT)
+        _text(page, pymupdf.Rect(value_left, cursor, box_right - 5, cursor + height - 2),
+              _plain(value), size=7.2)
+        cursor += height
+    remittance_height = max(12, 4 + _line_count(invoice.remittance_instruction, 519, 6.8) * 8)
+    _text(page, pymupdf.Rect(38, bottom + 2, 557, bottom + remittance_height),
+          _plain(invoice.remittance_instruction), size=6.8, italic=True)
+    return bottom + remittance_height
 
 
 def _draw_bank_details(page, invoice, top: float) -> float:
@@ -595,8 +666,48 @@ def _draw_signature(page, invoice, top: float) -> float:
     return cursor
 
 
+def _draw_taxed_signature(page, invoice, top: float) -> float:
+    left, right = 382, 557
+    _text(page, pymupdf.Rect(left, top + 2, right, top + 15),
+          _plain(invoice.seller_name, "OnePro Cloud Limited"), bold=True,
+          align=pymupdf.TEXT_ALIGN_CENTER)
+    signature = _signature_bytes(invoice.issuer_signature)
+    if signature:
+        page.insert_image(pymupdf.Rect(left + 18, top + 16, right - 18, top + 40),
+                          stream=signature, keep_proportion=True)
+    page.draw_line((left, top + 41), (right, top + 41), color=BORDER)
+    for index, (label, value) in enumerate([
+        ("Name:", invoice.signatory_name),
+        ("Title:", invoice.signatory_title),
+        ("Date:", _date(invoice.invoice_date)),
+    ]):
+        row_top = top + 43 + index * 13
+        _text(page, pymupdf.Rect(left, row_top, left + 42, row_top + 12), label)
+        _text(page, pymupdf.Rect(left + 46, row_top, right, row_top + 12),
+              _plain(value), size=7.5)
+    return top + 84
+
+
 def _draw_final_page(page, invoice, item_bottom: float) -> None:
     total_top = item_bottom + 8
+    if getattr(invoice, "tax_label", "") and invoice.tax_rate:
+        rows = [
+            ("Subtotal before tax:", invoice.subtotal_amount),
+            (f"{invoice.tax_label} ({format(invoice.tax_rate.normalize(), 'f')}%):", invoice.tax_amount),
+            ("Total:", invoice.total_amount),
+        ]
+        for label, amount in rows:
+            _text(page, pymupdf.Rect(140, total_top, 445, total_top + 14),
+                  label, bold=True, align=pymupdf.TEXT_ALIGN_RIGHT)
+            _text(page, pymupdf.Rect(450, total_top, 557, total_top + 14),
+                  _amount(amount, invoice.currency), bold=True, align=pymupdf.TEXT_ALIGN_RIGHT)
+            page.draw_line((450, total_top + 14), (557, total_top + 14), color=BLACK)
+            total_top += 18
+        notes_bottom = _draw_notes(page, invoice, total_top + 3)
+        bank_bottom = _draw_taxed_bank_details(page, invoice, notes_bottom + 10)
+        if _draw_taxed_signature(page, invoice, bank_bottom) > PAGE_BOTTOM:
+            raise InvoicePdfRenderError("Invoice content is too long for the approved A4 template.")
+        return
     _text(
         page,
         pymupdf.Rect(250, total_top, 445, total_top + 15),
@@ -626,7 +737,8 @@ def _draw_final_page(page, invoice, item_bottom: float) -> None:
         )
 
 
-def _paginate(items, items_top: float, footer_height: float) -> list:
+def _paginate(items, items_top: float, footer_height: float,
+              *, allow_footer_only: bool = False) -> list:
     """
     Split items into pages that fit the A4 template.
 
@@ -659,6 +771,8 @@ def _paginate(items, items_top: float, footer_height: float) -> list:
         while len(pages[-1]) > 1 and overflows(pages[-1]):
             moved.insert(0, pages[-1].pop())
         pages.append(moved)
+    if allow_footer_only and pages[-1] and overflows(pages[-1]):
+        pages.append([])
     return pages
 
 
@@ -674,6 +788,7 @@ def render_invoice_pdf(invoice) -> bytes:
         items,
         ITEMS_TOP + shift + ITEMS_HEADER_HEIGHT,
         _footer_height(invoice),
+        allow_footer_only=bool(getattr(invoice, "tax_label", "") and invoice.tax_rate),
     )
     document = pymupdf.open()
     try:
@@ -689,6 +804,7 @@ def render_invoice_pdf(invoice) -> bytes:
                 page_items,
                 start,
                 shift,
+                show_empty=not (page_index > 0 and not page_items),
             )
             start += len(page_items)
             if page_index == len(pages) - 1:

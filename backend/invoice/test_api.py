@@ -47,6 +47,40 @@ class InvoiceApiTests(TestCase):
         self.client = APIClient()
         self.client.force_authenticate(self.user)
 
+    def test_issue_taxed_invoice_and_download_pdf(self):
+        with TemporaryDirectory() as storage_root:
+            with override_settings(INVOICE_STORAGE=storage_root):
+                response = self.client.post(
+                    "/api/v1/invoice/invoices",
+                    {
+                        "invoice_no": "INV-DST-001",
+                        "invoice_date": "2026-11-16",
+                        "status": InvoiceStatus.ISSUED,
+                        "currency": "MYR",
+                        "customer_name": "Example",
+                        "tax_label": "Digital Service Tax (DST)",
+                        "tax_rate": "8",
+                        "items": [
+                            {"line_no": 1, "product_name": "License",
+                             "quantity": "50", "unit_price": "913.50"},
+                            {"line_no": 2, "product_name": "Service",
+                             "quantity": "50", "unit_price": "232.73"},
+                        ],
+                    }, format="json",
+                )
+                self.assertEqual(response.status_code, 201, response.data)
+                self.assertEqual(response.data["tax_amount"], "4584.92")
+                self.assertEqual(response.data["total_amount"], "61896.42")
+                invoice_id = response.data["id"]
+                detail = self.client.get(f"/api/v1/invoice/invoices/{invoice_id}")
+                self.assertEqual(detail.data["tax_label"], "Digital Service Tax (DST)")
+                download = self.client.get(f"/api/v1/invoice/invoices/{invoice_id}/pdf")
+                self.assertEqual(download.status_code, 200)
+                reader = PdfReader(BytesIO(b"".join(download.streaming_content)))
+                text = "\n".join(page.extract_text() for page in reader.pages)
+                self.assertIn("Digital Service Tax (DST) (8%)", text)
+                self.assertIn("61,896.42", text)
+
     def test_invoice_api_requires_invoice_access_grant(self):
         outsider = User.objects.create_user(
             username="invoice-outsider",
@@ -999,6 +1033,7 @@ class InvoiceApiTests(TestCase):
             f"/api/v1/invoice/invoices/{invoice.id}",
             {
                 "tax_rate": "10",
+                "tax_label": "Digital Service Tax (DST)",
                 "items": [
                     {
                         "line_no": 1,
@@ -1017,6 +1052,7 @@ class InvoiceApiTests(TestCase):
         ))
         self.assertEqual(response.data["subtotal_amount"], "100.00")
         self.assertEqual(response.data["tax_amount"], "10.00")
+        self.assertEqual(response.data["tax_label"], "Digital Service Tax (DST)")
         self.assertEqual(response.data["total_amount"], "110.00")
         self.assertEqual(invoice.items.count(), 1)
 

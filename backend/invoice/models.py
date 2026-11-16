@@ -203,6 +203,7 @@ class Invoice(models.Model):
     payment_terms = models.CharField(max_length=255, blank=True, default="")
     region = models.CharField(max_length=120, blank=True, default="")
     sales_owner = models.CharField(max_length=255, blank=True, default="")
+    tax_label = models.CharField(max_length=120, blank=True, default="")
     tax_rate = models.DecimalField(
         max_digits=7,
         decimal_places=4,

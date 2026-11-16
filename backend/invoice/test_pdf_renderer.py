@@ -95,6 +95,57 @@ def _pages(invoice) -> list[str]:
 
 
 class InvoicePdfRendererTests(SimpleTestCase):
+    def test_taxed_long_item_can_use_a_footer_only_page(self):
+        invoice = _invoice(
+            tax_label="VAT", tax_rate=Decimal("8"),
+            subtotal_amount=Decimal("100"), tax_amount=Decimal("8"),
+            total_amount=Decimal("108"),
+            items=_Items([_item(1, "\n".join(f"Line {i}" for i in range(10)))]),
+        )
+        pages = _pages(invoice)
+        self.assertEqual(len(pages), 2)
+        self.assertIn("Line 9", pages[0])
+        self.assertIn("VAT (8%):", pages[1])
+        self.assertNotIn("Line 9", pages[1])
+
+    def test_taxed_invoice_footer_fits_and_shows_tax(self):
+        invoice = _invoice(
+            tax_label="Digital Service Tax (DST)",
+            tax_rate=Decimal("8"),
+            subtotal_amount=Decimal("57311.50"),
+            tax_amount=Decimal("4584.92"),
+            total_amount=Decimal("61896.42"),
+            currency="MYR",
+            items=_Items([
+                _item(1, "HyperBDR Backup & DR License (SaaS Model)\n"
+                      "Backup & DR per host, irrespective of storage capacity\n"
+                      "1 x Failback license per HyperBDR license is included\n"
+                      "50 units for 6 months subscription"),
+                _item(2, "Product Service (24x7)\n50 units for 6 months"),
+            ]),
+        )
+        document = pymupdf.open(stream=render_invoice_pdf(invoice))
+        try:
+            self.assertEqual(len(document), 1)
+            text = document[0].get_text()
+            self.assertIn("Digital Service Tax (DST) (8%)", text)
+            self.assertIn("4,584.92", text)
+            self.assertIn("61,896.42", text)
+            lines = text.splitlines()
+            self.assertTrue(any(
+                f"18th Floor, The Center, {QUEENS}" in line
+                for line in lines
+            ))
+            account = document[0].search_for("Account Name:")[0]
+            bank = document[0].search_for("Bank Name:")[0]
+            self.assertAlmostEqual(account.x1, bank.x1, delta=0.5)
+            self.assertGreater(
+                document[0].search_for("Natalie Chan")[0].y0,
+                document[0].search_for("SWIFT CODE:")[0].y0,
+            )
+        finally:
+            document.close()
+
     def test_bill_to_matches_preview_and_keeps_typography(self):
         text = "\n".join(_pages(_invoice()))
 

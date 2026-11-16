@@ -33,6 +33,7 @@ SNAPSHOT_FIELDS = (
     "payment_terms",
     "region",
     "sales_owner",
+    "tax_label",
     "tax_rate",
     "subtotal_amount",
     "tax_amount",
