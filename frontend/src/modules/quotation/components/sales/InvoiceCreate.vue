@@ -16,6 +16,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
 import { useUserStore } from '@/store/user'
+import { calculateInvoiceTotals } from '../../utils/invoiceTotals'
 
 import {
   getCatalog,
@@ -165,6 +166,8 @@ const form = reactive({
   contactEmail: '',
   purchaseOrderNo: '',
   paymentTerms: 'CIA',
+  taxLabel: '',
+  taxRate: 0,
   additionalNotes: DEFAULT_ADDITIONAL_NOTES,
   remarks: '',
   bankAccountName: '',
@@ -525,6 +528,8 @@ const previewInvoice = computed<InvoicePreviewData>(() => ({
   contactEmail: form.contactEmail,
   purchaseOrderNo: form.purchaseOrderNo,
   paymentTerms: form.paymentTerms,
+  taxLabel: form.taxLabel,
+  taxRate: Number(form.taxRate) || 0,
   additionalNotes: form.additionalNotes,
   remarks: form.remarks,
   bankAccountName: form.bankAccountName,
@@ -546,12 +551,15 @@ const previewInvoice = computed<InvoicePreviewData>(() => ({
   })),
 }))
 
-const totalAmount = computed(() =>
-  form.items.reduce(
-    (total, item) => total + Number(item.quantity) * Number(item.unitPrice),
-    0,
-  ),
-)
+const totalAmount = computed(() => form.taxLabel && Number(form.taxRate) > 0
+  ? calculateInvoiceTotals(
+    form.items.filter((item) => item.description.trim()),
+    Number(form.taxRate) || 0,
+  ).total
+  : form.items.reduce((sum, item) => sum + Number(item.quantity) * Number(item.unitPrice), 0))
+const taxSummary = computed(() => calculateInvoiceTotals(
+  form.items.filter((item) => item.description.trim()), Number(form.taxRate) || 0,
+))
 
 function formatEditorAmount(value: number): string {
   return new Intl.NumberFormat('en-US', {
@@ -637,7 +645,8 @@ function payload(status: WritableInvoiceStatus): InvoiceCreatePayload {
     payment_terms: form.paymentTerms,
     region: '',
     sales_owner: form.salesOwner.trim(),
-    tax_rate: '0',
+    tax_label: form.taxLabel.trim(),
+    tax_rate: String(form.taxRate || 0),
     additional_notes: form.additionalNotes.trim(),
     remarks: form.remarks.trim(),
     bank_account_name: form.bankAccountName.trim(),
@@ -656,6 +665,15 @@ function payload(status: WritableInvoiceStatus): InvoiceCreatePayload {
 }
 
 function validateForm(status: WritableInvoiceStatus): boolean {
+  if (!/^[\x20-\x7e]{0,40}$/.test(form.taxLabel.trim())) {
+    error.value = t('quotation.sales.create.invoiceTaxLabelInvalid')
+    return false
+  }
+  if (Number(form.taxRate) < 0 || Number(form.taxRate) > 100 ||
+      (Number(form.taxRate) > 0 && !form.taxLabel.trim())) {
+    error.value = t('quotation.sales.create.invoiceTaxInvalid')
+    return false
+  }
   const customNumberMissing =
     form.numberingMode === InvoiceNumberingMode.CUSTOM &&
     !form.invoiceNumber.trim()
@@ -717,6 +735,8 @@ function populateForm(invoice: InvoiceRecord) {
   form.contactEmail = invoice.contact_email
   form.purchaseOrderNo = invoice.purchase_order_no
   form.paymentTerms = normalizePaymentTerm(invoice.payment_terms)
+  form.taxLabel = invoice.tax_label || ''
+  form.taxRate = Number(invoice.tax_rate) || 0
   form.additionalNotes = invoice.additional_notes
   form.remarks = invoice.remarks
   selectedBankAccount.value = invoice.bank_name || invoice.bank_account_name
@@ -1293,6 +1313,31 @@ onMounted(initializeForm)
               {{ form.currency }} {{ formatEditorAmount(totalAmount) }}
             </p>
           </div>
+        </section>
+
+        <section class="dm-card space-y-4 p-5">
+          <h2 class="font-semibold">{{ t('quotation.sales.create.invoiceTaxSettings') }}</h2>
+          <div class="grid grid-cols-2 gap-4">
+            <label class="invoice-field">
+              <span>{{ t('quotation.sales.create.invoiceTaxLabel') }}</span>
+              <input v-model="form.taxLabel" class="dm-input" list="invoice-tax-labels" maxlength="40" />
+              <small class="text-dm-text-tertiary">{{ t('quotation.sales.create.invoiceTaxLabelHelp') }}</small>
+              <datalist id="invoice-tax-labels">
+                <option value="Digital Service Tax (DST)" />
+                <option value="VAT" />
+                <option value="GST" />
+              </datalist>
+            </label>
+            <label class="invoice-field">
+              <span>{{ t('quotation.sales.create.invoiceTaxRate') }}</span>
+              <input v-model.number="form.taxRate" class="dm-input" type="number" min="0" max="100" step="0.0001" />
+            </label>
+          </div>
+          <dl v-if="Number(form.taxRate) > 0" class="space-y-1 text-sm">
+            <div class="flex justify-between"><dt>{{ t('quotation.sales.create.invoiceSubtotal') }}</dt><dd>{{ form.currency }} {{ formatEditorAmount(taxSummary.subtotal) }}</dd></div>
+            <div class="flex justify-between"><dt>{{ t('quotation.sales.create.invoiceTaxAmount') }}</dt><dd>{{ form.currency }} {{ formatEditorAmount(taxSummary.tax) }}</dd></div>
+            <div class="flex justify-between font-semibold"><dt>{{ t('quotation.sales.create.totalAmount') }}</dt><dd>{{ form.currency }} {{ formatEditorAmount(taxSummary.total) }}</dd></div>
+          </dl>
         </section>
 
         <section class="dm-card space-y-4 p-5">

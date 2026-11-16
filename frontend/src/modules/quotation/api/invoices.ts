@@ -71,6 +71,7 @@ export interface InvoiceRecord {
   payment_terms: string
   region: string
   sales_owner: string
+  tax_label: string
   tax_rate: string
   subtotal_amount: string
   tax_amount: string
@@ -170,6 +171,7 @@ export interface InvoiceCreatePayload {
   payment_terms: string
   region: string
   sales_owner: string
+  tax_label: string
   tax_rate: string
   additional_notes: string
   remarks: string

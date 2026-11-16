@@ -141,6 +141,9 @@ class InvoiceFormContextQuerySerializer(serializers.Serializer):
 
 class InvoiceSerializer(serializers.ModelSerializer):
     items = InvoiceItemSerializer(many=True, required=False)
+    tax_label = serializers.CharField(
+        required=False, allow_blank=True, max_length=40,
+    )
     created_by_email = serializers.SerializerMethodField()
     pdf_available = serializers.SerializerMethodField()
     feishu_url = serializers.SerializerMethodField()
@@ -188,6 +191,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "payment_terms",
             "region",
             "sales_owner",
+            "tax_label",
             "tax_rate",
             "subtotal_amount",
             "tax_amount",
@@ -276,6 +280,13 @@ class InvoiceSerializer(serializers.ModelSerializer):
                 "Use a three-letter currency code."
             )
         return currency
+
+    def validate_tax_label(self, value):
+        if not re.fullmatch(r"[\x20-\x7e]*", value):
+            raise serializers.ValidationError(
+                "Use English letters, numbers or standard ASCII symbols."
+            )
+        return value
 
     def validate_tax_rate(self, value):
         if value < 0 or value > 100:
