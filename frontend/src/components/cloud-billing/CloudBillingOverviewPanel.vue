@@ -1575,6 +1575,7 @@
               <input
                 v-model="rechargeSubmitForm.expected_date"
                 type="date"
+                :min="getRechargeDateBounds().minDate"
                 class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
               />
             </div>
@@ -1618,6 +1619,10 @@ import {
   Tooltip
 } from 'chart.js'
 import { cloudBillingApi } from '@/api/cloudBilling'
+import {
+  getRechargeDateBounds,
+  isValidRechargeExpectedDate
+} from '@/utils/rechargeExpectedDate'
 import alibabaCloudIcon from '@/assets/provider-icons/lobehub/alibabacloud.svg'
 import awsIcon from '@/assets/provider-icons/lobehub/aws.svg'
 import azureIcon from '@/assets/provider-icons/lobehub/azure.svg'
@@ -1912,17 +1917,6 @@ function getTodayDateString(timezone) {
     return ''
   }
   return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-}
-
-function addDaysToDateString(dateString, days) {
-  if (!dateString) return ''
-  const date = new Date(`${dateString}T00:00:00`)
-  if (Number.isNaN(date.getTime())) return ''
-  date.setDate(date.getDate() + Number(days || 0))
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
 }
 
 function normalizeTrendCostCny(item) {
@@ -3406,8 +3400,6 @@ function renderRechargeInfoObject(source, prefix = '') {
   return lines.join('\n')
 }
 
-const ALERT_RECHARGE_APPROVAL_EXPECTED_DAYS = 3
-
 function getFeishuUserOptionValue(user) {
   return String(
     user?.user_id || user?.open_id || user?.union_id || user?.email ||
@@ -3554,7 +3546,6 @@ async function refreshFeishuUsers() {
 
 async function openRechargeSubmitDialog(item) {
   await loadFeishuUsers()
-  const today = getTodayDateString(selectedTimezone.value)
   let rechargeApprovalSource = item.recharge_info || ''
   let parsed =
     typeof rechargeApprovalSource === 'object'
@@ -3604,10 +3595,7 @@ async function openRechargeSubmitDialog(item) {
     payment_type: parsed.payment_type || '仅充值',
     remit_method: parsed.remit_method || '转账',
     amount: '',
-    expected_date: addDaysToDateString(
-      today,
-      ALERT_RECHARGE_APPROVAL_EXPECTED_DAYS
-    )
+    expected_date: getRechargeDateBounds().defaultDate
   }
   applyRechargeSubmitterUserId(submitterUserId)
   showRechargeSubmitDialog.value = true
@@ -3653,6 +3641,10 @@ async function submitRechargeApprovalFromDialog() {
     showWarning(t('cloudBilling.billing.rechargeApprovalRequiredFields'))
     return
   }
+  if (!isValidRechargeExpectedDate(expectedDate)) {
+    showWarning(t('cloudBilling.billing.rechargeApprovalExpectedDateInvalid'))
+    return
+  }
 
   const key = rechargeAlertKey(item)
   submittingRechargeKey.value = key
@@ -3683,7 +3675,9 @@ async function submitRechargeApprovalFromDialog() {
     rechargeSubmitTarget.value = null
   } catch (err) {
     console.error('Failed to submit recharge approval:', err)
-    showError(t('cloudBilling.billing.rechargeApprovalError'))
+    showError(
+      extractErrorMessage(err, t('cloudBilling.billing.rechargeApprovalError'))
+    )
   } finally {
     submittingRechargeKey.value = ''
   }

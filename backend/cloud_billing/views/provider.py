@@ -19,6 +19,7 @@ from ..alert_messages import is_chinese_language
 from ..serializers import (
     CloudProviderListSerializer,
     CloudProviderSerializer,
+    RechargeApprovalSubmitSerializer,
 )
 from ..services.provider_service import ProviderService
 from ..services.recharge_approval import (
@@ -751,6 +752,12 @@ class CloudProviderViewSet(viewsets.ModelViewSet):
     )
     def submit_recharge_approval(self, request, pk=None):
         provider = self.get_object()
+        date_serializer = RechargeApprovalSubmitSerializer(
+            data=request.data,
+            context={"language": get_request_language(request)},
+        )
+        date_serializer.is_valid(raise_exception=True)
+        expected_date = date_serializer.validated_data["expected_date"]
 
         submitter_user_id = str(
             request.data.get("submitter_user_id") or ""
@@ -776,7 +783,7 @@ class CloudProviderViewSet(viewsets.ModelViewSet):
             payment_note=request.data.get("payment_note") or "",
             amount=request.data.get("amount") or request.data.get("recharge_amount") or "",
             currency=request.data.get("currency") or "",
-            expected_date=request.data.get("expected_date") or "",
+            expected_date=expected_date.isoformat(),
         )
         from ..tasks import submit_recharge_approval
 
