@@ -1761,6 +1761,7 @@ def convert_attachment_to_pdf(
     file_name: str,
     *,
     job_id: str,
+    timeout: float | None = None,
 ) -> bytes:
     """Convert a supported Office attachment to PDF."""
     with _libreoffice_conversion_slot():
@@ -1768,6 +1769,7 @@ def convert_attachment_to_pdf(
             content,
             file_name,
             job_id=job_id,
+            timeout=timeout,
         )
 
 def _convert_file_to_pdf_unlocked(
@@ -1775,6 +1777,7 @@ def _convert_file_to_pdf_unlocked(
     file_name: str,
     *,
     job_id: str,
+    timeout: float | None = None,
 ) -> bytes:
     """Convert one attachment with an isolated LibreOffice profile."""
     extension = Path(file_name).suffix.lower() or ".bin"
@@ -1812,8 +1815,9 @@ def _convert_file_to_pdf_unlocked(
                 code="libreoffice_unavailable",
             ) from exc
         try:
+            limit = settings.QUOTATION_RENDER_TIMEOUT_SECONDS
             _stdout, stderr = process.communicate(
-                timeout=settings.QUOTATION_RENDER_TIMEOUT_SECONDS
+                timeout=min(limit, timeout) if timeout is not None else limit,
             )
         except subprocess.TimeoutExpired as exc:
             _terminate_process_group(process)
@@ -1821,6 +1825,9 @@ def _convert_file_to_pdf_unlocked(
                 "LibreOffice conversion timed out",
                 code="libreoffice_timeout",
             ) from exc
+        except BaseException:
+            _terminate_process_group(process)
+            raise
         if process.returncode != 0:
             error_type = "conversion_failed" if stderr else "process_failed"
             raise PdfConversionError(

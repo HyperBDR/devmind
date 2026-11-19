@@ -30,6 +30,7 @@ import { getAccessRequestContext } from '../api/accessRequests'
 import {
   archiveQuotationFile,
   exportQuotationFile,
+  quotationPdfExportError,
   retryQuotationUpload,
   waitForQuotationExport,
   type QuotationExportStatus,
@@ -818,7 +819,9 @@ async function handleAttachmentDownload(ids: string[]) {
       'success',
     )
   } catch (error) {
-    emit('toast', error instanceof Error ? error.message : 'Download failed', 'error')
+    emit('toast', quotationPdfExportError(error, t), 'error')
+  } finally {
+    delete exportProgressByQuote.value[pending.quote.id]
   }
 }
 

@@ -66,7 +66,15 @@ def write_document_atomic(content: bytes, storage_key: str) -> Path:
 
 
 def delete_document(storage_key: str) -> bool:
-    return _storage().delete(storage_key)
+    storage = _storage()
+    deleted = storage.delete(storage_key)
+    if storage_key.startswith("documents/"):
+        storage.delete(attachment_pdf_cache_key(storage_key))
+    return deleted
+
+
+def attachment_pdf_cache_key(storage_key: str) -> str:
+    return f"{storage_key}.office-pdf-v1"
 
 
 def delete_documents_after_commit(storage_keys) -> None:

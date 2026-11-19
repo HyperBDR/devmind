@@ -94,10 +94,12 @@
       "unitCount": "{count} quotes",
       "lineItemCount": "{count} line items",
       "separator": "•",
+      "pdfExportTimeout": "PDF export took too long. Try again or select fewer attachments.",
+      "pdfExportUnavailable": "The PDF export service is temporarily unavailable. Try again later.",
       "exportStatuses": {
         "queued": "Export queued",
         "rendering_excel": "Rendering Excel",
-        "converting_pdf": "Converting PDF",
+        "converting_pdf": "Processing PDF",
         "rendered": "Files rendered",
         "upload_queued": "Feishu upload queued",
         "uploading": "Uploading to Feishu",

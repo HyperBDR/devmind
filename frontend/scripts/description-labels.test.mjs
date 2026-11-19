@@ -4,12 +4,22 @@ import test from 'node:test'
 import {
   buildDescriptionHistoryOptions,
   stripDescriptionLabel,
+  stripDescriptionVmSuffix,
   upsertDescriptionsToCatalog,
 } from '../src/modules/quotation/utils/descriptionCatalog.ts'
 
 const yearly = 'License Type: HyperBDR Yearly License. VM Quantity: 1. Cost: 420.'
 const tier = (range, cost) =>
   `Description: Remote Product Service - Premium 7*24 (Optional, Yearly). VM Quantity: ${range}. Cost: ${cost}.`
+
+test('selected descriptions omit trailing VM pricing metadata', () => {
+  const clean = stripDescriptionVmSuffix
+  assert.equal(clean('HyperBDR Yearly License. VM Quantity: 1. Cost: 420.'), 'HyperBDR Yearly License.')
+  assert.equal(clean('Remote Service. VM Quantity: 1 - 25. Cost: 2,300.50.'), 'Remote Service.')
+  assert.equal(clean('Remote Service. VM Quantity: >1000. Cost: Contact Sales.'), 'Remote Service.')
+  assert.equal(clean('License. VM Quantity: 1. Cost: 420. Includes support.'), 'License. VM Quantity: 1. Cost: 420. Includes support.')
+  assert.equal(clean('Service for 29 VMs'), 'Service for 29 VMs')
+})
 
 test('only the leading label is removed', () => {
   assert.equal(

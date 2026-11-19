@@ -94,10 +94,12 @@
       "unitCount": "{count} 笔",
       "lineItemCount": "{count} 个报价明细行",
       "separator": "•",
+      "pdfExportTimeout": "PDF 导出等待超时，请重试或减少附件数量。",
+      "pdfExportUnavailable": "PDF 导出服务暂不可用，请稍后重试。",
       "exportStatuses": {
         "queued": "导出任务已排队",
         "rendering_excel": "正在生成 Excel",
-        "converting_pdf": "正在转换 PDF",
+        "converting_pdf": "正在处理 PDF（转换或合并）",
         "rendered": "文件已生成",
         "upload_queued": "飞书归档已排队",
         "uploading": "正在归档到飞书",

@@ -36,6 +36,7 @@ import FormSelect from './FormSelect.vue'
 import {
   buildDescriptionHistoryOptions,
   catalogPriceForCurrency,
+  stripDescriptionVmSuffix,
   type LineItemDescriptionHistory,
 } from '../utils/descriptionCatalog'
 import {
@@ -1135,7 +1136,7 @@ function handleDescriptionSelect(
   const optionItemId = (option.meta as { itemId?: string } | undefined)?.itemId
   const optionSource = (option.meta as { source?: string } | undefined)?.source
   const patch: Partial<QuotationLineItem> = {
-    description: option.value,
+    description: stripDescriptionVmSuffix(option.value),
   }
   if (optionItemId) patch.itemId = optionItemId
   if (optionSource === 'catalog' && optionItemId) {

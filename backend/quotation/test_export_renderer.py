@@ -16,6 +16,12 @@ from openpyxl import load_workbook
 from pypdf import PdfReader
 from quotation.models import QuotationTemplate
 from quotation.services.export_pipeline import _attachment_pdf_bytes
+from quotation.services.storage import (
+    attachment_pdf_cache_key,
+    delete_document,
+    resolve_document_path,
+    write_document,
+)
 from quotation.services.export_renderer import (
     COMPACT_RENDERER_VERSION,
     DEFAULT_TEMPLATE_NAME,
@@ -1069,29 +1075,34 @@ class LibreOfficeConversionTests(SimpleTestCase):
         self.lock_dir.cleanup()
 
     @patch("quotation.services.export_pipeline.convert_attachment_to_pdf")
-    @patch("quotation.services.export_pipeline.resolve_document_path")
     def test_public_office_attachment_is_converted_before_merge(
         self,
-        resolve_document_path,
         convert_attachment_to_pdf,
     ):
-        resolve_document_path.return_value.read_bytes.return_value = (
-            b"PK\x03\x04document"
-        )
         convert_attachment_to_pdf.return_value = b"%PDF-converted"
         asset = SimpleNamespace(
             storage_key="documents/test",
             file_name="scope.docx",
         )
 
-        result = _attachment_pdf_bytes(asset, "job-id")
-
-        self.assertEqual(result, b"%PDF-converted")
-        convert_attachment_to_pdf.assert_called_once_with(
-            b"PK\x03\x04document",
-            "scope.docx",
-            job_id="job-id",
-        )
+        with TemporaryDirectory() as storage, override_settings(
+            QUOTATION_STORAGE=storage,
+        ):
+            content = b"PK\x03\x04document"
+            write_document(content, asset.storage_key)
+            for job_id in ("job-id", "other-job"):
+                self.assertEqual(
+                    _attachment_pdf_bytes(asset, job_id), b"%PDF-converted",
+                )
+            convert_attachment_to_pdf.assert_called_once_with(
+                content, "scope.docx", job_id="job-id", timeout=None,
+            )
+            write_document(content + b"edited", asset.storage_key)
+            _attachment_pdf_bytes(asset, "edited-job")
+            self.assertEqual(convert_attachment_to_pdf.call_count, 2)
+            delete_document(asset.storage_key)
+            cache_key = attachment_pdf_cache_key(asset.storage_key)
+            self.assertFalse(resolve_document_path(cache_key).exists())
 
     @patch("quotation.services.export_pipeline.resolve_document_path")
     def test_public_attachment_merge_rejects_unsupported_content(

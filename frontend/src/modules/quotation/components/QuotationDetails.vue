@@ -19,6 +19,7 @@ import { listAuditEvents, type AuditEvent } from '../api/audit'
 import { getQuotationVersion } from '../api/quotations'
 import {
   exportQuotationFile,
+  quotationPdfExportError,
   type QuotationExportFormat,
   type QuotationExportStatus,
 } from '../api/exports'
@@ -32,6 +33,7 @@ import {
   type VersionDiffResult,
 } from '../utils/versionDiff'
 import QuotationPreview from './QuotationPreview.vue'
+import PublicAttachmentPicker from './PublicAttachmentPicker.vue'
 import StatusBadge from './StatusBadge.vue'
 import { useQuotationI18n } from '../composables/useQuotationI18n'
 
@@ -52,6 +54,7 @@ const emit = defineEmits<{
 const selectedVersionForModal = ref<QuoteVersion | null>(null)
 const activityEvents = ref<AuditEvent[]>([])
 const exportingFormat = ref<QuotationExportFormat | null>(null)
+const attachmentQuoteId = ref<string | null>(null)
 const activeExportStatus = ref<QuotationExportStatus | null>(null)
 const versionLoadingId = ref<string | null>(null)
 const loadedVersionRevision = ref(0)
@@ -303,6 +306,7 @@ async function handleGenerateExcel() {
     alert(error instanceof Error ? error.message : 'Quotation export failed')
   } finally {
     exportingFormat.value = null
+    activeExportStatus.value = null
   }
 }
 
@@ -334,20 +338,30 @@ async function handleDownloadExcel() {
     alert(error instanceof Error ? error.message : 'Quotation export failed')
   } finally {
     exportingFormat.value = null
+    activeExportStatus.value = null
   }
 }
 
-async function handleExportPdf() {
-  if (props.quote.status === 'Cancelled') return
+function openPdfAttachmentPicker() {
+  if (props.quote.status === 'Cancelled' || exportingFormat.value) return
+  attachmentQuoteId.value = props.quote.id
+}
+
+async function handleExportPdf(ids: string[]) {
+  const quoteId = attachmentQuoteId.value
+  attachmentQuoteId.value = null
+  if (quoteId !== props.quote.id || props.quote.status === 'Cancelled' || exportingFormat.value) return
   exportingFormat.value = 'pdf'
   try {
     await exportQuotationFile(props.quote.id, 'pdf', {
+      attachmentSelection: ids,
       onProgress: (job) => trackExportProgress(job.status),
     })
   } catch (error) {
-    alert(error instanceof Error ? error.message : 'Quotation export failed')
+    alert(quotationPdfExportError(error, t))
   } finally {
     exportingFormat.value = null
+    activeExportStatus.value = null
   }
 }
 
@@ -404,7 +418,7 @@ function setStatus(status: QuoteStatus) {
           </p>
         </div>
 
-        <div class="flex flex-wrap items-center gap-2">
+        <div class="relative ml-auto flex flex-wrap items-center justify-end gap-2 pb-5">
         <button
           v-if="
             quote.status !== 'Cancelled' &&
@@ -453,20 +467,25 @@ function setStatus(status: QuoteStatus) {
               ? 'cursor-not-allowed border border-dm-border bg-slate-100 text-dm-text-tertiary'
               : 'cursor-pointer bg-violet-500 text-white hover:bg-violet-600 active:bg-violet-700'
           "
-          @click="handleExportPdf"
+          @click="openPdfAttachmentPicker"
         >
           <FileDown class="h-4 w-4" />
           {{ t('quotation.pages.details.exportPdf') }}
         </button>
-      </div>
         <p
-          v-if="activeExportStatus"
-        class="w-full text-right text-xs font-semibold text-indigo-600 sm:w-auto"
-        role="status"
-      >
+          class="absolute inset-x-0 bottom-0 truncate text-right text-xs font-semibold text-indigo-600"
+          role="status"
+        >
           {{ activeExportStatusLabel }}
         </p>
+        </div>
         </header>
+
+      <PublicAttachmentPicker
+        :open="attachmentQuoteId === quote.id"
+        @close="attachmentQuoteId = null"
+        @confirm="handleExportPdf"
+      />
 
       <section class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <div class="dm-card p-4">

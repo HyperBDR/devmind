@@ -31,6 +31,7 @@ from quotation.models import (
     SyncJobType,
 )
 from quotation.services.export_jobs import (
+    export_worker_failed,
     ExportRequestError,
     create_export_job,
 )
@@ -282,7 +283,14 @@ class ExportJobDetailView(APIView):
             target_id=job.quotation_id,
             target_label=quotation_audit_label(job.quotation),
         )
-        return Response(export_job_data(job))
+        data = export_job_data(job)
+        if export_worker_failed(job):
+            data.update(
+                status=ExportJobStatus.RENDER_FAILED,
+                error_code="export_worker_failed",
+                error_message="The export worker could not complete this job.",
+            )
+        return Response(data)
 
 
 class ExportJobRetryUploadView(APIView):

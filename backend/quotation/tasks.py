@@ -9,7 +9,13 @@ from celery import shared_task
 from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
 from django.core.cache import cache
-from django.db import OperationalError, transaction
+from django.db import (
+    InterfaceError,
+    OperationalError,
+    close_old_connections,
+    connection,
+    transaction,
+)
 from django.utils import timezone
 
 from quotation.metrics import record_export_operation, record_storage_operation
@@ -17,6 +23,7 @@ from quotation.models import (
     DocumentAsset,
     DocumentParseStatus,
     DocumentType,
+    ExportJob,
     FeishuSyncState,
     FeishuSyncStatus,
     RemoteFileCleanup,
@@ -301,6 +308,12 @@ def render_quotation_export_task(
         )
         return {"job_id": job_id, "status": "render_failed"}
     except PdfConversionBusyError as exc:
+        if self.request.retries >= 3 and ExportJob.objects.filter(
+            pk=job_id,
+        ).exclude(attachment_selection=[]).exists():
+            mark_render_failed(job_id, exc)
+            _record_export_stage("render", "failure", started)
+            return {"job_id": job_id, "status": "render_failed"}
         reset_render_for_retry(job_id, exc)
         _record_export_stage("render", "retry", started)
         logger.info(
@@ -328,13 +341,24 @@ def render_quotation_export_task(
         _record_export_stage("render", "failure", started)
         return {"job_id": job_id, "status": "render_failed"}
     except (
+        InterfaceError,
         OperationalError,
         OSError,
         SoftTimeLimitExceeded,
         TimeoutError,
     ) as exc:
+        if isinstance(exc, (InterfaceError, OperationalError)) and (
+            not connection.in_atomic_block
+        ):
+            close_old_connections()
         if failure_retries < 1:
-            reset_render_for_retry(job_id, exc)
+            try:
+                reset_render_for_retry(job_id, exc)
+            except (InterfaceError, OperationalError):
+                logger.exception(
+                    "quotation_export_retry_state_failed",
+                    extra={"export_job_id": job_id},
+                )
             _record_export_stage("render", "retry", started)
             raise self.retry(
                 args=(job_id, failure_retries + 1),
