@@ -13,6 +13,7 @@ from django.db.models.deletion import RestrictedError
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from openpyxl import load_workbook
+from pypdf import PdfReader, PdfWriter
 from rest_framework.test import APIClient
 
 from quotation.metrics import export_metrics_snapshot
@@ -25,6 +26,7 @@ from quotation.models import (
     DocumentReplica,
     ExportJob,
     ExportJobStatus,
+    PublicAttachment,
     Quotation,
     QuotationSourceType,
     QuotationTemplate,
@@ -113,6 +115,32 @@ class QuotationExportFixture(TestCase):
 
 
 class QuotationExportApiTests(QuotationExportFixture):
+
+    @patch("quotation.services.export_jobs.current_app")
+    @patch("quotation.tasks.render_quotation_export_task.apply_async")
+    def test_worker_failure_ends_polling_and_allows_same_export_retry(
+        self, enqueue, celery,
+    ):
+        enqueue.return_value.id = "failed-task"
+        payload = {"formats": ["pdf"], "quotation_version": 1}
+        url = f"/api/v1/quotation/quotations/{self.quotation.id}/exports"
+        with self.captureOnCommitCallbacks(execute=True):
+            created = self.client.post(url, payload, format="json")
+        self.assertEqual(created.status_code, 202)
+        job_id = created.data["job_id"]
+        celery.AsyncResult.return_value.state = "FAILURE"
+        detail = self.client.get(f"/api/v1/quotation/exports/{job_id}")
+        self.assertEqual(detail.data["status"], "render_failed")
+        self.assertEqual(detail.data["error_code"], "export_worker_failed")
+
+        enqueue.return_value.id = "retry-task"
+        with self.captureOnCommitCallbacks(execute=True):
+            retried = self.client.post(url, payload, format="json")
+        self.assertEqual(retried.status_code, 202)
+        self.assertEqual(retried.data["job_id"], job_id)
+        saved = ExportJob.objects.get(pk=job_id)
+        self.assertEqual(saved.celery_task_id, "retry-task")
+        self.assertEqual(enqueue.call_count, 2)
 
     @patch(
         "quotation.services.export_pipeline.convert_xlsx_to_pdf",
@@ -952,6 +980,92 @@ class QuotationExportApiTests(QuotationExportFixture):
 
 
 class QuotationExportTaskTests(QuotationExportFixture):
+    def test_database_disconnect_still_retries_when_status_write_fails(self):
+        job = self.create_job(["pdf"])
+        with (
+            patch("quotation.services.export_pipeline.render_export_job",
+                  side_effect=OperationalError("connection lost")),
+            patch("quotation.services.export_pipeline.reset_render_for_retry",
+                  side_effect=OperationalError("database recovering")),
+            patch.object(render_quotation_export_task, "retry",
+                         side_effect=Retry()) as retry,
+            self.assertRaises(Retry),
+        ):
+            render_quotation_export_task.run(job.id)
+        self.assertEqual(retry.call_args.kwargs["args"], (job.id, 1))
+
+    def test_attachments_merge_in_order_or_report_error(self):
+        attachments = [
+            PublicAttachment.objects.create(
+                asset=DocumentAsset.objects.create(
+                    file_name=f"scope-{index}.docx", doc_type="pdf",
+                    storage_key=f"scope-{index}",
+                ),
+                scope="Testing",
+            )
+            for index in range(2)
+        ]
+
+        def pdf(width):
+            writer = PdfWriter()
+            writer.add_blank_page(width=width, height=100)
+            output = BytesIO()
+            writer.write(output)
+            return output.getvalue()
+
+        for fails in (False, True):
+            with self.subTest(fails=fails):
+                job = self.create_job(["xlsx", "pdf"] if fails else ["pdf"])
+                job.attachment_selection = [item.id for item in attachments]
+                job.save(update_fields=["attachment_selection"])
+                second = PdfConversionError(
+                    "LibreOffice executable is unavailable",
+                    code="libreoffice_unavailable",
+                ) if fails else pdf(300)
+                quote_path = (
+                    "quotation.services.export_pipeline."
+                    "convert_xlsx_to_pdf"
+                )
+                attachment_path = (
+                    "quotation.services.export_pipeline."
+                    "_attachment_pdf_bytes"
+                )
+                with (
+                    patch(
+                        quote_path,
+                        return_value=pdf(100),
+                    ) as quote_conversion,
+                    patch(
+                        attachment_path,
+                        side_effect=[pdf(200), second],
+                    ) as convert,
+                ):
+                    result = render_quotation_export_task.run(job.id)
+                job.refresh_from_db()
+                self.assertEqual(
+                    quote_conversion.call_count,
+                    0 if fails else 1,
+                )
+                self.assertEqual(convert.call_count, 2)
+                self.assertTrue(all(
+                    0 < call.kwargs["timeout"] <= 90
+                    for call in convert.call_args_list
+                ))
+                if fails:
+                    self.assertEqual(result["status"], "render_failed")
+                    self.assertEqual(job.error_code, "libreoffice_unavailable")
+                    self.assertIn("scope-1.docx", job.error_message)
+                    self.assertFalse(job.assets.exists())
+                else:
+                    asset = job.assets.get(doc_type="merged_pdf")
+                    reader = PdfReader(
+                        resolve_document_path(asset.storage_key)
+                    )
+                    self.assertEqual(
+                        [int(page.mediabox.width) for page in reader.pages],
+                        [100, 200, 300],
+                    )
+
     def test_preview_excel_matches_compact_preview_layout(self):
         template = ensure_default_template()
         logo_bytes = (

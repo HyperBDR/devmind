@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from hashlib import sha256
 
+from celery import current_app, states
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 from quotation.audit import AUDIT_CONTEXT
@@ -32,6 +33,22 @@ logger = logging.getLogger(__name__)
 
 class ExportRequestError(ValueError):
     pass
+
+
+def export_worker_failed(job: ExportJob) -> bool:
+    """Detect worker failure before the job's terminal state was saved."""
+    if not job.celery_task_id or job.status not in {
+        ExportJobStatus.QUEUED,
+        ExportJobStatus.RENDERING_EXCEL,
+        ExportJobStatus.CONVERTING_PDF,
+    }:
+        return False
+    try:
+        result = current_app.AsyncResult(job.celery_task_id)
+        return result.state == states.FAILURE
+    except Exception:
+        logger.debug("Could not read export task result", exc_info=True)
+        return False
 
 
 def renderer_version() -> str:
@@ -235,17 +252,23 @@ def create_export_job(
             job.save(update_fields=["archive_to_feishu", "updated_at"])
         if created:
             transaction.on_commit(lambda: _enqueue_export(job.id))
-        elif job.status == ExportJobStatus.RENDER_FAILED or missing_assets:
+        elif (
+            job.status == ExportJobStatus.RENDER_FAILED
+            or missing_assets
+            or export_worker_failed(job)
+        ):
             job.status = ExportJobStatus.QUEUED
             job.error_code = ""
             job.error_message = ""
             job.finished_at = None
+            job.celery_task_id = ""
             job.save(
                 update_fields=[
                     "status",
                     "error_code",
                     "error_message",
                     "finished_at",
+                    "celery_task_id",
                     "updated_at",
                 ]
             )

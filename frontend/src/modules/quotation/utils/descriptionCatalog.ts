@@ -41,6 +41,17 @@ export interface LineItemDescriptionHistory {
 
 const DESCRIPTION_LABEL_PATTERN = /^\s*(?:license\s+type|description)\s*[:：]\s*/i
 
+const VM_PRICING_SUFFIX =
+  /\s+VM Quantity:\s*(?:[<>]=?\s*)?\d+(?:\s*[-–]\s*\d+)?\.\s*Cost:\s*(?:[\d,]+(?:\.\d+)?|Contact Sales)\.?\s*$/i
+
+/**
+ * Remove a trailing VM quantity and cost suffix from a selected description.
+ * Dropdown labels keep that suffix so tiers stay distinguishable.
+ */
+export function stripDescriptionVmSuffix(value: string): string {
+  return value.replace(VM_PRICING_SUFFIX, '')
+}
+
 /**
  * Drop a leading price-list label such as "License Type:".
  * The rest of the text is kept exactly as written.

@@ -98,9 +98,11 @@ export function createQuotationExport(
 
 export function getQuotationExport(
   jobId: string,
+  signal?: AbortSignal,
 ): Promise<QuotationExportJob> {
   return apiRequest<QuotationExportJob>(
     `/exports/${encodeURIComponent(jobId)}`,
+    { signal },
   )
 }
 
@@ -124,7 +126,10 @@ export async function waitForQuotationExport(
   const deadline = Date.now() + (options.timeoutMs ?? 600_000)
   const pollMs = options.pollMs ?? 250
   while (Date.now() < deadline) {
-    const job = await getQuotationExport(jobId)
+    const signal = options.timeoutMs === undefined
+      ? undefined
+      : AbortSignal.timeout(Math.max(1, deadline - Date.now()))
+    const job = await getQuotationExport(jobId, signal)
     options.onProgress?.(job)
     if (TERMINAL_STATUSES.has(job.status)) return job
     await delay(pollMs)
@@ -165,9 +170,16 @@ export async function exportQuotationFile(
     quotationVersion: options.quotationVersion,
     attachmentSelection: options.attachmentSelection,
   })
-  const job = await waitForQuotationExport(created.job_id, options)
+  const job = await waitForQuotationExport(created.job_id, {
+    ...options,
+    timeoutMs: options.attachmentSelection?.length ? 180_000 : undefined,
+  })
   if (job.status === 'render_failed') {
-    throw new ApiError(job.error_message || 'Quotation rendering failed', 422)
+    throw new ApiError(
+      job.error_message || 'Quotation rendering failed',
+      422,
+      job.error_code,
+    )
   }
   const targetFormat =
     format === 'pdf' && options.attachmentSelection?.length
@@ -179,6 +191,29 @@ export async function exportQuotationFile(
   }
   await downloadQuotationExportAsset(asset)
   return job
+}
+
+export function quotationPdfExportError(
+  error: unknown,
+  t: (key: string) => string,
+): string {
+  if (error instanceof ApiError) {
+    if (error.status === 408 || error.data === 'public_attachments_timeout'
+      || error.data === 'libreoffice_timeout') {
+      return t('quotation.common.pdfExportTimeout')
+    }
+    if ([502, 503, 504].includes(error.status)
+      || error.data === 'libreoffice_unavailable'
+      || error.data === 'export_worker_failed'
+      || error.data === 'export_enqueue_failed'
+      || error.data === 'libreoffice_busy') {
+      return t('quotation.common.pdfExportUnavailable')
+    }
+  }
+  if (error instanceof TypeError || (error instanceof Error && error.name === 'TimeoutError')) {
+    return t('quotation.common.pdfExportUnavailable')
+  }
+  return error instanceof Error ? error.message : t('quotation.common.exportStatuses.render_failed')
 }
 
 export async function archiveQuotationFile(

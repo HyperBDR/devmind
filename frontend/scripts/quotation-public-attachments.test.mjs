@@ -26,6 +26,10 @@ const manager = fs.readFileSync(
   new URL('../src/modules/quotation/components/PublicAttachmentManager.vue', import.meta.url),
   'utf8',
 )
+const quotationDetails = fs.readFileSync(
+  new URL('../src/modules/quotation/components/QuotationDetails.vue', import.meta.url),
+  'utf8',
+)
 
 assert.doesNotMatch(picker, />必选</)
 assert.match(picker, /accent-blue-600/)
@@ -52,4 +56,7 @@ assert.match(
 assert.match(manager, /accept="\.pdf,\.doc,\.docx,\.xls,\.xlsx"/)
 assert.doesNotMatch(manager, /accept="[^"]*\.png/)
 assert.match(quotationList, /attachmentSelection: ids/)
+assert.match(quotationDetails, /@click="openPdfAttachmentPicker"/)
+assert.match(quotationDetails, /<PublicAttachmentPicker[\s\S]*?@confirm="handleExportPdf"/)
+assert.match(quotationDetails, /exportQuotationFile\(props\.quote\.id, 'pdf', \{[\s\S]*?attachmentSelection: ids/)
 assert.match(exportsSource, /attachment_selection: options\.attachmentSelection \|\| \[\]/)
