@@ -449,8 +449,21 @@ def test_dashboard_combines_complete_snapshots_without_upstream(native):
 @pytest.mark.parametrize(
     "part", ["current", "current_partial", "previous", "previous_single"],
 )
-def test_dashboard_directory_conflict(native, part, monkeypatch):
+def test_dashboard_directory_conflict(native, part, monkeypatch, settings):
     from rest_framework.test import APIClient
+
+    from agione_ops import native_snapshot_queries
+
+    settings.AGIONE_OPS_QUERY_CACHE_ENABLED = True
+    settings.CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        },
+    }
+    composite_rows = Mock(wraps=native_snapshot_queries._composite_rows)
+    monkeypatch.setattr(
+        native_snapshot_queries, "_composite_rows", composite_rows,
+    )
 
     start = native["start"] - timedelta(days=7)
     row = native["rows"][0]
@@ -523,7 +536,24 @@ def test_dashboard_directory_conflict(native, part, monkeypatch):
         )
         assert frame["summary"]["requestCount"] == 4
         assert frame["provenance"]["fetchedAt"]
+        assert composite_rows.call_count
+        composite_rows.reset_mock()
 
+        repeated = client.post(url, {"window": window}, format="json")
+        assert repeated.status_code == 200
+        assert repeated.json()["data"] == frame
+        composite_rows.assert_not_called()
+
+        native["start"] = start
+        native["end"] = start + timedelta(days=7)
+        _, replacement = collect(native)
+        assert replacement["status"] == "succeeded"
+        restored = client.post(url, {"window": window}, format="json")
+        assert restored.status_code == 200
+        restored_frame = restored.json()["data"]
+        assert restored_frame["dataVersion"] == replacement["dataVersion"]
+        assert "fallbackReason" not in restored_frame
+        assert restored_frame["summary"]["requestCount"] == 7
     else:
         assert "fallbackReason" not in frame
         assert frame["summary"]["requestCount"] == 7

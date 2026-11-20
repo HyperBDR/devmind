@@ -590,7 +590,19 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
     }
   }
 
-  function syncPrevious() {
+  function syncPrevious(displayedWindow) {
+    if (displayedWindow) {
+      const start = Date.parse(displayedWindow.start)
+      const duration = Date.parse(displayedWindow.endExclusive) - start
+      if (displayedWindow.timezone !== 'Asia/Shanghai' ||
+          !(duration > 0 && duration <= 31 * DAY) || start > now().getTime() ||
+          start % 1000 !== 0 || duration % 1000 !== 0) return
+      return sync({
+        start: new Date(start - duration).toISOString(),
+        endExclusive: new Date(start).toISOString(),
+        timezone: displayedWindow.timezone
+      })
+    }
     const start = dateEpoch(state.startDate)
     const end = dateEpoch(state.endDate)
     const days = (end - start) / DAY + 1

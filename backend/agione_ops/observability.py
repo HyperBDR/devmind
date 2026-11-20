@@ -14,6 +14,7 @@ _current = ContextVar("agione_query_observation", default=None)
 STAGES = frozenset({
     "acl", "snapshot_metadata", "demo_operation", "finance",
     "response_projection", "cache", "native_collection", "dispatch",
+    "snapshot_dashboard_query", "snapshot_dashboard_fallback",
 })
 COUNTERS = frozenset({
     "internal_http_requests", "internal_download_bytes", "upstream_pages",
