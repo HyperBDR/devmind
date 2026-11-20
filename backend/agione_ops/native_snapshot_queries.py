@@ -433,31 +433,49 @@ def query_native_snapshot(connection, user, query):
                     "SNAPSHOT_CONTENT_INVALID", status_code=409,
                 ) from error
         previous = None
+        comparison_conflict = False
         if signature.get("previousParts"):
-            prior_rows = _composite_rows(
-                signature["previousParts"], snapshot,
-                None if signature.get("parts") else signature["dataVersion"],
-            )
-            previous = LiveAnalytics(
-                customers, snapshot.data["models"],
-                external_rows(prior_rows, account_types, overrides),
-                prior_start, start, query,
-            )
+            try:
+                prior_rows = _composite_rows(
+                    signature["previousParts"], snapshot,
+                    None if signature.get("parts") else signature["dataVersion"],
+                )
+            except AgioneOpsError as error:
+                if error.code != "SNAPSHOT_DIRECTORY_CHANGED":
+                    raise
+                comparison_conflict = True
+            else:
+                previous = LiveAnalytics(
+                    customers, snapshot.data["models"],
+                    external_rows(prior_rows, account_types, overrides),
+                    prior_start, start, query,
+                )
         elif prior_snapshot and prior_snapshot.version.coverage.get(
             "pagingComplete"
         ) and not prior_snapshot.version.coverage.get("partial"):
-            prior_rows = [row for row in external_rows(
-                snapshot_rows(prior_snapshot, prior_start, start), account_types, overrides
-            ) if (
-                prior_start <= parse_time(row["occurred_at"]) < start
-            )]
-            previous = LiveAnalytics(
-                customers, snapshot.data["models"],
-                prior_rows, prior_start, start, query,
+            comparison_conflict = (
+                prior_snapshot.data["customers"].keys()
+                != snapshot.data["customers"].keys()
             )
+            if not comparison_conflict:
+                prior_rows = [
+                    row for row in external_rows(
+                        snapshot_rows(prior_snapshot, prior_start, start),
+                        account_types, overrides,
+                    ) if prior_start <= parse_time(row["occurred_at"]) < start
+                ]
+                previous = LiveAnalytics(
+                    customers, snapshot.data["models"],
+                    prior_rows, prior_start, start, query,
+                )
         apply_dashboard_observations(
             data, engine, previous, snapshot.version.coverage,
         )
+        if comparison_conflict:
+            data["comparison"].update({
+                "reason": "租户目录已变化，前期暂不可比",
+                "reasonCode": "SNAPSHOT_DIRECTORY_CHANGED",
+            })
         data["finance"] = finance or unavailable_finance(
             "NATIVE_FINANCE_NOT_COLLECTED"
         )

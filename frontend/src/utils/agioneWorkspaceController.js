@@ -45,7 +45,10 @@ const empty = () => ({
 const unwrap = (response) => response?.data?.data
 const denied = (error) => [401, 403, 404].includes(error?.response?.status)
 const failure = (error) => {
-  const code = error?.response?.data?.data?.errorCode
+  const payload = error?.response?.data?.data
+  const code = payload?.errorCode ||
+    (error?.response?.status === 409 &&
+      payload?.detail === 'SNAPSHOT_DIRECTORY_CHANGED' ? payload.detail : '')
   const messages = {
     WINDOW_NOT_CACHED: '所选日期未采集，不会自动补采。',
     DEMO_WINDOW_OUTSIDE_SNAPSHOT: '所选日期超出已缓存范围。',
@@ -297,6 +300,9 @@ export function createAgioneWorkspaceController(api, onChange = () => {}) {
     const retain = state.connectionId === connectionId && !live &&
       (view === 'focus' ? state.dashboard :
         view === 'aggregate' ? state.analysis : state.customers)
+    const nativeScope = state.connectionId === connectionId &&
+      frame.provenance?.kind === 'native_snapshot'
+      ? { customerIds: state.customerIds, filters: state.filters } : {}
     const retained = retain
       ? Object.fromEntries(pageFields.map((key) => [key, state[key]])) : {}
     clearWork(state.connectionId === connectionId && !live)
@@ -311,6 +317,7 @@ export function createAgioneWorkspaceController(api, onChange = () => {}) {
     publish({
       ...empty(),
       ...retained,
+      ...nativeScope,
       stale: !!retain,
       view,
       connectionId,
@@ -335,6 +342,8 @@ export function createAgioneWorkspaceController(api, onChange = () => {}) {
     if (
       (live || snapshotResponse) &&
       view === 'focus' &&
+      !state.customerIds.length &&
+      !Object.values(state.filters).some(values => values.length) &&
       response?.operation === 'dashboard' &&
       response?.data
     ) {

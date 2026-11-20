@@ -128,15 +128,20 @@ function unwrap(response) {
 
 function safeError(error) {
   const status = error?.response?.status
-  const code = error?.response?.data?.data?.errorCode || ''
+  const payload = error?.response?.data?.data
+  const code = payload?.errorCode ||
+    (status === 409 && payload?.detail === 'SNAPSHOT_DIRECTORY_CHANGED'
+      ? payload.detail : '')
   return {
     error: code === 'QUERY_IN_PROGRESS'
       ? 'queryBusy'
-      : [401, 403, 404].includes(status)
-        ? 'accessDenied'
-        : status === 409
-          ? 'conflict'
-          : 'networkError',
+      : code === 'SNAPSHOT_DIRECTORY_CHANGED'
+        ? 'snapshotDirectoryChanged'
+        : [401, 403, 404].includes(status)
+          ? 'accessDenied'
+          : status === 409
+            ? 'conflict'
+            : 'networkError',
     errorCode: /^[A-Z_0-9]{1,80}$/.test(code) ? code : ''
   }
 }
@@ -281,7 +286,8 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
     } catch (error) {
       if (!current(version) || query !== queryRevision) return
       const failure = safeError(error)
-      if (failure.error === 'accessDenied') {
+      const directoryConflict = failure.error === 'snapshotDirectoryChanged'
+      if (failure.error === 'accessDenied' || directoryConflict) {
         stopPolling()
         dashboardCache.delete(`${session}:${id}`)
       }
@@ -289,8 +295,9 @@ export function createAgioneController(api, onChange = () => {}, options = {}) {
         ...(state.readOnly && failure.error === 'accessDenied'
           ? { dashboard: null, startDate: '', endDate: '' }
           : {}),
+        ...(directoryConflict ? { dashboard: null, windowMissing: false } : {}),
         loading: false,
-        ...(failure.error === 'accessDenied'
+        ...(failure.error === 'accessDenied' || directoryConflict
           ? { run: null, syncing: false }
           : {}),
         ...failure
