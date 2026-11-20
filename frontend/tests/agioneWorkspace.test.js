@@ -67,8 +67,12 @@ test('new snapshot retains selected range and queries that range', async () => {
     .at(-1).body.window.start, selected.start)
 })
 
-test('a narrower native fallback preserves active dashboard filters', async () => {
-  const { c, calls } = setup((id, body) => wrap(body, { finance: {} }))
+test('a slow native fallback keeps filters without showing old totals', async () => {
+  const slow = deferred()
+  const { c, calls } = setup((id, body) => {
+    if (body.dataVersion === 'version-2') return slow.promise
+    return wrap(body, { summary: { requestCount: 70 }, finance: {} })
+  })
   await c.attach(frame, 'a')
   await c.setFilters(['10'], { modelIds: ['20'] })
   const fallback = {
@@ -77,11 +81,38 @@ test('a narrower native fallback preserves active dashboard filters', async () =
     provenance: { kind: 'native_snapshot' },
     fallbackReason: 'SNAPSHOT_DIRECTORY_CHANGED'
   }
-  await c.attach(fallback, 'a', frame.window)
+  const pending = c.attach(fallback, 'a', frame.window)
   const body = calls.filter(call => call.body.operation === 'dashboard').at(-1).body
   assert.deepEqual(body.window, fallback.window)
   assert.deepEqual(body.customerIds, ['10'])
   assert.deepEqual(body.filters.modelIds, ['20'])
+  assert.equal(c.snapshot().dashboard, null)
+  assert.equal(c.snapshot().loading, true)
+  slow.resolve(wrap(body, { summary: { requestCount: 40 }, finance: {} }))
+  await pending
+  assert.deepEqual(c.snapshot().window, fallback.window)
+  assert.equal(c.snapshot().dashboard.summary.requestCount, 40)
+})
+
+test('changing the native date again ignores a late fallback result', async () => {
+  const slow = deferred()
+  const fallback = {
+    ...frame,
+    provenance: { kind: 'native_snapshot' },
+    fallbackReason: 'SNAPSHOT_DIRECTORY_CHANGED'
+  }
+  const { c, calls } = setup((id, body) => {
+    if (body.window.start === fallback.window.start) return slow.promise
+    return wrap(body, { summary: { requestCount: 10 }, finance: {} })
+  })
+  const pending = c.attach(fallback, 'a')
+  const original = calls[0].body
+  const selected = { ...fallback.window, start: '2026-10-23T00:00:00+08:00' }
+  await c.setWindow(selected)
+  slow.resolve(wrap(original, { summary: { requestCount: 40 }, finance: {} }))
+  await pending
+  assert.deepEqual(c.snapshot().window, selected)
+  assert.equal(c.snapshot().dashboard.summary.requestCount, 10)
 })
 
 test('busy snapshot query reports a retryable busy state', async () => {
@@ -1026,7 +1057,7 @@ test('waits for a covering frame when a larger window is selected', async () => 
 test('previous comparison checks local data before requesting collection', async () => {
   const { requestPreviousComparison } = await import('../src/utils/agioneWorkspaceController.js')
   let comparison = 'UNAVAILABLE'
-  let syncs = 0
+  const submitted = []
   const state = { view: 'focus', connectionId: 'a', dataVersion: 'v',
     window: frame.window, filters: {}, customerIds: [] }
   const workspace = {
@@ -1034,18 +1065,24 @@ test('previous comparison checks local data before requesting collection', async
     reload: async () => { comparison = 'READY' }
   }
   const controller = { snapshot: () => ({ syncing: false }), refresh: async () => {},
-    syncPrevious: async () => { syncs++ } }
+    syncPrevious: async window => { submitted.push(window) } }
   await requestPreviousComparison(workspace, controller)
-  assert.equal(syncs, 0)
+  assert.deepEqual(submitted, [])
   comparison = 'UNAVAILABLE'
   workspace.reload = async () => {}
   await requestPreviousComparison(workspace, controller)
-  assert.equal(syncs, 1)
+  assert.deepEqual(submitted, [frame.window])
   state.coverage = { partial: true }
   assert.equal(await requestPreviousComparison(workspace, controller), 'current_required')
-  assert.equal(syncs, 1)
+  assert.deepEqual(submitted, [frame.window])
   state.coverage = null
   workspace.reload = async () => { state.filters = { statuses: ['SUCCESS'] } }
   await requestPreviousComparison(workspace, controller)
-  assert.equal(syncs, 1)
+  assert.deepEqual(submitted, [frame.window])
+  state.filters = {}
+  workspace.reload = async () => {
+    state.window = { ...frame.window, start: '2026-10-22T00:00:00+08:00' }
+  }
+  await requestPreviousComparison(workspace, controller)
+  assert.deepEqual(submitted, [frame.window])
 })

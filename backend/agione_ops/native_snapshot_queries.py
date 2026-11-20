@@ -360,9 +360,21 @@ def query_native_snapshot(connection, user, query):
 
     start, end = _window(query, signature)
     if signature.get("parts"):
-        rows = _composite_rows(
-            signature["parts"], snapshot, signature["dataVersion"],
-        )
+        try:
+            rows = _composite_rows(
+                signature["parts"], snapshot, signature["dataVersion"],
+            )
+        except AgioneOpsError as error:
+            if (
+                operation != "dashboard"
+                or not query.get("_cache_directory_conflict")
+                or error.code != "SNAPSHOT_DIRECTORY_CHANGED"
+            ):
+                raise
+            # Cache the decision with the validated snapshot signature.
+            result["reason"] = error.code
+            validate_native_snapshot(connection, user, query, signature)
+            return result
         missing = signature.get("missingDays", [])
         snapshot = SimpleNamespace(
             data={**{k: v for k, v in snapshot.data.items() if k != "chunkDigests"}, "rows": rows},

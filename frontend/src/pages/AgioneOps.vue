@@ -416,7 +416,9 @@
                   </template>
                   <template v-if="state.dashboard?.fallbackReason === 'SNAPSHOT_DIRECTORY_CHANGED'">
                     <span class="scope-dot">·</span>
-                    {{ t('agione.directoryFallback', { range: actualWindow }) }}
+                    {{ work.loading
+                      ? t('agione.readingSnapshot')
+                      : t('agione.directoryFallback', { range: actualWindow }) }}
                   </template>
                   <template v-else-if="pendingRange && state.error !== 'snapshotDirectoryChanged'">
                     <span class="scope-dot">·</span>

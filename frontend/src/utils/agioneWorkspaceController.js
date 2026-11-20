@@ -70,6 +70,13 @@ export function viewFromHash(hash = '') {
   return VIEWS.has(view) ? view : 'focus'
 }
 
+const sameWindow = (left, right) => left === right || (
+  !!left && !!right &&
+  Date.parse(left.start) === Date.parse(right.start) &&
+  Date.parse(left.endExclusive) === Date.parse(right.endExclusive) &&
+  left.timezone === right.timezone
+)
+
 export async function requestPreviousComparison(workspace, controller) {
   const before = workspace.snapshot()
   const selection = controller.snapshot()
@@ -80,12 +87,12 @@ export async function requestPreviousComparison(workspace, controller) {
   const unchanged = () => {
     const view = workspace.snapshot()
     const current = controller.snapshot()
-    return JSON.stringify([
+    return sameWindow(view.window, before.window) && JSON.stringify([
       view.view, view.connectionId, view.filters, view.customerIds,
       current.startDate, current.endDate
     ]) === context
   }
-  if (before.view !== 'focus' || selection.syncing) return
+  if (before.view !== 'focus' || !before.window || selection.syncing) return
   await controller.refresh()
   if (!unchanged() || controller.snapshot().error ||
       controller.snapshot().syncing) return
@@ -95,7 +102,7 @@ export async function requestPreviousComparison(workspace, controller) {
   if (!unchanged() || after.error || controller.snapshot().syncing) return
   if (after.coverage?.partial) return 'current_required'
   if (after.dashboard?.comparison?.state !== 'READY')
-    await controller.syncPrevious()
+    await controller.syncPrevious(after.window)
 }
 
 export function createAgioneWorkspaceController(api, onChange = () => {}) {
@@ -289,7 +296,7 @@ export function createAgioneWorkspaceController(api, onChange = () => {}) {
       if (selectedWindow && frame.window &&
           Date.parse(selectedWindow.start) >= Date.parse(frame.window.start) &&
           Date.parse(selectedWindow.endExclusive) <= Date.parse(frame.window.endExclusive) &&
-          canonical(selectedWindow) !== canonical(state.window)) {
+          !sameWindow(selectedWindow, state.window)) {
         publish({ cachedWindow: frame.window })
         return setWindow(selectedWindow)
       }
@@ -297,11 +304,16 @@ export function createAgioneWorkspaceController(api, onChange = () => {}) {
     }
     attachedFrame = frame
     const view = state.view
+    const selectedFits = !live && selectedWindow && frame.window &&
+      Date.parse(selectedWindow.start) >= Date.parse(frame.window.start) &&
+      Date.parse(selectedWindow.endExclusive) <= Date.parse(frame.window.endExclusive)
+    const effectiveWindow = selectedFits ? selectedWindow : frame.window
+    const nativeSnapshot = frame.provenance?.kind === 'native_snapshot'
     const retain = state.connectionId === connectionId && !live &&
+      (!nativeSnapshot || sameWindow(state.window, effectiveWindow)) &&
       (view === 'focus' ? state.dashboard :
         view === 'aggregate' ? state.analysis : state.customers)
-    const nativeScope = state.connectionId === connectionId &&
-      frame.provenance?.kind === 'native_snapshot'
+    const nativeScope = state.connectionId === connectionId && nativeSnapshot
       ? { customerIds: state.customerIds, filters: state.filters } : {}
     const retained = retain
       ? Object.fromEntries(pageFields.map((key) => [key, state[key]])) : {}
@@ -310,15 +322,12 @@ export function createAgioneWorkspaceController(api, onChange = () => {}) {
     epoch++
     request++
     detail++
-    const selectedFits = !live && selectedWindow && frame.window &&
-      Date.parse(selectedWindow.start) >= Date.parse(frame.window.start) &&
-      Date.parse(selectedWindow.endExclusive) <= Date.parse(frame.window.endExclusive)
-    const effectiveWindow = selectedFits ? selectedWindow : frame.window
     publish({
       ...empty(),
       ...retained,
       ...nativeScope,
       stale: !!retain,
+      loading: !retain,
       view,
       connectionId,
       dataVersion: live ? '' : frame.dataVersion,
@@ -624,7 +633,14 @@ export function createAgioneWorkspaceController(api, onChange = () => {}) {
       throw new Error('所选日期超出已缓存范围，不会触发补采')
     request++
     detail++
+    const changedNativeWindow = state.provenance?.kind === 'native_snapshot' &&
+      !sameWindow(state.window, window)
+    const resetPage = empty()
+    const clearedPage = changedNativeWindow
+      ? Object.fromEntries(pageFields.map(key => [key, resetPage[key]])) : {}
     publish({
+      ...clearedPage,
+      ...(changedNativeWindow ? { loading: true, stale: false } : {}),
       window,
       analysisPage: 1,
       customerPage: 1,

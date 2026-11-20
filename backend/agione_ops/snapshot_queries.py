@@ -8,7 +8,7 @@ from django.utils import timezone
 from rest_framework.exceptions import NotFound
 
 from agione_ops.client import AgioneOpsError
-from agione_ops.observability import set_fields
+from agione_ops.observability import set_fields, stage
 from agione_ops.permissions import get_connection_for
 from agione_ops.query_cache import cached_operation
 
@@ -136,30 +136,35 @@ def dashboard_frame(
         raise NotFound("Snapshot not found.") from None
     query = {"operation": "dashboard", "data_version": version, "payload": {}}
     if composite:
-        query["window"] = {"start": window_start, "end_exclusive": window_end,
-                           "timezone": "Asia/Shanghai"}
-    try:
-        response = query_operation(connection, user, query)
-    except AgioneOpsError as error:
-        if error.code == "SNAPSHOT_DIRECTORY_CHANGED" and composite:
-            coverage = composite["version__coverage"]
-            if not coverage.get("pagingComplete") or coverage.get("partial"):
-                raise
-            # Use the directory of the same baseline version used above.
-            query["window"] = {
-                "start": max(window_start, composite["version__window_start"]),
-                "end_exclusive": min(window_end, composite["version__window_end"]),
-                "timezone": "Asia/Shanghai",
-            }
+        query["window"] = {
+            "start": window_start, "end_exclusive": window_end,
+            "timezone": "Asia/Shanghai",
+        }
+        coverage = composite["version__coverage"]
+        if coverage.get("pagingComplete") and not coverage.get("partial"):
+            query["_cache_directory_conflict"] = True
+    with stage("snapshot_dashboard_query"):
+        try:
             response = query_operation(connection, user, query)
-            fallback_reason = error.code
-        elif error.code == "SNAPSHOT_WINDOW_NOT_COLLECTED":
-            return {"state": "not_collected", "dataVersion": None,
-                    "summary": None, "window": None,
-                    "provenance": {"kind": "native_snapshot"},
-                    "capabilities": {}}
-        else:
-            raise
+        except AgioneOpsError as error:
+            if error.code != "SNAPSHOT_WINDOW_NOT_COLLECTED":
+                raise
+            return {
+                "state": "not_collected", "dataVersion": None,
+                "summary": None, "window": None,
+                "provenance": {"kind": "native_snapshot"},
+                "capabilities": {},
+            }
+    if response.get("reason") == "SNAPSHOT_DIRECTORY_CHANGED":
+        fallback_reason = response["reason"]
+        query.pop("_cache_directory_conflict")
+        query["window"] = {
+            "start": max(window_start, composite["version__window_start"]),
+            "end_exclusive": min(window_end, composite["version__window_end"]),
+            "timezone": "Asia/Shanghai",
+        }
+        with stage("snapshot_dashboard_fallback"):
+            response = query_operation(connection, user, query)
     set_fields(operation="dashboard", data_version=version)
     return {
         **response["overview"],

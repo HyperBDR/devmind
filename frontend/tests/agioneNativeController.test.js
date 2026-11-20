@@ -564,6 +564,29 @@ test('collecting the previous period keeps the selected dates and refreshes them
   assert.equal(c.snapshot().dashboard.dataVersion, 'current')
 })
 
+test('previous sync uses the displayed range, while refresh keeps the selection', async () => {
+  const h = harness()
+  const submitted = []
+  h.api.dashboard = async () => response({
+    state: 'ready', dataVersion: 'cached', summary: {}, window,
+    provenance: { kind: 'native_snapshot' }
+  })
+  h.api.submitSync = async (_id, period) => {
+    submitted.push(period)
+    return response({ runId: 'run', status: 'succeeded', dataVersion: 'v2' })
+  }
+  const c = createAgioneController(h.api, () => {}, { now, localNative: true })
+  c.reset('user:1')
+  await c.load()
+  const displayed = { ...window, start: '2026-10-22T00:00:00+08:00' }
+  await c.syncPrevious(displayed)
+  await c.sync()
+  assert.equal(Date.parse(submitted[0].start), Date.parse('2026-10-18T00:00:00+08:00'))
+  assert.equal(Date.parse(submitted[0].endExclusive), Date.parse(displayed.start))
+  assert.equal(submitted[1].start, '2026-10-19T00:00:00+08:00')
+  assert.equal(submitted[1].endExclusive, window.endExclusive)
+})
+
 test('partial cached range is displayed and triggers background collection', async () => {
   let syncs = 0
   const partial = {
