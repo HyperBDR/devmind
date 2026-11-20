@@ -234,7 +234,7 @@
                       state.syncing ||
                       state.loading ||
                       work.loading ||
-                      (readOnly && !isLive && !work.dataVersion)
+                      (readOnly && state.sourceKind !== 'native' && !work.dataVersion)
                     "
                     :title="
                       readOnly ? t('agione.readOnlyRangeHelp') : undefined
@@ -248,7 +248,7 @@
                       state.syncing ||
                       state.loading ||
                       work.loading ||
-                      (readOnly && !isLive && !work.dataVersion)
+                      (readOnly && state.sourceKind !== 'native' && !work.dataVersion)
                     "
                     :title="
                       readOnly ? t('agione.readOnlyRangeHelp') : undefined
@@ -414,7 +414,11 @@
                       {{ t('agione.missingDates', { dates: state.dashboard.coverage.missingDays.join('、') }) }}
                     </template>
                   </template>
-                  <template v-if="pendingRange">
+                  <template v-if="state.dashboard?.fallbackReason === 'SNAPSHOT_DIRECTORY_CHANGED'">
+                    <span class="scope-dot">·</span>
+                    {{ t('agione.directoryFallback', { range: actualWindow }) }}
+                  </template>
+                  <template v-else-if="pendingRange && state.error !== 'snapshotDirectoryChanged'">
                     <span class="scope-dot">·</span>
                     {{ state.dashboard?.coverage?.partial ? t(state.error ? 'agione.pendingRangePartialFailed' : 'agione.pendingRangePartial', pendingRange) : ready && work.window ? t(state.error ? 'agione.pendingRangeFailed' : 'agione.pendingRange', pendingRange) : t('agione.pendingRangeEmpty', pendingRange) }}
                     <template v-if="state.dashboard?.coverage?.missingDays?.length">
@@ -497,7 +501,7 @@
               </button>
             </div>
             <div v-if="readOnly && work.error" class="callout" role="alert">
-              <p>{{ t(work.error.includes('(DATA_VERSION_EXPIRED)') ? 'agione.errors.snapshotExpired' : work.error.includes('(QUERY_IN_PROGRESS)') ? 'agione.errors.queryBusy' : 'agione.errors.networkError') }}</p>
+              <p>{{ t(work.error.includes('(DATA_VERSION_EXPIRED)') ? 'agione.errors.snapshotExpired' : work.error.includes('(SNAPSHOT_DIRECTORY_CHANGED)') ? 'agione.errors.snapshotDirectoryChanged' : work.error.includes('(QUERY_IN_PROGRESS)') ? 'agione.errors.queryBusy' : 'agione.errors.networkError') }}</p>
               <button @click="work.error.includes('(DATA_VERSION_EXPIRED)') ? controller.loadWindow(state.startDate, state.endDate) : workspace.load()">{{ t('agione.retryPage') }}</button>
             </div>
             <div v-if="readOnly && work.loading" class="loading" role="status">
@@ -1477,6 +1481,7 @@ const directoryCoverage = computed(
 const sourceTime = computed(() =>
   isLive.value ? state.value.dashboard?.provenance?.fetchedAt : readOnly.value
     ? state.value.dashboard?.provenance?.collectedAt ||
+      state.value.dashboard?.provenance?.fetchedAt ||
       state.value.dashboard?.publishedAt
     : state.value.dashboard?.publishedAt
 )

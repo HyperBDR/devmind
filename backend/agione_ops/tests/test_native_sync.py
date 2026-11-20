@@ -445,6 +445,99 @@ def test_dashboard_combines_complete_snapshots_without_upstream(native):
     pinned = query_operation(native["connection"], native["user"], query)
     assert pinned["data"]["rows"][0]["metrics"]["requestCount"] == 4
 
+
+@pytest.mark.parametrize(
+    "part", ["current", "current_partial", "previous", "previous_single"],
+)
+def test_dashboard_directory_conflict(native, part, monkeypatch):
+    from rest_framework.test import APIClient
+
+    start = native["start"] - timedelta(days=7)
+    row = native["rows"][0]
+    native["rows"] = [
+        {**row, "id": str(1000 + day), "createTime": int(
+            (start + timedelta(days=day, hours=1)).timestamp() * 1000
+        )}
+        for day in range(7)
+    ]
+
+    class DirectoryClient(native["factory"]):
+        def get(self, path, params=None):
+            result = super().get(path, params)
+            if path.endswith("provider-customers") and native["extra_customer"]:
+                result["data"].append({
+                    "customerTenantId": "201", "customerName": "Additional",
+                })
+                result["total"] = 2
+            return result
+
+    native["factory"] = DirectoryClient
+    if part == "current_partial":
+        save = DatasetVersion.save
+
+        def save_partial_baseline(version, *args, **kwargs):
+            if not native["extra_customer"]:
+                version.coverage = {**version.coverage, "partial": True}
+            return save(version, *args, **kwargs)
+
+        monkeypatch.setattr(DatasetVersion, "save", save_partial_baseline)
+    windows = {
+        "current": [(0, 3, True), (3, 7, False)],
+        "current_partial": [(0, 3, True), (3, 7, False)],
+        "previous": [(-7, -3, True), (-3, 0, False), (0, 7, False)],
+        "previous_single": [(-7, 0, True), (0, 7, False)],
+    }[part]
+    for left, right, extra_customer in windows:
+        native["start"] = start + timedelta(days=left)
+        native["end"] = start + timedelta(days=right)
+        native["extra_customer"] = extra_customer
+        _, result = collect(native)
+        assert result["status"] == "succeeded"
+
+    before = len(native["calls"])
+    client = APIClient()
+    client.force_authenticate(native["user"])
+    connection_id = native["connection"].pk
+    url = f"/api/v1/agione-ops/connections/{connection_id}/dashboard/query/"
+    window = {
+        "start": start.isoformat(),
+        "end_exclusive": (start + timedelta(days=7)).isoformat(),
+        "timezone": "Asia/Shanghai",
+    }
+    response = client.post(url, {"window": window}, format="json")
+    assert len(native["calls"]) == before
+    if part == "current_partial":
+        assert response.status_code == 409
+        assert response.json()["data"]["detail"] == "SNAPSHOT_DIRECTORY_CHANGED"
+        return
+
+    assert response.status_code == 200
+    frame = response.json()["data"]
+    assert frame["state"] == "ready"
+    assert frame["dataVersion"] == result["dataVersion"]
+    assert len(native["calls"]) == before
+    if part == "current":
+        assert frame["fallbackReason"] == "SNAPSHOT_DIRECTORY_CHANGED"
+        assert datetime.fromisoformat(frame["window"]["start"]) == (
+            start + timedelta(days=3)
+        )
+        assert frame["summary"]["requestCount"] == 4
+        assert frame["provenance"]["fetchedAt"]
+
+    else:
+        assert "fallbackReason" not in frame
+        assert frame["summary"]["requestCount"] == 7
+        comparison = frame["snapshotResponse"]["data"]["comparison"]
+        assert comparison["state"] == "UNAVAILABLE"
+        assert comparison["reasonCode"] == "SNAPSHOT_DIRECTORY_CHANGED"
+        assert comparison["summary"] is None
+
+    native["grant"].can_view = False
+    native["grant"].save(update_fields=["can_view"])
+    denied = client.post(url, {"window": window}, format="json")
+    assert denied.status_code == 404
+
+
 def test_daily_finance_projection_passes_snapshot_validation(native):
     from agione_ops.native_finance import aggregate_finance
     from agione_ops.native_sync import digest, validate_snapshot_data

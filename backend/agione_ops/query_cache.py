@@ -22,7 +22,7 @@ from agione_ops.permissions import get_connection_for
 
 _flights = {}
 _flights_lock = threading.Lock()
-_CACHE_SCHEMA = 9
+_CACHE_SCHEMA = 10
 
 
 def _json_value(value):

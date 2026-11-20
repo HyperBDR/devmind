@@ -79,14 +79,16 @@ def dashboard_frame(
     """Return overview and the complete DTO so focus needs one business read."""
     connection = get_connection_for(user, connection.pk, "view_business")
     composite = False
+    fallback_reason = None
     if connection.source_kind == "native" and version_id is None:
         from agione_ops.native_sync_models import NativePublishedSnapshot
 
-        snapshots = NativePublishedSnapshot.objects.filter(
+        eligible = NativePublishedSnapshot.objects.filter(
             version__connection=connection, version__run__status="succeeded",
             version__run__config_version=connection.config_version,
             version__run__credential_version=connection.credential_version,
         )
+        snapshots = eligible
         if window_start is not None and window_end is not None:
             snapshots = snapshots.filter(
                 version__window_start__lte=window_start,
@@ -95,18 +97,19 @@ def dashboard_frame(
         published = snapshots.order_by("-version__published_at").values_list(
             "version_id", flat=True
         ).first()
-        if published is None and window_start is not None and window_end is not None:
-            published = NativePublishedSnapshot.objects.filter(
-                version__connection=connection,
-                version__run__status="succeeded",
-                version__run__config_version=connection.config_version,
-                version__run__credential_version=connection.credential_version,
+        if (
+            published is None
+            and window_start is not None and window_end is not None
+        ):
+            composite = eligible.filter(
                 version__window_start__lt=window_end,
                 version__window_end__gt=window_start,
-            ).order_by("-version__published_at", "-version_id").values_list(
-                "version_id", flat=True,
+            ).order_by("-version__published_at", "-version_id").values(
+                "version_id", "version__window_start", "version__window_end",
+                "version__coverage",
             ).first()
-            composite = published is not None
+            if composite:
+                published = composite["version_id"]
         if published is None:
             if window_start is not None:
                 return {
@@ -138,14 +141,29 @@ def dashboard_frame(
     try:
         response = query_operation(connection, user, query)
     except AgioneOpsError as error:
-        if error.code != "SNAPSHOT_WINDOW_NOT_COLLECTED":
+        if error.code == "SNAPSHOT_DIRECTORY_CHANGED" and composite:
+            coverage = composite["version__coverage"]
+            if not coverage.get("pagingComplete") or coverage.get("partial"):
+                raise
+            # Use the directory of the same baseline version used above.
+            query["window"] = {
+                "start": max(window_start, composite["version__window_start"]),
+                "end_exclusive": min(window_end, composite["version__window_end"]),
+                "timezone": "Asia/Shanghai",
+            }
+            response = query_operation(connection, user, query)
+            fallback_reason = error.code
+        elif error.code == "SNAPSHOT_WINDOW_NOT_COLLECTED":
+            return {"state": "not_collected", "dataVersion": None,
+                    "summary": None, "window": None,
+                    "provenance": {"kind": "native_snapshot"},
+                    "capabilities": {}}
+        else:
             raise
-        return {"state": "not_collected", "dataVersion": None,
-                "summary": None, "window": None,
-                "provenance": {"kind": "native_snapshot"}, "capabilities": {}}
     set_fields(operation="dashboard", data_version=version)
     return {
         **response["overview"],
+        **({"fallbackReason": fallback_reason} if fallback_reason else {}),
         "state": "ready",
         "window": response.get("window"),
         "coverage": response.get("coverage"),

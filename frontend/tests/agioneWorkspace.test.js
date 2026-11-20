@@ -67,6 +67,23 @@ test('new snapshot retains selected range and queries that range', async () => {
     .at(-1).body.window.start, selected.start)
 })
 
+test('a narrower native fallback preserves active dashboard filters', async () => {
+  const { c, calls } = setup((id, body) => wrap(body, { finance: {} }))
+  await c.attach(frame, 'a')
+  await c.setFilters(['10'], { modelIds: ['20'] })
+  const fallback = {
+    dataVersion: 'version-2',
+    window: { ...frame.window, start: '2026-10-22T00:00:00+08:00' },
+    provenance: { kind: 'native_snapshot' },
+    fallbackReason: 'SNAPSHOT_DIRECTORY_CHANGED'
+  }
+  await c.attach(fallback, 'a', frame.window)
+  const body = calls.filter(call => call.body.operation === 'dashboard').at(-1).body
+  assert.deepEqual(body.window, fallback.window)
+  assert.deepEqual(body.customerIds, ['10'])
+  assert.deepEqual(body.filters.modelIds, ['20'])
+})
+
 test('busy snapshot query reports a retryable busy state', async () => {
   const { c } = setup(async () => {
     throw { response: { status: 503, data: { data: { errorCode: 'QUERY_IN_PROGRESS' } } } }

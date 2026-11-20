@@ -451,6 +451,35 @@ test('selecting a date reuses a matching native snapshot before collecting', asy
   assert.equal(syncs, 0)
 })
 
+test('directory fallback stays readable without starting another sync', async () => {
+  const h = harness()
+  const data = {
+    state: 'ready', dataVersion: 'cached', summary: {}, window,
+    provenance: { kind: 'native_snapshot' },
+    fallbackReason: 'SNAPSHOT_DIRECTORY_CHANGED'
+  }
+  let fail = false
+  h.api.dashboard = async () => {
+    if (fail) throw {
+      response: { status: 409, data: { data: {
+        detail: 'SNAPSHOT_DIRECTORY_CHANGED'
+      } } }
+    }
+    return response(data)
+  }
+  const c = createAgioneController(h.api, () => {}, { now, localNative: true })
+  c.reset('user:1')
+  await c.load()
+  await c.loadWindow('2026-10-18', '2026-10-25')
+  assert.deepEqual(c.snapshot().dashboard, data)
+  assert.equal(c.snapshot().error, '')
+  assert.equal(c.snapshot().windowMissing, false)
+  fail = true
+  await c.refresh()
+  assert.equal(c.snapshot().dashboard, null)
+  assert.equal(c.snapshot().error, 'snapshotDirectoryChanged')
+})
+
 test('selecting an uncollected date starts one background collection', async () => {
   let syncs = 0
   const api = {

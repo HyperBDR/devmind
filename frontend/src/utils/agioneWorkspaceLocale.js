@@ -410,6 +410,8 @@ P95 耗时|P95 latency
 前期比较未完成|Comparison not ready
 前期读取中…|Loading previous period…
 正在准备前期比较|Preparing comparison
+前期暂不可比|Previous period unavailable for comparison
+租户目录已变化，前期暂不可比|The tenant directory changed. The previous period cannot be compared.
 正在计算所选日期的调用变化|Calculating usage changes
 比较完成前不生成使用下降结论|Declining usage is assessed only after the comparison is complete
 正在读取对应的等长前期，完成后自动更新；本期数据可继续查看。|Loading the previous period of the same length. Current-period data remains available.
