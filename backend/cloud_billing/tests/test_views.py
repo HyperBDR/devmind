@@ -1194,6 +1194,118 @@ class TestRechargeApprovalEndpoints:
         assert response.data["id"] == record.id
         mocked_refresh.assert_called_once_with(record)
 
+    @pytest.mark.parametrize(
+        ("utc_now", "expected_date", "status_code"),
+        [
+            ("2026-10-12T01:00:00+00:00", "2026-10-11", 400),
+            ("2026-10-12T01:00:00+00:00", "2026-10-12", 400),
+            ("2026-10-12T01:00:00+00:00", "2026-10-13", 200),
+            ("2026-10-12T01:00:00+00:00", "2026-10-15", 200),
+            ("2026-10-11T16:30:00+00:00", "2026-10-12", 400),
+            ("2026-10-11T16:30:00+00:00", "2026-10-13", 200),
+            ("2026-12-31T16:30:00+00:00", "2027-01-01", 400),
+            ("2026-12-31T16:30:00+00:00", "2027-01-02", 200),
+            ("2026-10-12T01:00:00+00:00", "2026-02-30", 400),
+            ("2026-10-12T01:00:00+00:00", "invalid", 400),
+            ("2026-10-12T01:00:00+00:00", "", 400),
+            ("2026-10-12T01:00:00+00:00", None, 400),
+        ],
+    )
+    def test_manual_recharge_date_must_be_after_beijing_today(
+        self,
+        api_client,
+        cloud_provider,
+        mocker,
+        monkeypatch,
+        utc_now,
+        expected_date,
+        status_code,
+    ):
+        """Reject invalid dates before scheduling any manual approval."""
+        cloud_provider.recharge_info = json.dumps(
+            {"amount": 188, "recharge_account": "acct-188"}
+        )
+        cloud_provider.save(update_fields=["recharge_info"])
+        monkeypatch.setattr(
+            timezone, "now", lambda: datetime.fromisoformat(utc_now)
+        )
+        mock_task = mocker.Mock()
+        mock_task.id = "manual-date-task"
+        mocked_delay = mocker.patch(
+            "cloud_billing.tasks.submit_recharge_approval.delay",
+            return_value=mock_task,
+        )
+        url = (
+            f"/api/v1/cloud-billing/providers/{cloud_provider.id}/"
+            "submit-recharge-approval/"
+        )
+
+        with timezone.override("America/Los_Angeles"):
+            response = api_client.post(
+                url, {"expected_date": expected_date}, format="json"
+            )
+
+        assert response.status_code == status_code
+        if status_code == 400:
+            assert "expected_date" in response.data
+            mocked_delay.assert_not_called()
+            assert not TaskExecution.objects.filter(
+                task_id=mock_task.id
+            ).exists()
+        else:
+            payload = json.loads(
+                mocked_delay.call_args.kwargs["recharge_info_override"]
+            )
+            assert payload["expected_date"] == expected_date
+
+    @pytest.mark.parametrize(
+        ("utc_now", "expected_date"),
+        [
+            ("2026-10-11T16:30:00+00:00", "2026-10-15"),
+            ("2026-12-31T16:30:00+00:00", "2027-01-04"),
+        ],
+    )
+    def test_manual_recharge_defaults_date_from_beijing_today(
+        self,
+        api_client,
+        cloud_provider,
+        mocker,
+        monkeypatch,
+        utc_now,
+        expected_date,
+    ):
+        """Default omitted dates without changing stored templates."""
+        template = {
+            "amount": 188,
+            "recharge_account": "acct-188",
+            "expected_date": "2026-04-30",
+        }
+        cloud_provider.recharge_info = json.dumps(template)
+        cloud_provider.save(update_fields=["recharge_info"])
+        monkeypatch.setattr(
+            timezone, "now", lambda: datetime.fromisoformat(utc_now)
+        )
+        mock_task = mocker.Mock()
+        mock_task.id = "manual-default-date-task"
+        mocked_delay = mocker.patch(
+            "cloud_billing.tasks.submit_recharge_approval.delay",
+            return_value=mock_task,
+        )
+        url = (
+            f"/api/v1/cloud-billing/providers/{cloud_provider.id}/"
+            "submit-recharge-approval/"
+        )
+        with timezone.override("UTC"):
+            response = api_client.post(url, {}, format="json")
+
+        assert response.status_code == 200
+        payload = json.loads(
+            mocked_delay.call_args.kwargs["recharge_info_override"]
+        )
+        assert payload["expected_date"] == expected_date
+        cloud_provider.refresh_from_db()
+        assert json.loads(cloud_provider.recharge_info) == template
+
     def test_submit_recharge_approval_schedules_task(
         self,
         api_client,

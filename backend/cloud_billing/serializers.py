@@ -4,8 +4,11 @@ Serializers for cloud billing API.
 import json
 
 from datetime import date as date_cls
+from datetime import timedelta
+from zoneinfo import ZoneInfo
 
 from django.contrib.auth.models import User
+from django.utils import timezone
 from django.utils.translation import gettext as _
 
 from rest_framework import serializers
@@ -25,6 +28,31 @@ from .services.recharge_approval import (
     prepare_recharge_request_payload,
     serialize_recharge_request_payload,
 )
+
+
+def _default_manual_recharge_date():
+    """Return a fresh arrival date three Beijing calendar days from today."""
+    today = timezone.localdate(timezone=ZoneInfo("Asia/Shanghai"))
+    return today + timedelta(days=3)
+
+
+class RechargeApprovalSubmitSerializer(serializers.Serializer):
+    """Validate arrival dates before scheduling manual recharge approvals."""
+
+    expected_date = serializers.DateField(default=_default_manual_recharge_date)
+
+    def validate_expected_date(self, value):
+        """Require a future date according to the Beijing calendar."""
+        today = timezone.localdate(timezone=ZoneInfo("Asia/Shanghai"))
+        if value <= today:
+            message = (
+                "期望到账时间必须晚于北京时间今天，最早可选明天。"
+                if self.context.get("language") == "zh-hans"
+                else "Expected arrival date must be later than today "
+                "(Beijing time); the earliest date is tomorrow."
+            )
+            raise serializers.ValidationError(message)
+        return value
 
 
 def get_balance_support_info(provider):
