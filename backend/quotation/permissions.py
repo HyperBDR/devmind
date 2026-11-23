@@ -116,6 +116,11 @@ def is_quotation_admin(user: User) -> bool:
     return "admin" in role_names
 
 
+def can_manage_public_attachments(user: User) -> bool:
+    """Allow Quote Desk admins and preserve existing attachment admins."""
+    return is_quotation_platform_admin(user) or is_quotation_admin(user)
+
+
 def user_role(user: User) -> str:
     if getattr(user, "is_superuser", False) or getattr(
         user, "is_staff", False

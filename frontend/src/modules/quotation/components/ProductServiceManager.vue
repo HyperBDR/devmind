@@ -47,7 +47,7 @@ const props = withDefaults(
     services: Service[]
     discounts: DiscountOption[]
     productLineOptions?: ProductLineOption[]
-    currentUser?: { role?: string } | null
+    currentUser?: { canManagePublicAttachments: boolean } | null
   }>(),
   {
     productLineOptions: () => [],
@@ -121,7 +121,9 @@ function closeForm() {
 }
 
 const normalizedSearch = computed(() => searchQuery.value.trim().toLowerCase())
-const isAdmin = computed(() => String(props.currentUser?.role || '').toLowerCase().includes('admin'))
+const canManagePublicAttachments = computed(
+  () => props.currentUser?.canManagePublicAttachments === true,
+)
 const filteredProducts = computed(() => props.products.filter((item) =>
   !normalizedSearch.value || [item.name, item.description, item.category]
     .some((value) => String(value || '').toLowerCase().includes(normalizedSearch.value)),
@@ -317,6 +319,10 @@ function formatCatalogItemPrice(
   })}`
 }
 
+watch(canManagePublicAttachments, (allowed) => {
+  if (!allowed && subTab.value === 'attachments') setSubTab('products')
+})
+
 watch(
   categoryOptions,
   (options) => {
@@ -371,7 +377,7 @@ watch(
           </div>
         </div>
 
-        <div v-if="isAdmin" data-catalog-parent="attachment-library" class="mt-2 space-y-1">
+        <div v-if="canManagePublicAttachments" data-catalog-parent="attachment-library" class="mt-2 space-y-1">
           <button type="button" class="flex h-8 w-full items-center gap-2 rounded-md px-1 text-left text-sm font-semibold text-dm-text hover:bg-slate-50" @click="setSubTab('attachments')">
             <FileText class="h-4 w-4 text-dm-text-tertiary" />
             <span class="min-w-0 flex-1 truncate">{{ t('quotation.pages.catalog.attachmentLibrary') }}</span>
@@ -386,7 +392,7 @@ watch(
       </aside>
 
       <section data-catalog-content class="min-w-0">
-        <PublicAttachmentManager v-if="subTab === 'attachments'" :is-admin="isAdmin" />
+        <PublicAttachmentManager v-if="subTab === 'attachments'" :is-admin="canManagePublicAttachments" />
         <div v-if="subTab !== 'attachments'" class="flex flex-col gap-3 border-b border-dm-border-light px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div class="min-w-0">
             <h3 class="text-base font-bold text-dm-text">{{ t(`quotation.pages.catalog.${subTab}Title`) }}</h3>

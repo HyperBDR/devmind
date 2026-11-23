@@ -302,7 +302,10 @@ def get_access_profile(
         effective_roles=resolved_roles,
         feature_keys=feature_keys,
     )
-    from quotation.permissions import get_quotation_platform_role
+    from quotation.permissions import (
+        can_manage_public_attachments,
+        get_quotation_platform_role,
+    )
 
     available_platforms = serialize_platforms(feature_keys)
     landing_path = PLATFORM_DEFAULT_PATHS.get(
@@ -316,4 +319,5 @@ def get_access_profile(
         'landing_path': landing_path,
         'invoice_access': invoice_access,
         'quotation_role': get_quotation_platform_role(user),
+        'can_manage_public_attachments': can_manage_public_attachments(user),
     }
