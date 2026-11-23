@@ -8,6 +8,7 @@ export interface AppUser {
   title: string
   email: string
   role: string
+  canManagePublicAttachments: boolean
 }
 
 function roleLabelFromDevMind(user: any): string {
@@ -38,6 +39,8 @@ function mapDevMindUser(user: any): AppUser | null {
     title: profile.bio || '',
     email: user.email || user.username || '',
     role: roleLabelFromDevMind(user),
+    canManagePublicAttachments:
+      user?.access_profile?.can_manage_public_attachments === true,
   }
 }
 

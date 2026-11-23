@@ -60,3 +60,16 @@ assert.match(quotationDetails, /@click="openPdfAttachmentPicker"/)
 assert.match(quotationDetails, /<PublicAttachmentPicker[\s\S]*?@confirm="handleExportPdf"/)
 assert.match(quotationDetails, /exportQuotationFile\(props\.quote\.id, 'pdf', \{[\s\S]*?attachmentSelection: ids/)
 assert.match(exportsSource, /attachment_selection: options\.attachmentSelection \|\| \[\]/)
+
+const catalog = fs.readFileSync(
+  new URL('../src/modules/quotation/components/ProductServiceManager.vue', import.meta.url),
+  'utf8',
+)
+const auth = fs.readFileSync(
+  new URL('../src/modules/quotation/stores/auth.ts', import.meta.url),
+  'utf8',
+)
+
+assert.match(auth, /canManagePublicAttachments:\s*user\?\.access_profile\?\.can_manage_public_attachments === true/)
+assert.match(catalog, /v-if="canManagePublicAttachments" data-catalog-parent="attachment-library"/)
+assert.match(catalog, /:is-admin="canManagePublicAttachments"/)

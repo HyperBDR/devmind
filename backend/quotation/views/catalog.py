@@ -16,7 +16,10 @@ from quotation.models import (
     PublicAttachmentStatus,
     UserQuotationCatalog,
 )
-from quotation.permissions import is_quotation_admin, user_display_email
+from quotation.permissions import (
+    can_manage_public_attachments,
+    user_display_email,
+)
 from quotation.serializers import (
     UserQuotationCatalogSerializer,
     UserQuotationCatalogWriteSerializer,
@@ -165,14 +168,14 @@ class PublicAttachmentListCreateView(APIView):
         queryset = PublicAttachment.objects.select_related(
             "asset", "uploaded_by"
         )
-        if not is_quotation_admin(request.user):
+        if not can_manage_public_attachments(request.user):
             queryset = queryset.filter(status=PublicAttachmentStatus.ACTIVE)
         return Response(
             [public_attachment_data(item) for item in queryset]
         )
 
     def post(self, request):
-        if not is_quotation_admin(request.user):
+        if not can_manage_public_attachments(request.user):
             return forbidden_response()
         upload = request.FILES.get("file")
         if not upload:
@@ -223,7 +226,7 @@ class PublicAttachmentStatusView(APIView):
     permission_classes = [IsAuthenticated]
 
     def patch(self, request, attachment_id: str):
-        if not is_quotation_admin(request.user):
+        if not can_manage_public_attachments(request.user):
             return forbidden_response()
         attachment = PublicAttachment.objects.select_related(
             "asset", "uploaded_by"
